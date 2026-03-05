@@ -50,7 +50,7 @@
 ### Cài đặt & Chạy
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/luongndcoder/Scribble.git
 cd meeting-minutes
 npm install
 npm start
@@ -156,7 +156,7 @@ Download the Scribble desktop app for your operating system:
 ### Install & Run
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/luongndcoder/Scribble.git
 cd meeting-minutes
 npm install
 npm start
