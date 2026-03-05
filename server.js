@@ -21,6 +21,13 @@ if (FFMPEG_BIN === 'ffmpeg') {
         if (staticPath) FFMPEG_BIN = staticPath;
     } catch { }
 }
+const STDERR_SUPPRESS = process.platform === 'win32' ? '2>NUL' : '2>/dev/null';
+
+function getAudioMimeType(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeMap = { '.webm': 'audio/webm', '.mp4': 'audio/mp4', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.flac': 'audio/flac' };
+    return mimeMap[ext] || 'audio/webm';
+}
 
 // ─── Config ───
 const STT_MODE = process.env.STT_MODE || 'api'; // 'local' | 'api'
@@ -68,7 +75,7 @@ function getLLMModel() {
 async function transcribeViaLocal(filePath) {
     const fileBuffer = fs.readFileSync(filePath);
     const fileName = path.basename(filePath);
-    const blob = new Blob([fileBuffer], { type: 'audio/webm' });
+    const blob = new Blob([fileBuffer], { type: getAudioMimeType(filePath) });
 
     const form = new FormData();
     form.append('audio', blob, fileName);
@@ -90,7 +97,7 @@ async function transcribeViaLocal(filePath) {
 async function transcribeViaAPI(filePath) {
     const fileBuffer = fs.readFileSync(filePath);
     const fileName = path.basename(filePath);
-    const blob = new Blob([fileBuffer], { type: 'audio/webm' });
+    const blob = new Blob([fileBuffer], { type: getAudioMimeType(filePath) });
 
     const form = new FormData();
     form.append('file', blob, fileName);
@@ -157,7 +164,7 @@ async function transcribeViaNvidia(filePath) {
     // Convert audio to WAV PCM 16kHz mono (Riva expects this format)
     const wavPath = filePath.replace(/\.[^.]+$/, '_riva.wav');
     try {
-        execSync(`"${FFMPEG_BIN}" -y -i "${filePath}" -ar 16000 -ac 1 -f wav "${wavPath}" 2>/dev/null`);
+        execSync(`"${FFMPEG_BIN}" -y -i "${filePath}" -ar 16000 -ac 1 -f wav "${wavPath}" ${STDERR_SUPPRESS}`);
     } catch (e) {
         throw new Error('ffmpeg conversion failed — is ffmpeg installed?');
     }
@@ -203,10 +210,10 @@ async function transcribeViaGroq(filePath) {
     if (!apiKey) throw new Error('Groq API key not configured');
 
     const fileBuffer = fs.readFileSync(filePath);
-    const blob = new Blob([fileBuffer], { type: 'audio/webm' });
+    const blob = new Blob([fileBuffer], { type: getAudioMimeType(filePath) });
 
     const form = new FormData();
-    form.append('file', blob, 'audio.webm');
+    form.append('file', blob, path.basename(filePath));
     form.append('model', 'whisper-large-v3-turbo');
     form.append('response_format', 'verbose_json');
     form.append('temperature', '0');
@@ -615,7 +622,7 @@ app.post('/api/meetings/:id/audio', upload.single('audio'), (req, res) => {
     const wavPath = path.join(AUDIO_DIR, wavFilename);
 
     try {
-        execSync(`"${FFMPEG_BIN}" -y -i "${req.file.path}" -ar 44100 -ac 1 -f wav "${wavPath}" 2>/dev/null`);
+        execSync(`"${FFMPEG_BIN}" -y -i "${req.file.path}" -ar 44100 -ac 1 -f wav "${wavPath}" ${STDERR_SUPPRESS}`);
         fs.unlink(req.file.path, () => { });
         db.updateMeeting(id, { audioPath: wavFilename });
         res.json({ ok: true, audioPath: wavFilename });
@@ -646,7 +653,7 @@ app.post('/api/convert-wav', upload.single('audio'), (req, res) => {
     const wavPath = req.file.path.replace(/\.[^.]+$/, '.wav');
 
     try {
-        execSync(`"${FFMPEG_BIN}" -y -i "${req.file.path}" -ar 44100 -ac 1 -f wav "${wavPath}" 2>/dev/null`);
+        execSync(`"${FFMPEG_BIN}" -y -i "${req.file.path}" -ar 44100 -ac 1 -f wav "${wavPath}" ${STDERR_SUPPRESS}`);
         res.download(wavPath, 'meeting.wav', () => {
             fs.unlink(req.file.path, () => { });
             fs.unlink(wavPath, () => { });

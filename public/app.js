@@ -324,8 +324,14 @@ async function toggleRecording() {
             stream = await getMixedAudioStream();
         }
         state.audioStream = stream;
-        state.mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-            ? 'audio/webm;codecs=opus' : 'audio/webm';
+        const mimeTypes = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/mp4',
+            'audio/ogg;codecs=opus',
+        ];
+        state.mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+        console.log('MediaRecorder mimeType:', state.mimeType || '(default)');
 
         const isResumingDraft = !!state.draftId;
         if (!isResumingDraft) {
