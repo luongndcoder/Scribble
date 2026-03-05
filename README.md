@@ -231,27 +231,6 @@ meeting-minutes/
     └── style.css          # Styles
 ```
 
-## 🔌 API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/transcribe` | Upload audio → transcript |
-| POST | `/api/transcribe-chunk` | Real-time chunk transcription |
-| POST | `/api/summarize` | SSE streaming meeting summary (by meetingId) |
-| POST | `/api/translate` | SSE streaming translation |
-| GET | `/api/settings` | Get current config |
-| POST | `/api/stt-config` | Save STT + LLM settings |
-| GET | `/api/meetings` | List meetings |
-| POST | `/api/meetings` | Create meeting |
-| PUT | `/api/meetings/:id` | Update meeting |
-| DELETE | `/api/meetings/:id` | Delete meeting |
-| POST | `/api/meetings/:id/export` | Export as Markdown |
-| POST | `/api/meetings/:id/export-docx` | Export as DOCX |
-| POST | `/api/meetings/:id/audio` | Upload audio recording |
-| GET | `/api/meetings/:id/audio` | Download audio recording |
-| POST | `/api/drafts` | Create draft (auto-save) |
-| PATCH | `/api/drafts/:id` | Append text to draft |
-| GET | `/api/drafts/active` | Get active draft |
 
 ---
 
