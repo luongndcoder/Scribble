@@ -13,7 +13,7 @@
 ### 🎬 Demo
 
 <p align="center">
-  <img src="public/demo.webp" alt="Scribble Demo" width="800">
+  <video src="https://github.com/luongndcoder/Scribble/raw/main/public/demo.mp4" width="800" controls></video>
 </p>
 
 ---
