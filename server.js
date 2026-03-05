@@ -11,13 +11,75 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Resolve ffmpeg binary path (cross-platform: macOS + Windows)
-const { execSync } = require('child_process');
+const { execSync, execFile } = require('child_process');
 const STDERR_SUPPRESS = process.platform === 'win32' ? '2>NUL' : '2>/dev/null';
 let FFMPEG_BIN = process.env.FFMPEG_PATH || '';
 let ffmpegAvailable = false;
 
 function testFfmpeg(bin) {
     try { execSync(`"${bin}" -version`, { stdio: 'ignore' }); return true; } catch { return false; }
+}
+
+// Get app data directory for storing downloaded ffmpeg
+function getFfmpegDir() {
+    const appData = process.env.APPDATA || process.env.HOME || __dirname;
+    const dir = path.join(appData, 'scribble-ffmpeg');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return dir;
+}
+
+// Auto-download ffmpeg.exe for Windows
+async function downloadFfmpegWin() {
+    const ffmpegDir = getFfmpegDir();
+    const exePath = path.join(ffmpegDir, 'ffmpeg.exe');
+    if (fs.existsSync(exePath) && testFfmpeg(exePath)) {
+        return exePath;
+    }
+
+    console.log('📥 Downloading ffmpeg for Windows (first-time only, ~30MB)...');
+    const zipUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
+    const zipPath = path.join(ffmpegDir, 'ffmpeg.zip');
+
+    try {
+        const res = await fetch(zipUrl, { redirect: 'follow' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buffer = Buffer.from(await res.arrayBuffer());
+        fs.writeFileSync(zipPath, buffer);
+
+        // Extract only ffmpeg.exe from zip using PowerShell
+        execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${ffmpegDir}' -Force"`, { stdio: 'ignore' });
+
+        // Find ffmpeg.exe recursively
+        const findExe = (dir) => {
+            for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, f.name);
+                if (f.isDirectory()) { const r = findExe(full); if (r) return r; }
+                else if (f.name === 'ffmpeg.exe') return full;
+            }
+            return null;
+        };
+        const found = findExe(ffmpegDir);
+        if (found && found !== exePath) {
+            fs.copyFileSync(found, exePath);
+        }
+
+        // Cleanup zip and extracted folder
+        fs.unlinkSync(zipPath);
+        const extractedDirs = fs.readdirSync(ffmpegDir, { withFileTypes: true })
+            .filter(d => d.isDirectory())
+            .map(d => path.join(ffmpegDir, d.name));
+        for (const d of extractedDirs) {
+            fs.rmSync(d, { recursive: true, force: true });
+        }
+
+        if (testFfmpeg(exePath)) {
+            console.log('✅ ffmpeg downloaded successfully:', exePath);
+            return exePath;
+        }
+    } catch (err) {
+        console.error('❌ ffmpeg download failed:', err.message);
+    }
+    return null;
 }
 
 if (FFMPEG_BIN && testFfmpeg(FFMPEG_BIN)) {
@@ -41,14 +103,28 @@ if (FFMPEG_BIN && testFfmpeg(FFMPEG_BIN)) {
         } catch { }
     }
 
-    // 3. Fallback
+    // 3. Check previously downloaded ffmpeg
+    if (!ffmpegAvailable) {
+        const localExe = path.join(getFfmpegDir(), process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+        if (fs.existsSync(localExe) && testFfmpeg(localExe)) {
+            FFMPEG_BIN = localExe; ffmpegAvailable = true;
+        }
+    }
+
+    // 4. Auto-download for Windows (async — will be available after download completes)
+    if (!ffmpegAvailable && process.platform === 'win32') {
+        console.log('⏳ ffmpeg not found — starting background download...');
+        downloadFfmpegWin().then(exePath => {
+            if (exePath) { FFMPEG_BIN = exePath; ffmpegAvailable = true; }
+        }).catch(() => { });
+    }
+
     if (!ffmpegAvailable) {
         FFMPEG_BIN = 'ffmpeg';
-        console.warn('⚠️ ffmpeg not found. WAV conversion and Nvidia STT will not work.');
-        console.warn('   Install ffmpeg: https://ffmpeg.org/download.html');
+        console.warn('⚠️ ffmpeg not found. WAV conversion and Nvidia STT will not work until download completes.');
     }
 }
-console.log(`ffmpeg: ${ffmpegAvailable ? '✅ ' + FFMPEG_BIN : '❌ not available'}`);
+console.log(`ffmpeg: ${ffmpegAvailable ? '✅ ' + FFMPEG_BIN : '⏳ downloading in background (Windows)'}`);
 
 function getAudioMimeType(filePath) {
     const ext = path.extname(filePath).toLowerCase();
