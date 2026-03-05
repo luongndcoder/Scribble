@@ -397,6 +397,7 @@ async function toggleRecording() {
         drawWaveform();
 
         // Start recording
+        console.log('[DEBUG] Starting recorder session, mimeType:', state.mimeType, 'ext:', state.audioExt);
         startRecorderSession();
 
         // VAD-based chunk splitting with auto-calibrating noise floor
@@ -458,6 +459,7 @@ async function toggleRecording() {
 
                 // Cut on natural pause: silence + minimum chunk reached
                 if (silenceDuration >= SILENCE_DURATION && chunkAge >= MIN_CHUNK_SEC) {
+                    console.log(`[DEBUG] VAD cut: chunkAge=${chunkAge.toFixed(1)}s silence=${silenceDuration}ms`);
                     state.chunkStartTime = now;
                     state.isSilent = false;
                     state.mediaRecorder.stop();
@@ -469,6 +471,7 @@ async function toggleRecording() {
 
             // Safety cap: force cut
             if (chunkAge >= MAX_CHUNK_SEC) {
+                console.log(`[DEBUG] Force cut at ${MAX_CHUNK_SEC}s`);
                 state.chunkStartTime = now;
                 state.isSilent = false;
                 state.mediaRecorder.stop();
@@ -512,6 +515,7 @@ function startRecorderSession() {
     };
 
     recorder.onstop = () => {
+        console.log(`[DEBUG] Recorder stopped, chunks: ${chunks.length}, totalSize: ${chunks.reduce((s, c) => s + c.size, 0)} bytes`);
         if (chunks.length > 0) {
             const blob = new Blob(chunks, { type: state.mimeType });
             // Calculate actual times relative to recording start
@@ -715,6 +719,7 @@ async function processQueue() {
     const { form, startSec, endSec } = state.chunkQueue.shift();
     try {
         const res = await fetch('/api/transcribe', { method: 'POST', body: form });
+        console.log(`[DEBUG] Transcription response status: ${res.status}`);
         const data = await res.json();
 
         if (data.text && data.text.trim()) {
@@ -771,6 +776,7 @@ async function processQueue() {
         }
     } catch (err) {
         console.error('Transcribe error:', err);
+        showToast(`Transcription error: ${err.message}`, 'error');
     }
 
     processQueue();
