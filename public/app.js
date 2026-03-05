@@ -1366,7 +1366,10 @@ async function loadMeeting(id) {
 
 function newMeeting() {
     state.currentMeetingId = null;
+    state.draftId = null;
     state.transcriptParts = [];
+    state.seconds = 0;
+    state.recordStartTime = null;
     el.transcriptContent.innerHTML = '';
     el.minutesContent.innerHTML = '';
     el.emptyState.classList.remove('hidden');
@@ -1374,6 +1377,7 @@ function newMeeting() {
     el.btnSummarize.classList.add('hidden');
     el.btnExport.classList.add('hidden');
 
+    updateTimerDisplay();
     switchTab('recording');
     loadMeetings();
 }
