@@ -57,8 +57,6 @@ npm start
 # → http://localhost:3000
 ```
 
-Cấu hình qua **Settings** (⚙️) trong app — không cần file `.env`.
-
 
 ## 🐳 Docker
 
@@ -162,8 +160,6 @@ npm install
 npm start
 # → http://localhost:3000
 ```
-
-All configuration via **Settings** (⚙️) in the app — no `.env` file required.
 
 
 ## 🐳 Docker
