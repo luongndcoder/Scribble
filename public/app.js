@@ -331,7 +331,10 @@ async function toggleRecording() {
             'audio/ogg;codecs=opus',
         ];
         state.mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || '';
-        console.log('MediaRecorder mimeType:', state.mimeType || '(default)');
+        // Determine file extension from MIME type
+        const extMap = { 'audio/webm;codecs=opus': 'webm', 'audio/webm': 'webm', 'audio/mp4': 'mp4', 'audio/ogg;codecs=opus': 'ogg' };
+        state.audioExt = extMap[state.mimeType] || 'webm';
+        console.log('MediaRecorder mimeType:', state.mimeType || '(browser default)', '→ ext:', state.audioExt);
 
         const isResumingDraft = !!state.draftId;
         if (!isResumingDraft) {
@@ -493,10 +496,13 @@ async function toggleRecording() {
 function startRecorderSession() {
     if (!state.recording || !state.audioStream) return;
 
-    const recorder = new MediaRecorder(state.audioStream, { mimeType: state.mimeType });
+    const recorderOpts = state.mimeType ? { mimeType: state.mimeType } : undefined;
+    const recorder = new MediaRecorder(state.audioStream, recorderOpts);
     let chunks = [];
     // Capture the actual start time of this recording segment
     const segmentStartMs = Date.now();
+
+    recorder.onerror = (e) => console.error('MediaRecorder error:', e.error || e);
 
     recorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
@@ -692,7 +698,8 @@ function drawWaveform() {
 
 // ─── Transcription ───
 async function sendChunkBlob(blob, startSec, endSec) {
-    const filename = `${Date.now()}-chunk.webm`;
+    const ext = state.audioExt || 'webm';
+    const filename = `${Date.now()}-chunk.${ext}`;
     const form = new FormData();
     form.append('audio', blob, filename);
 
