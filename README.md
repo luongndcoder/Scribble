@@ -25,8 +25,8 @@
 | Hệ điều hành | Chip / Kiến trúc | File cài đặt | Link |
 |---------------|-------------------|---------------|------|
 | 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble-1.0.0-arm64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0-arm64.dmg) |
-| 🍎 **macOS** | Intel | `Scribble-1.0.0-x64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0-x64.dmg) |
-| 🪟 **Windows** | 64-bit | `Scribble-Setup-1.0.0.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-Setup-1.0.0.exe) |
+| 🍎 **macOS** | Intel | `Scribble-1.0.0.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0.dmg) |
+| 🪟 **Windows** | 64-bit | `Scribble.Setup.1.0.0.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble.Setup.1.0.0.exe) |
 
 > **⚠️ Lưu ý macOS:** Lần đầu mở app nếu gặp cảnh báo **"Scribble Not Opened"**, mở Terminal và chạy:
 > ```bash
@@ -121,8 +121,8 @@ Hỗ trợ: OpenAI, Azure, Groq, Together, Ollama, ...
 | OS | Architecture | Installer | Link |
 |----|-------------|-----------|------|
 | 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble-1.0.0-arm64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0-arm64.dmg) |
-| 🍎 **macOS** | Intel | `Scribble-1.0.0-x64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0-x64.dmg) |
-| 🪟 **Windows** | 64-bit | `Scribble-Setup-1.0.0.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-Setup-1.0.0.exe) |
+| 🍎 **macOS** | Intel | `Scribble-1.0.0.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0.dmg) |
+| 🪟 **Windows** | 64-bit | `Scribble.Setup.1.0.0.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble.Setup.1.0.0.exe) |
 
 > **⚠️ macOS note:** If you see **"Scribble Not Opened"** on first launch, open Terminal and run:
 > ```bash
@@ -152,8 +152,8 @@ Download the Scribble desktop app for your operating system:
 | OS | Architecture | Installer | Link |
 |----|-------------|-----------|------|
 | 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble-1.0.0-arm64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0-arm64.dmg) |
-| 🍎 **macOS** | Intel | `Scribble-1.0.0-x64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0-x64.dmg) |
-| 🪟 **Windows** | 64-bit | `Scribble-Setup-1.0.0.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-Setup-1.0.0.exe) |
+| 🍎 **macOS** | Intel | `Scribble-1.0.0.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0.dmg) |
+| 🪟 **Windows** | 64-bit | `Scribble.Setup.1.0.0.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble.Setup.1.0.0.exe) |
 
 > **⚠️ macOS note:** If you see **"Scribble Not Opened"** on first launch, open Terminal and run:
 > ```bash
