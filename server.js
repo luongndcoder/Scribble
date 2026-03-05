@@ -10,18 +10,45 @@ const db = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Resolve ffmpeg binary path
-let FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
-if (FFMPEG_BIN === 'ffmpeg') {
-    try {
-        let staticPath = require('ffmpeg-static');
-        if (staticPath && staticPath.includes('app.asar')) {
-            staticPath = staticPath.replace('app.asar', 'app.asar.unpacked');
-        }
-        if (staticPath) FFMPEG_BIN = staticPath;
-    } catch { }
-}
+// Resolve ffmpeg binary path (cross-platform: macOS + Windows)
+const { execSync } = require('child_process');
 const STDERR_SUPPRESS = process.platform === 'win32' ? '2>NUL' : '2>/dev/null';
+let FFMPEG_BIN = process.env.FFMPEG_PATH || '';
+let ffmpegAvailable = false;
+
+function testFfmpeg(bin) {
+    try { execSync(`"${bin}" -version`, { stdio: 'ignore' }); return true; } catch { return false; }
+}
+
+if (FFMPEG_BIN && testFfmpeg(FFMPEG_BIN)) {
+    ffmpegAvailable = true;
+} else {
+    // 1. Check system PATH
+    const sysCmd = process.platform === 'win32' ? 'where ffmpeg' : 'which ffmpeg';
+    try {
+        const sysPath = execSync(sysCmd, { encoding: 'utf8' }).trim().split('\n')[0];
+        if (sysPath && testFfmpeg(sysPath)) { FFMPEG_BIN = sysPath; ffmpegAvailable = true; }
+    } catch { }
+
+    // 2. Try ffmpeg-static
+    if (!ffmpegAvailable) {
+        try {
+            let staticPath = require('ffmpeg-static');
+            if (staticPath && staticPath.includes('app.asar')) {
+                staticPath = staticPath.replace('app.asar', 'app.asar.unpacked');
+            }
+            if (staticPath && testFfmpeg(staticPath)) { FFMPEG_BIN = staticPath; ffmpegAvailable = true; }
+        } catch { }
+    }
+
+    // 3. Fallback
+    if (!ffmpegAvailable) {
+        FFMPEG_BIN = 'ffmpeg';
+        console.warn('⚠️ ffmpeg not found. WAV conversion and Nvidia STT will not work.');
+        console.warn('   Install ffmpeg: https://ffmpeg.org/download.html');
+    }
+}
+console.log(`ffmpeg: ${ffmpegAvailable ? '✅ ' + FFMPEG_BIN : '❌ not available'}`);
 
 function getAudioMimeType(filePath) {
     const ext = path.extname(filePath).toLowerCase();
@@ -162,11 +189,12 @@ async function transcribeViaNvidia(filePath) {
     const { execSync } = require('child_process');
 
     // Convert audio to WAV PCM 16kHz mono (Riva expects this format)
+    if (!ffmpegAvailable) throw new Error('ffmpeg is required for Nvidia STT but not installed. Install from https://ffmpeg.org or use Groq/API backend instead.');
     const wavPath = filePath.replace(/\.[^.]+$/, '_riva.wav');
     try {
         execSync(`"${FFMPEG_BIN}" -y -i "${filePath}" -ar 16000 -ac 1 -f wav "${wavPath}" ${STDERR_SUPPRESS}`);
     } catch (e) {
-        throw new Error('ffmpeg conversion failed — is ffmpeg installed?');
+        throw new Error('ffmpeg conversion failed — is ffmpeg installed correctly?');
     }
 
     const audioData = fs.readFileSync(wavPath);
@@ -358,6 +386,8 @@ app.get('/api/settings', (req, res) => {
         backend: saved.stt_backend || 'local',
         preprocessing: saved.stt_preprocessing !== 'false',
         chunkDuration: parseInt(saved.stt_chunk_duration) || 5,
+        ffmpegAvailable,
+        platform: process.platform,
     });
 });
 
@@ -529,10 +559,13 @@ app.post('/api/transcribe-chunk', upload.single('audio'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Không có audio chunk' });
 
     try {
+        console.log(`[transcribe-chunk] file: ${req.file.originalname} (${req.file.size} bytes) backend: ${db.getSetting('stt_backend') || 'local'}`);
         const result = await transcribe(req.file.path);
 
         fs.unlink(req.file.path, () => { });
-        res.json({ text: filterHallucinations((result.text || '').trim()) });
+        const text = filterHallucinations((result.text || '').trim());
+        console.log(`[transcribe-chunk] result: "${text.substring(0, 80)}${text.length > 80 ? '...' : ''}"`);
+        res.json({ text });
     } catch (err) {
         if (req.file?.path) fs.unlink(req.file.path, () => { });
         console.error('Chunk transcription error:', err.message);
@@ -622,6 +655,7 @@ app.post('/api/meetings/:id/audio', upload.single('audio'), (req, res) => {
     const wavPath = path.join(AUDIO_DIR, wavFilename);
 
     try {
+        if (!ffmpegAvailable) throw new Error('ffmpeg not available');
         execSync(`"${FFMPEG_BIN}" -y -i "${req.file.path}" -ar 44100 -ac 1 -f wav "${wavPath}" ${STDERR_SUPPRESS}`);
         fs.unlink(req.file.path, () => { });
         db.updateMeeting(id, { audioPath: wavFilename });
@@ -653,6 +687,7 @@ app.post('/api/convert-wav', upload.single('audio'), (req, res) => {
     const wavPath = req.file.path.replace(/\.[^.]+$/, '.wav');
 
     try {
+        if (!ffmpegAvailable) throw new Error('ffmpeg is not installed. Download from https://ffmpeg.org');
         execSync(`"${FFMPEG_BIN}" -y -i "${req.file.path}" -ar 44100 -ac 1 -f wav "${wavPath}" ${STDERR_SUPPRESS}`);
         res.download(wavPath, 'meeting.wav', () => {
             fs.unlink(req.file.path, () => { });
