@@ -8,11 +8,11 @@ venv/
 audio_files/
 data/
 
-# Electron source & build output
+# Electron source, config & build output
 electron/
+electron-builder.yml
+build/
 dist/
-build/icon.icns
-build/icon.ico
 *.dmg
 *.exe
 *.AppImage
