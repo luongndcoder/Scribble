@@ -28,7 +28,11 @@
 | 🍎 **macOS** | Intel | `Scribble-1.0.0-x64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0-x64.dmg) |
 | 🪟 **Windows** | 64-bit | `Scribble-Setup-1.0.0.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-Setup-1.0.0.exe) |
 
-> **Lưu ý macOS:** Lần đầu mở app, nếu gặp cảnh báo "unidentified developer", click chuột phải → Open → Open.
+> **⚠️ Lưu ý macOS:** Lần đầu mở app nếu gặp cảnh báo **"Scribble Not Opened"**, mở Terminal và chạy:
+> ```bash
+> xattr -cr /Applications/Scribble.app
+> ```
+> Hoặc vào **System Settings → Privacy & Security → scroll xuống → Allow Anyway**.
 
 ## ✨ Tính năng chính
 
@@ -120,7 +124,11 @@ Hỗ trợ: OpenAI, Azure, Groq, Together, Ollama, ...
 | 🍎 **macOS** | Intel | `Scribble-1.0.0-x64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0-x64.dmg) |
 | 🪟 **Windows** | 64-bit | `Scribble-Setup-1.0.0.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-Setup-1.0.0.exe) |
 
-> **macOS note:** On first launch, if you see "unidentified developer" warning, right-click → Open → Open.
+> **⚠️ macOS note:** If you see **"Scribble Not Opened"** on first launch, open Terminal and run:
+> ```bash
+> xattr -cr /Applications/Scribble.app
+> ```
+> Or go to **System Settings → Privacy & Security → scroll down → Allow Anyway**.
 
 ## ✨ Key Features
 
@@ -147,7 +155,11 @@ Download the Scribble desktop app for your operating system:
 | 🍎 **macOS** | Intel | `Scribble-1.0.0-x64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-1.0.0-x64.dmg) |
 | 🪟 **Windows** | 64-bit | `Scribble-Setup-1.0.0.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble-Setup-1.0.0.exe) |
 
-> **macOS note:** On first launch, if you see "unidentified developer" warning, right-click → Open → Open.
+> **⚠️ macOS note:** If you see **"Scribble Not Opened"** on first launch, open Terminal and run:
+> ```bash
+> xattr -cr /Applications/Scribble.app
+> ```
+> Or go to **System Settings → Privacy & Security → scroll down → Allow Anyway**.
 
 ## 🚀 Quick Start
 
