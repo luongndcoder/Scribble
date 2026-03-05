@@ -43,6 +43,7 @@ const el = {
 
     btnNewMeeting2: $id('btnNewMeeting2'),
     btnCopyTranscript: $id('btnCopyTranscript'),
+    btnClearTranscript: $id('btnClearTranscript'),
     recordTimer: $id('recordTimer'),
     waveformCanvas: $id('waveformCanvas'),
     emptyState: $id('emptyState'),
@@ -171,6 +172,7 @@ function bindEvents() {
 
     el.btnNewMeeting2.addEventListener('click', newMeeting);
     el.btnCopyTranscript.addEventListener('click', copyTranscript);
+    el.btnClearTranscript.addEventListener('click', clearAllTranscript);
 
     // Translation toggle
     el.translationToggle.addEventListener('change', () => {
@@ -815,6 +817,10 @@ function renderTranscript() {
                             <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
                         </svg>
                     </button>
+                    ${p.translation ? `<button class="transcript-action-btn t-edit-translation-btn" data-idx="${i}" title="Sửa bản dịch" style="color:var(--primary,#6366f1)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M5 8l6 6"/><path d="M4 14l6 6"/><path d="M2 5h12"/><path d="M7 2v6"/><path d="M15 11h7"/><path d="M18 8v6"/>                        </svg>
+                    </button>` : ''}
                     <button class="transcript-action-btn t-delete-btn" data-idx="${i}" title="Xóa">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
@@ -837,6 +843,14 @@ function renderTranscript() {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteTranscriptItem(parseInt(btn.dataset.idx));
+        });
+    });
+
+    // Bind edit translation buttons
+    el.transcriptContent.querySelectorAll('.t-edit-translation-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            editTranslationItem(parseInt(btn.dataset.idx));
         });
     });
 
@@ -951,6 +965,48 @@ function deleteTranscriptItem(idx) {
     renderTranscript();
     showToast(t('toast_transcript_deleted'), 'success');
     autoSaveDraft();
+}
+
+function clearAllTranscript() {
+    if (state.transcriptParts.length === 0) return;
+    if (!confirm(t('confirm_clear_all') || 'Xóa tất cả transcript?')) return;
+    state.transcriptParts = [];
+    el.transcriptContent.innerHTML = '';
+    el.emptyState.classList.remove('hidden');
+    showToast(t('toast_transcript_cleared') || 'Đã xóa tất cả transcript', 'success');
+    autoSaveDraft();
+}
+
+function editTranslationItem(idx) {
+    const transEl = document.getElementById(`ttrans-${idx}`);
+    if (!transEl) return;
+    const original = state.transcriptParts[idx].translation || '';
+
+    transEl.contentEditable = 'true';
+    transEl.classList.add('editing');
+    transEl.focus();
+
+    const range = document.createRange();
+    range.selectNodeContents(transEl);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+
+    const save = () => {
+        const newText = transEl.textContent.trim();
+        transEl.contentEditable = 'false';
+        transEl.classList.remove('editing');
+        if (newText !== original) {
+            state.transcriptParts[idx].translation = newText;
+            showToast(t('toast_translation_updated') || 'Đã cập nhật bản dịch', 'success');
+            autoSaveDraft();
+        }
+    };
+
+    transEl.addEventListener('blur', save, { once: true });
+    transEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); transEl.blur(); }
+        if (e.key === 'Escape') { transEl.textContent = original; transEl.blur(); }
+    });
 }
 
 function autoSaveDraft() {
