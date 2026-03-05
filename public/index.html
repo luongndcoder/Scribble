@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scribble — AI Meeting Notes</title>
+  <meta name="description"
+    content="Ứng dụng ghi chú cuộc họp thông minh với AI. Thu âm, phiên dịch và tóm tắt cuộc họp bằng tiếng Việt.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="app">
+
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Draggable Titlebar (for Electron macOS hiddenInset) -->
+      <div class="titlebar-drag" id="titlebarDrag"></div>
+
+      <!-- Top Navigation -->
+      <header class="topnav">
+        <div class="topnav-left">
+          <span class="brand">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round" class="brand-icon">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" x2="12" y1="19" y2="22" />
+            </svg>
+            Scribble
+          </span>
+        </div>
+        <div class="topnav-right">
+          <button class="lang-toggle" id="btnLangToggle" title="Switch language">🇻🇳</button>
+          <button class="icon-btn" id="btnSettings" aria-label="Cài đặt">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Master-Detail Views -->
+      <div class="tab-content">
+
+        <!-- VIEW: Meetings List (default) -->
+        <section class="view active" id="viewMeetings">
+          <div class="pane-header">
+            <h2 class="pane-title" data-i18n="meetings_title">Lịch sử cuộc họp</h2>
+            <div class="pane-actions">
+              <button class="action-btn primary" id="btnNewMeeting2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+                <span data-i18n="new_meeting">New Meeting</span>
+              </button>
+            </div>
+          </div>
+          <div class="meetings-grid" id="meetingsGrid">
+            <div class="list-empty" data-i18n="no_meetings">Chưa có cuộc họp nào</div>
+          </div>
+        </section>
+
+        <!-- VIEW: Meeting Detail -->
+        <section class="view" id="viewDetail">
+          <!-- Detail header with back button -->
+          <div class="detail-header">
+            <button class="back-btn" id="btnBack" aria-label="Quay lại">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+              <span data-i18n="tab_meetings">Cuộc họp</span>
+            </button>
+          </div>
+
+          <!-- Sub-tabs: Recording | Minutes -->
+          <nav class="sub-tabs" id="subTabs">
+            <button class="sub-tab active" data-detail-tab="recording" id="subTabRecording">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" x2="12" y1="19" y2="22" />
+              </svg>
+              <span data-i18n="tab_recording">Ghi âm</span>
+            </button>
+            <button class="sub-tab" data-detail-tab="summary" id="subTabSummary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path
+                  d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
+              </svg>
+              <span data-i18n="tab_summary">Biên bản</span>
+            </button>
+          </nav>
+
+          <!-- Detail Pane: Recording/Transcript -->
+          <div class="detail-pane active" id="paneRecording">
+            <div class="pane-header">
+              <h2 class="pane-title" data-i18n="live_transcription">Phiên dịch trực tiếp</h2>
+              <div class="pane-actions">
+                <span class="rec-indicator hidden" id="recIndicator">
+                  <span class="rec-dot-live"></span>
+                  <span data-i18n="tab_recording">Ghi âm</span>
+                </span>
+                <button class="action-btn" id="btnCopyTranscript" aria-label="Copy Transcript">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                  </svg>
+                  <span data-i18n="copy_transcript">Copy Transcript</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Empty state -->
+            <div class="empty-state" id="emptyState">
+              <div class="empty-icon-wrap">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" x2="12" y1="19" y2="22" />
+                </svg>
+              </div>
+              <h3 data-i18n="empty_title">Bắt đầu cuộc họp</h3>
+              <p data-i18n="empty_desc">Nhấn nút <strong>Record</strong> bên dưới để ghi âm.<br>AI sẽ phiên dịch trực
+                tiếp
+                cho bạn.</p>
+            </div>
+
+            <!-- Processing state -->
+            <div class="processing hidden" id="processingState">
+              <div class="spinner"></div>
+              <p id="processingText" data-i18n="processing">Đang xử lý...</p>
+            </div>
+
+            <!-- Transcript segments -->
+            <div class="transcript-list" id="transcriptContent"></div>
+          </div>
+
+          <!-- Detail Pane: Summary/Minutes -->
+          <div class="detail-pane" id="paneSummary">
+            <div class="pane-header">
+              <h2 class="pane-title" data-i18n="summary_title">Biên bản cuộc họp</h2>
+              <div class="pane-actions">
+                <button class="action-btn" id="btnExport">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" x2="12" y1="15" y2="3" />
+                  </svg>
+                  <span data-i18n="export">Export</span>
+                </button>
+              </div>
+            </div>
+            <div class="summary-empty" id="summaryEmpty">
+              <p data-i18n="summary_empty">Chưa có biên bản. Nhấn <strong>"Tạo biên bản"</strong> sau khi thu âm.</p>
+            </div>
+            <div class="minutes-body" id="minutesContent"></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Floating Recording Bar -->
+      <div class="rec-bar" id="recBar">
+        <button class="rec-main-btn" id="btnRecord" aria-label="Thu âm">
+          <span class="rec-main-icon" id="recMainIcon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="12" r="8" />
+            </svg>
+          </span>
+        </button>
+        <button class="rec-pause-btn hidden" id="btnPause" aria-label="Tạm dừng">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" id="pauseIcon">
+            <rect x="6" y="4" width="4" height="16" rx="1" />
+            <rect x="14" y="4" width="4" height="16" rx="1" />
+          </svg>
+        </button>
+        <div class="rec-wave-wrap hidden" id="recWaveWrap">
+          <canvas id="waveformCanvas" width="200" height="32"></canvas>
+        </div>
+        <button class="rec-stop-btn hidden" id="btnStop" aria-label="Dừng">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
+        </button>
+        <span class="rec-timer hidden" id="recordTimer">0:00</span>
+        <button class="rec-download-btn hidden" id="btnDownloadAudio" aria-label="Download audio">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" x2="12" y1="15" y2="3" />
+          </svg>
+          WAV
+        </button>
+        <button class="rec-summarize-btn hidden" id="btnSummarize">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path
+              d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
+          </svg>
+          <span data-i18n="create_minutes">Tạo biên bản</span>
+        </button>
+      </div>
+
+      <!-- Audio Source + Translation Controls -->
+      <div class="translation-bar" id="translationBar">
+        <!-- Audio Source Selector -->
+        <div class="audio-source-wrap">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 10v3a7 7 0 0 0 14 0v-3" />
+            <path d="M9 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+          </svg>
+          <div class="audio-source-pills" id="audioSourcePills">
+            <button class="source-pill active" data-source="mic" title="Microphone" data-i18n="source_mic">🎙️
+              Mic</button>
+            <button class="source-pill" data-source="system" title="System Audio" data-i18n="source_system">🔊 Hệ
+              thống</button>
+            <button class="source-pill" data-source="both" title="Mic + System Audio" data-i18n="source_both">🎚️ Cả
+              hai</button>
+          </div>
+        </div>
+
+        <div class="bar-divider"></div>
+
+        <!-- Translation Toggle -->
+        <div class="translation-toggle-wrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="m5 8 6 6" />
+            <path d="m4 14 6-6 2-3" />
+            <path d="M2 5h12" />
+            <path d="M7 2h1" />
+            <path d="m22 22-5-10-5 10" />
+            <path d="M14 18h6" />
+          </svg>
+          <span data-i18n="cabin_translate">Dịch cabin</span>
+          <label class="toggle toggle-sm">
+            <input type="checkbox" id="translationToggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <select class="translation-lang-select" id="translationLang" disabled>
+          <option value="Vietnamese">🇻🇳 Tiếng Việt</option>
+          <option value="English">🇬🇧 English</option>
+          <option value="Japanese">🇯🇵 Tiếng Nhật</option>
+          <option value="Korean">🇰🇷 Tiếng Hàn</option>
+          <option value="Chinese (Simplified)">🇨🇳 Tiếng Trung</option>
+          <option value="French">🇫🇷 Tiếng Pháp</option>
+          <option value="German">🇩🇪 Tiếng Đức</option>
+          <option value="Spanish">🇪🇸 Tiếng Tây Ban Nha</option>
+          <option value="Thai">🇹🇭 Tiếng Thái</option>
+          <option value="Indonesian">🇮🇩 Tiếng Indonesia</option>
+          <option value="Russian">🇷🇺 Tiếng Nga</option>
+        </select>
+      </div>
+    </main>
+
+    <!-- Settings Panel (Full-page slide-over) -->
+    <div class="settings-overlay hidden" id="settingsModal">
+      <div class="settings-panel">
+        <div class="settings-panel-header">
+          <h2 class="settings-panel-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <span data-i18n="settings_title">Cài đặt</span>
+          </h2>
+          <button class="settings-close-btn" id="closeSettings" aria-label="Đóng">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="settings-panel-body">
+          <!-- STT Section -->
+          <div class="settings-section">
+            <div class="settings-section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" x2="12" y1="19" y2="22" />
+              </svg>
+              <span data-i18n="stt_section">Speech-to-Text</span>
+            </div>
+
+            <div class="setting-group" id="sttStatusGroup">
+              <div class="setting-label" data-i18n="status_label">Trạng thái</div>
+              <div class="stt-status" id="sttStatus">
+                <span class="status-dot offline"></span>
+                <span class="status-text">Đang kiểm tra...</span>
+              </div>
+            </div>
+
+            <div class="setting-group">
+              <div class="setting-label" data-i18n="stt_backend">STT Backend</div>
+              <div class="radio-cards" id="sttBackendCards">
+                <label class="radio-card" data-stt-backend="local">
+                  <input type="radio" name="sttBackend" value="local">
+                  <div class="radio-card-inner">
+                    <span class="radio-card-icon">💻</span>
+                    <span class="radio-card-title">Local Parakeet</span>
+                    <span class="radio-card-desc" data-i18n="local_desc">Chạy trên máy tính</span>
+                  </div>
+                </label>
+                <label class="radio-card active" data-stt-backend="nvidia">
+                  <input type="radio" name="sttBackend" value="nvidia" checked>
+                  <div class="radio-card-inner">
+                    <span class="radio-card-icon">☁️</span>
+                    <span class="radio-card-title">Nvidia Cloud</span>
+                    <span class="radio-card-desc" data-i18n="nvidia_desc">Chỉ tiếng Việt · Miễn phí</span>
+                  </div>
+                </label>
+                <label class="radio-card" data-stt-backend="groq">
+                  <input type="radio" name="sttBackend" value="groq">
+                  <div class="radio-card-inner">
+                    <span class="radio-card-icon">⚡</span>
+                    <span class="radio-card-title">Groq</span>
+                    <span class="radio-card-desc" data-i18n="groq_desc">Đa ngôn ngữ · Mất phí</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div class="setting-group hidden" id="localSettings">
+              <div class="settings-info-card">
+                <div class="settings-info-title">⚠️ Yêu cầu</div>
+                <div class="settings-info-body">
+                  Python 3.10+ và ~4GB RAM<br>
+                  <strong>Docker (khuyến nghị):</strong><br>
+                  <code>docker compose --profile local up --build</code><br><br>
+                </div>
+              </div>
+            </div>
+
+            <div class="setting-group" id="nvidiaSettings">
+              <div class="setting-label" data-i18n="nvidia_api_key">Nvidia API Key</div>
+              <input type="password" class="setting-input" id="nvidiaApiKey" placeholder="nvapi-xxx">
+              <div class="setting-hint">Lấy key tại <a href="https://build.nvidia.com/nvidia/parakeet-ctc-0_6b-vi"
+                  target="_blank">build.nvidia.com</a></div>
+            </div>
+
+            <div class="setting-group hidden" id="groqSettings">
+              <div class="setting-label" data-i18n="groq_api_key">Groq API Key</div>
+              <input type="password" class="setting-input" id="groqApiKey" placeholder="gsk_xxx">
+              <div class="setting-hint">Lấy key tại <a href="https://console.groq.com/keys"
+                  target="_blank">console.groq.com</a></div>
+            </div>
+
+            <div class="setting-group">
+              <div class="setting-row">
+                <div>
+                  <div class="setting-label" data-i18n="preprocessing">Lọc nhiễu (Preprocessing)</div>
+                  <div class="setting-hint" data-i18n="preprocessing_desc">Noise reduction + High-pass filter +
+                    Normalize</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="preprocessToggle" checked>
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- LLM Section -->
+          <div class="settings-section">
+            <div class="settings-section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path
+                  d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
+              </svg>
+              <span data-i18n="llm_section">🤖 Cấu hình AI</span>
+            </div>
+            <div class="setting-hint" style="margin-bottom: 8px;" data-i18n="llm_hint">Cấu hình AI cho tóm tắt cuộc họp
+              và dịch cabin</div>
+
+            <div class="setting-group">
+              <div class="setting-label" data-i18n="llm_api_key">API Key</div>
+              <input type="password" class="setting-input" id="llmApiKey" placeholder="sk-xxx">
+            </div>
+            <div class="setting-group">
+              <div class="setting-label" data-i18n="llm_base_url">Base URL</div>
+              <input type="text" class="setting-input" id="llmBaseUrl" placeholder="https://api.openai.com/v1">
+              <div class="setting-hint" data-i18n="llm_base_url_hint">URL endpoint tương thích OpenAI API</div>
+            </div>
+            <div class="setting-group">
+              <div class="setting-label" data-i18n="llm_model">Model</div>
+              <input type="text" class="setting-input" id="llmModel" placeholder="gpt-4o">
+              <div class="setting-hint" data-i18n="llm_model_hint">Tên model LLM (ví dụ: gpt-4o, gpt-5.2, claude-3)
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-panel-footer">
+          <div class="diagnose-results hidden" id="diagnoseResults"></div>
+          <div class="settings-footer-actions">
+            <button class="action-btn" id="btnDiagnose" data-i18n="diagnose">🩺 Kiểm tra cấu hình</button>
+            <div class="settings-footer-right">
+              <button class="action-btn" id="cancelSettings" data-i18n="cancel">Hủy</button>
+              <button class="action-btn primary" id="saveSettings">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                <span data-i18n="save_settings">Lưu cài đặt</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>

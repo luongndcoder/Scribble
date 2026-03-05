@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Data (rebuilt at runtime)
+uploads/
+audio_files/
+data/
+
+# Git
+.git/
+.gitignore
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log

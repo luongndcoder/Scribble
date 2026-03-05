@@ -1,0 +1,68 @@
+syntax = "proto3";
+package nvidia.riva.asr;
+
+// Matches nvidia-riva-client exact field numbers
+service RivaSpeechRecognition {
+  rpc Recognize (RecognizeRequest) returns (RecognizeResponse);
+}
+
+message RecognizeRequest {
+  RecognitionConfig config = 1;
+  bytes audio = 2;
+}
+
+message RecognizeResponse {
+  repeated SpeechRecognitionResult results = 1;
+}
+
+message RecognitionConfig {
+  AudioEncoding encoding = 1;
+  int32 sample_rate_hertz = 2;
+  string language_code = 3;
+  int32 max_alternatives = 4;
+  bool profanity_filter = 5;
+  repeated SpeechContext speech_contexts = 6;
+  int32 audio_channel_count = 7;
+  bool enable_word_time_offsets = 8;
+  bool enable_automatic_punctuation = 11;
+  bool enable_separate_recognition_per_channel = 12;
+  string model = 13;
+  bool verbatim_transcripts = 14;
+  map<string, string> custom_configuration = 24;
+}
+
+message SpeechContext {
+  repeated string phrases = 1;
+  float boost = 2;
+}
+
+message SpeechRecognitionResult {
+  repeated SpeechRecognitionAlternative alternatives = 1;
+  int32 channel_tag = 2;
+  float audio_processed = 3;
+}
+
+message SpeechRecognitionAlternative {
+  string transcript = 1;
+  float confidence = 2;
+  repeated WordInfo words = 3;
+  repeated string language_code = 4;
+}
+
+message WordInfo {
+  int32 start_time = 1;
+  int32 end_time = 2;
+  string word = 3;
+  float confidence = 4;
+  int32 speaker_tag = 5;
+  string language_code = 6;
+}
+
+enum AudioEncoding {
+  ENCODING_UNSPECIFIED = 0;
+  LINEAR_PCM = 1;
+  FLAC = 2;
+  MULAW = 3;
+  OGGOPUS = 4;
+  ALAW = 20;
+}

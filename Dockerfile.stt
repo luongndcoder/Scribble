@@ -1,0 +1,30 @@
+# ─── Parakeet STT Service (Python + NeMo) ───
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps for audio processing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements.txt
+
+COPY stt_service.py .
+COPY .env* ./
+
+# Pre-download the Parakeet model at build time (optional, ~600MB)
+# Uncomment next line to bake model into image for faster startup:
+# RUN python -c "import nemo.collections.asr as asr; asr.models.ASRModel.from_pretrained('nvidia/parakeet-ctc-0.6b-vi')"
+
+EXPOSE 5555
+
+ENV STT_PORT=5555
+ENV STT_BACKEND=local
+ENV STT_PREPROCESS=true
+
+CMD ["python", "stt_service.py"]

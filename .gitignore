@@ -1,0 +1,27 @@
+node_modules/
+.env
+*.db
+uploads/
+__pycache__/
+venv/
+.venv/
+audio_files/
+data/
+
+# Electron source & build output
+electron/
+dist/
+build/icon.icns
+build/icon.ico
+*.dmg
+*.exe
+*.AppImage
+*.snap
+*.deb
+*.rpm
+*.blockmap
+*.yml.bak
+
+# OS files
+.DS_Store
+Thumbs.db

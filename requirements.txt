@@ -1,0 +1,9 @@
+nemo_toolkit[asr]
+flask
+flask-cors
+pydub
+soundfile
+noisereduce
+scipy
+nvidia-riva-client
+python-dotenv
