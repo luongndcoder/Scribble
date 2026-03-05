@@ -10,6 +10,12 @@
 
 **🇻🇳 [Tiếng Việt](#-tiếng-việt)** · **🇬🇧 [English](#-english)**
 
+### 🎬 Demo
+
+<p align="center">
+  <img src="public/demo.webp" alt="Scribble Demo" width="800">
+</p>
+
 ---
 
 # 🇻🇳 Tiếng Việt
