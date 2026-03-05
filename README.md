@@ -54,7 +54,7 @@ git clone https://github.com/luongndcoder/Scribble.git
 cd meeting-minutes
 npm install
 npm start
-# → http://localhost:3001
+# → http://localhost:3000
 ```
 
 Cấu hình qua **Settings** (⚙️) trong app — không cần file `.env`.
@@ -160,7 +160,7 @@ git clone https://github.com/luongndcoder/Scribble.git
 cd meeting-minutes
 npm install
 npm start
-# → http://localhost:3001
+# → http://localhost:3000
 ```
 
 All configuration via **Settings** (⚙️) in the app — no `.env` file required.
