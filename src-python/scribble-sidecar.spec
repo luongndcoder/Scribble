@@ -10,8 +10,12 @@ hiddenimports = [
     'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on',
     'fastapi', 'starlette', 'starlette.responses', 'starlette.background',
     'multipart', 'multipart.multipart', 'httpx', 'groq', 'openai', 'docx',
-    'onnxruntime', 'scipy', 'scipy.signal',
+    'onnxruntime', 'onnxruntime.capi', 'scipy', 'scipy.signal',
     'riva', 'riva.client', 'grpcio', 'grpcio_tools', 'charset_normalizer',
+    # Windows-specific
+    'multiprocessing', 'multiprocessing.popen_spawn_win32',
+    'encodings', 'encodings.utf_8', 'encodings.ascii',
+    'pkg_resources', 'pkg_resources.extern',
 ]
 
 # Bundle ONNX model

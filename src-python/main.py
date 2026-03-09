@@ -4,9 +4,14 @@ Runs as a local HTTP server spawned by Tauri.
 Handles: STT (Groq), Speaker Diarization (Pyannote), Translation, Summarization
 """
 
+# ── Windows PyInstaller: must be first ──
+import multiprocessing
+import sys
+import os
+multiprocessing.freeze_support()
+
 import asyncio
 import json
-import os
 import subprocess
 import tempfile
 import time
@@ -14,7 +19,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
-import sys
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +33,7 @@ import collections
 import logging
 import threading
 import queue as _queue
+
 
 # ─── Log Ring Buffer ───
 MAX_LOG_LINES = 500
@@ -1087,5 +1092,34 @@ def filter_hallucinations(text: str) -> str:
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("SIDECAR_PORT", "8765"))
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    import traceback
+
+    # ── Crash-safe logging ──
+    def _crash_log_path():
+        data_dir = os.getenv("VOICESCRIBE_DATA", os.path.join(os.path.expanduser("~"), ".voicescribe"))
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, "sidecar-crash.log")
+
+    try:
+        # Log startup environment for debugging
+        log_path = _crash_log_path()
+        with open(log_path, "w") as f:
+            f.write(f"[startup] frozen={getattr(sys, 'frozen', False)}\n")
+            f.write(f"[startup] _MEIPASS={getattr(sys, '_MEIPASS', 'N/A')}\n")
+            f.write(f"[startup] executable={sys.executable}\n")
+            f.write(f"[startup] cwd={os.getcwd()}\n")
+            f.write(f"[startup] platform={sys.platform}\n")
+            f.write(f"[startup] Starting uvicorn...\n")
+
+        port = int(os.getenv("SIDECAR_PORT", "8765"))
+        uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"[CRASH] {e}\n{tb}", file=sys.stderr)
+        try:
+            with open(_crash_log_path(), "a") as f:
+                f.write(f"\n[CRASH] {e}\n{tb}\n")
+        except Exception:
+            pass
+        sys.exit(1)
+
