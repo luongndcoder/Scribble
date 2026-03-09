@@ -122,7 +122,6 @@ npx tauri build -b nsis --target x86_64-pc-windows-msvc
 | Backend | Đặc điểm | Yêu cầu |
 |---------|----------|---------|
 | ☁️ **Nvidia Riva** | Streaming gRPC, đa ngôn ngữ, speaker diarization | API key từ [build.nvidia.com](https://build.nvidia.com) |
-| ⚡ **Groq Whisper** | Siêu nhanh, đa ngôn ngữ, **~1.000 VNĐ/giờ** | API key từ [console.groq.com](https://console.groq.com/keys) |
 
 > 🔒 **Bảo mật:** API key của bạn được lưu trữ **hoàn toàn trên máy tính của bạn**. Chúng tôi không thu thập, gửi đi hay sử dụng API key của bạn cho bất kỳ mục đích nào.
 
@@ -250,7 +249,6 @@ npx tauri build -b nsis --target x86_64-pc-windows-msvc
 | Backend | Highlights | Requirements |
 |---------|------------|-------------|
 | ☁️ **Nvidia Riva** | Streaming gRPC, multilingual, speaker diarization | API key from [build.nvidia.com](https://build.nvidia.com) |
-| ⚡ **Groq Whisper** | Ultra-fast, multilingual, **~$0.04 USD/hour** | API key from [console.groq.com](https://console.groq.com/keys) |
 
 > 🔒 **Privacy:** Your API keys are stored **entirely on your local machine**. We never collect, transmit, or use your API keys for any purpose.
 
