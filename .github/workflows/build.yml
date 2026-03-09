@@ -1,4 +1,4 @@
-name: Build & Release
+name: Build Windows
 
 on:
   workflow_dispatch:
@@ -7,20 +7,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            bundle: dmg
-            sidecar: scribble-sidecar-aarch64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            bundle: nsis
-            sidecar: scribble-sidecar-x86_64-pc-windows-msvc.exe
-
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +30,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -58,24 +46,26 @@ jobs:
       - name: Copy sidecar binary
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp src-python/dist/scribble-sidecar.exe src-tauri/binaries/${{ matrix.sidecar }}
-          else
-            cp src-python/dist/scribble-sidecar src-tauri/binaries/${{ matrix.sidecar }}
-          fi
+          mkdir -p src-tauri/binaries
+          cp src-python/dist/scribble-sidecar.exe src-tauri/binaries/scribble-sidecar-x86_64-pc-windows-msvc.exe
 
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+      - name: Build Tauri NSIS installer
+        shell: bash
+        run: npx tauri build -b nsis --target x86_64-pc-windows-msvc
+
+      - name: Upload to Release v1.1.0
+        shell: bash
+        run: |
+          INSTALLER=$(find src-tauri/target -name "*.exe" -path "*/nsis/*" | head -1)
+          if [ -n "$INSTALLER" ]; then
+            gh release upload v1.1.0 "$INSTALLER#Scribble_1.1.0_x64-setup.exe" --clobber
+            echo "✅ Uploaded: $INSTALLER"
+          else
+            echo "❌ No NSIS installer found"
+            exit 1
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Scribble ${{ github.ref_name }}'
-          releaseBody: 'Download the installer for your platform below.'
-          releaseDraft: true
-          prerelease: false
-          args: --target ${{ matrix.target }}
