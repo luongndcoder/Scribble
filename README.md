@@ -38,9 +38,9 @@
 
 | Tính năng | Mô tả |
 |-----------|-------|
-| 🎙️ **Ghi âm realtime** | Voice Activity Detection (VAD) — tự cắt chunk theo silence |
+| 🎙️ **Ghi âm realtime** | Voice Activity Detection (Silero VAD) — tự cắt chunk theo silence |
 | 📝 **Phiên dịch tự động** | Nvidia Riva STT — streaming gRPC, đa ngôn ngữ |
-| 👥 **Nhận diện người nói** | Speaker diarization realtime — tự phân biệt giọng nói |
+| 👥 **Nhận diện người nói** | Speaker diarization realtime (ONNX Runtime + CAM++) — tự phân biệt giọng nói |
 | 🌐 **Dịch cabin realtime** | Nvidia NMT — dịch 10+ ngôn ngữ, realtime |
 | 📋 **Biên bản AI** | Tóm tắt: tiêu đề, key points, action items, decisions, risks, next steps |
 | 📦 **Export đa định dạng** | Markdown (.md) và Word (.docx) |
@@ -66,6 +66,7 @@ pnpm install
 
 # Chạy Python sidecar
 cd src-python
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python main.py  # → http://127.0.0.1:8765
 
@@ -73,6 +74,48 @@ python main.py  # → http://127.0.0.1:8765
 cd ..
 pnpm tauri dev
 ```
+
+### 🔨 Build từ source
+
+#### macOS (Apple Silicon)
+
+```bash
+# 1. Build sidecar
+cd src-python
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+
+# 2. Copy sidecar vào Tauri
+cp dist/scribble-sidecar ../src-tauri/binaries/scribble-sidecar-aarch64-apple-darwin
+
+# 3. Build DMG
+cd ..
+pnpm install
+npx tauri build -b dmg
+# → src-tauri/target/release/bundle/dmg/Scribble_*.dmg
+```
+
+#### Windows (64-bit)
+
+```bash
+# 1. Build sidecar
+cd src-python
+python -m venv .venv && .venv\Scripts\activate
+pip install -r requirements.txt
+python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+
+# 2. Copy sidecar vào Tauri
+copy dist\scribble-sidecar.exe ..\src-tauri\binaries\scribble-sidecar-x86_64-pc-windows-msvc.exe
+
+# 3. Build NSIS installer
+cd ..
+pnpm install
+npx tauri build -b nsis --target x86_64-pc-windows-msvc
+# → src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+```
+
+> **💡 CI/CD:** Windows build tự động qua GitHub Actions (`.github/workflows/build.yml`), trigger bằng `workflow_dispatch`.
 
 ## 🔧 STT Backends
 
@@ -123,9 +166,9 @@ Hỗ trợ: OpenAI, Azure, Groq, Together, Ollama, ...
 
 | Feature | Description |
 |---------|-------------|
-| 🎙️ **Real-time Recording** | Voice Activity Detection (VAD) — auto-splits chunks on silence |
+| 🎙️ **Real-time Recording** | Voice Activity Detection (Silero VAD) — auto-splits chunks on silence |
 | 📝 **Auto Transcription** | Nvidia Riva STT — streaming gRPC, multilingual |
-| 👥 **Speaker Diarization** | Real-time speaker identification — auto-detects voice changes |
+| 👥 **Speaker Diarization** | Real-time speaker identification (ONNX Runtime + CAM++) — auto-detects voice changes |
 | 🌐 **Cabin Translation** | Nvidia NMT — 10+ languages, real-time streaming |
 | 📋 **AI Minutes** | Auto-summarize: title, key points, action items, decisions, risks, next steps |
 | 📦 **Multi-format Export** | Markdown (.md) and Word (.docx) |
@@ -151,6 +194,7 @@ pnpm install
 
 # Run Python sidecar
 cd src-python
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python main.py  # → http://127.0.0.1:8765
 
@@ -158,6 +202,48 @@ python main.py  # → http://127.0.0.1:8765
 cd ..
 pnpm tauri dev
 ```
+
+### 🔨 Build from Source
+
+#### macOS (Apple Silicon)
+
+```bash
+# 1. Build sidecar
+cd src-python
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+
+# 2. Copy sidecar to Tauri
+cp dist/scribble-sidecar ../src-tauri/binaries/scribble-sidecar-aarch64-apple-darwin
+
+# 3. Build DMG
+cd ..
+pnpm install
+npx tauri build -b dmg
+# → src-tauri/target/release/bundle/dmg/Scribble_*.dmg
+```
+
+#### Windows (64-bit)
+
+```bash
+# 1. Build sidecar
+cd src-python
+python -m venv .venv && .venv\Scripts\activate
+pip install -r requirements.txt
+python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+
+# 2. Copy sidecar to Tauri
+copy dist\scribble-sidecar.exe ..\src-tauri\binaries\scribble-sidecar-x86_64-pc-windows-msvc.exe
+
+# 3. Build NSIS installer
+cd ..
+pnpm install
+npx tauri build -b nsis --target x86_64-pc-windows-msvc
+# → src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+```
+
+> **💡 CI/CD:** Windows builds run automatically via GitHub Actions (`.github/workflows/build.yml`), triggered by `workflow_dispatch`.
 
 ## 🔧 STT Backends
 
@@ -199,18 +285,17 @@ Scribble/
 │   └── lib/               # API, SSE, sidecar utilities
 ├── src-python/            # Python FastAPI sidecar
 │   ├── main.py            # FastAPI server (STT, diarize, translate, summarize)
-│   ├── diarize.py         # Speaker diarization (WeSpeaker)
+│   ├── diarize.py         # Speaker diarization (ONNX Runtime + CAM++)
 │   ├── translate.py       # Nvidia NMT translation
 │   ├── summarize.py       # LLM summarization
-│   └── stt.py             # STT service
+│   ├── stt.py             # STT service (Nvidia Riva, Groq)
+│   ├── models/            # ONNX model files
+│   └── scribble-sidecar.spec  # PyInstaller build spec
 ├── src-tauri/             # Tauri Rust shell
 │   ├── tauri.conf.json    # App config, icons, bundle settings
 │   └── binaries/          # Platform sidecar binaries
-├── package.json
-├── vite.config.ts
-├── build.sh               # macOS/Linux build script
-├── build-windows.bat      # Windows build script
-└── .github/workflows/     # CI/CD (manual dispatch)
+├── .github/workflows/     # CI/CD (Windows build)
+└── package.json
 ```
 
 ---
