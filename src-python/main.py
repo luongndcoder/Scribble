@@ -275,7 +275,7 @@ async def lifespan(app: FastAPI):
     print("[main] Initializing diarizer model (blocking)...")
     try:
         diarizer._init_model()
-        if not diarizer._model:
+        if not diarizer._session:
             raise RuntimeError("Model loaded but instance is None")
         print(f"[main] ✓ Diarizer model ready (model_loaded={diarizer._model_loaded})")
     except Exception as e:
@@ -353,7 +353,7 @@ async def diarizer_status():
     """Diagnostic endpoint: check if model loaded and config state."""
     return {
         "model_loaded": diarizer._model_loaded,
-        "model_ok": diarizer._model is not None,
+        "model_ok": diarizer._session is not None,
         "source": diarizer._source,
         "profile_count": len(diarizer._profiles),
         "config": {
