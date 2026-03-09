@@ -45,6 +45,9 @@
       "signingIdentity": "Scribble Dev"
     },
     "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
       "nsis": {
         "installMode": "both",
         "displayLanguageSelector": true,

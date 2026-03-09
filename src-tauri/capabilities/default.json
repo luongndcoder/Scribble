@@ -16,7 +16,7 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "voicescribe-sidecar",
+          "name": "scribble-sidecar",
           "sidecar": true
         }
       ]

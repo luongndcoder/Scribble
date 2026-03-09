@@ -1,12 +1,52 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+src-python/.venv
+src-python/build
+src-python/dist
+src-python/.pyinstaller-cache
+
+# Node
 node_modules
+
+# Build output
 dist
+build
+
+# Tauri / Rust (not needed for backend)
+src-tauri/target
+
+# Data & media
+data
+audio_files/
+uploads/
+*.wav
+*.mov
+*.db
+
+# Git & CI
 .git
 .github
-src-tauri/target
-src-python/dist
-src-python/build
-src-python/.venv
-data
+
+# IDE
+.vscode/
+.idea/
+
+# Agent config
+.agent/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App bundles
 *.dmg
 *.exe
+*.AppImage
+
+# Misc
 landing
+*.log

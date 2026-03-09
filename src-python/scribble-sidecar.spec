@@ -25,10 +25,6 @@ datas += [('models', 'models')]
 tmp_ret = collect_all('riva')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
-# Collect silero_vad data files
-tmp_ret = collect_all('silero_vad')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-
 a = Analysis(
     ['main.py'],
     pathex=[],

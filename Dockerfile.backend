@@ -1,14 +1,14 @@
+# ── Build stage: install Python deps ──
 FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
-# System deps for scipy, numpy, audio processing
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY src-python/requirements-docker.txt .
-RUN pip install --no-cache-dir --target=/install -r requirements-docker.txt
+RUN pip install --no-cache-dir --target=/install -r requirements-docker.txt \
+    && find /install -type d -name '__pycache__' -exec rm -rf {} + \
+    && find /install -name '*.pyc' -delete \
+    && find /install -name '*.pyi' -delete \
+    && find /install -name '*.dist-info' -type d -exec rm -rf {} +
 
 # ── Runtime stage ──
 FROM python:3.10-slim
@@ -21,7 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /root/.cache
 
 COPY --from=builder /install /usr/local/lib/python3.10/site-packages/
-COPY src-python/ .
+
+# Selective copy: only .py source + models (skip .venv, build, dist, etc.)
+COPY src-python/*.py .
+COPY src-python/models/ ./models/
 
 ENV VOICESCRIBE_DATA=/data
 ENV PYTHONDONTWRITEBYTECODE=1
