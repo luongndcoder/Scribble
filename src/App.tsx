@@ -6,10 +6,11 @@ import { MeetingDetail } from './components/MeetingDetail';
 import { RecordingBar } from './components/RecordingBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ToastProvider } from './components/Toast';
+import { SIDECAR_HTTP_BASES } from './lib/sidecar';
 import './index.css';
 
 const queryClient = new QueryClient();
-const SIDECAR_BASES = ['http://127.0.0.1:8765', 'http://localhost:8765'] as const;
+const SIDECAR_BASES = SIDECAR_HTTP_BASES;
 
 function App() {
   const { currentView, settingsOpen, setSettingsOpen, lang, setLang } = useAppStore();

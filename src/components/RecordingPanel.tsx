@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { resetDiarize } from '../lib/api';
+import { fetchSidecar } from '../lib/sidecar';
 
 
 
@@ -183,7 +184,7 @@ export function RecordingPanel() {
 
     const queueChunk = async (form: FormData, startSec: number, endSec: number) => {
         try {
-            const res = await fetch('http://localhost:8765/transcribe-diarize', { method: 'POST', body: form });
+            const res = await fetchSidecar('/transcribe-diarize', { method: 'POST', body: form });
             const data = await res.json();
             const rawSegments = Array.isArray(data.segments) ? data.segments : [];
             const normalizedSegments = rawSegments

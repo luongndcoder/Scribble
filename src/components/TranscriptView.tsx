@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { useAppStore, TranscriptPart } from '../stores/appStore';
+import { fetchSidecar } from '../lib/sidecar';
 
 const SPEAKER_COLORS = ['#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 const abortControllers: Record<number, AbortController> = {};
@@ -50,7 +51,7 @@ export function TranscriptView() {
 
         try {
             const targetLang = useAppStore.getState().translationLang;
-            const res = await fetch('http://localhost:8765/translate', {
+            const res = await fetchSidecar('/translate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: part.text, targetLang }),

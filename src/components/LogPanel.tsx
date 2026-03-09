@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { SIDECAR_HTTP_BASES } from '../lib/sidecar';
 
-const BASE = 'http://127.0.0.1:8765';
+const BASE = SIDECAR_HTTP_BASES[0];
 
 export function LogPanel() {
     const [open, setOpen] = useState(false);

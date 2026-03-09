@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAppStore } from '../stores/appStore';
+import { fetchSidecar } from '../lib/sidecar';
 
 export function SummaryView({ meetingId, transcript }: { meetingId: number; transcript: string }) {
     const [summary, setSummary] = useState('');
@@ -17,7 +18,7 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
             } else {
                 payload.transcript = transcript;
             }
-            const res = await fetch('http://localhost:8765/summarize', {
+            const res = await fetchSidecar('/summarize', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
