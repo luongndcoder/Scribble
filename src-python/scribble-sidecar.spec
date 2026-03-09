@@ -1,22 +1,29 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files
 from PyInstaller.utils.hooks import collect_all
+import os
 
 datas = []
 binaries = []
-hiddenimports = ['uvicorn.logging', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.http.h11_impl', 'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on', 'fastapi', 'starlette', 'starlette.responses', 'starlette.background', 'multipart', 'multipart.multipart', 'httpx', 'groq', 'openai', 'docx', 'wespeaker', 'wespeaker.cli', 'wespeaker.cli.speaker', 'wespeaker.cli.hub', 'wespeaker.models', 'torchaudio', 'riva', 'riva.client', 'grpcio', 'grpcio_tools', 'charset_normalizer']
-datas += collect_data_files('s3prl')
-tmp_ret = collect_all('wespeaker')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('torch')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('torchaudio')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+hiddenimports = [
+    'uvicorn.logging', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto',
+    'uvicorn.protocols.http.h11_impl', 'uvicorn.protocols.websockets',
+    'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on',
+    'fastapi', 'starlette', 'starlette.responses', 'starlette.background',
+    'multipart', 'multipart.multipart', 'httpx', 'groq', 'openai', 'docx',
+    'onnxruntime', 'scipy', 'scipy.signal',
+    'riva', 'riva.client', 'grpcio', 'grpcio_tools', 'charset_normalizer',
+]
+
+# Bundle ONNX model
+datas += [('models', 'models')]
+
+# Collect riva client protos
 tmp_ret = collect_all('riva')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
+# Collect silero_vad data files
 tmp_ret = collect_all('silero_vad')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-
 
 a = Analysis(
     ['main.py'],
@@ -26,8 +33,10 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=['pyi_rth_torchaudio.py'],
-    excludes=[],
+    runtime_hooks=[],
+    excludes=['torch', 'torchaudio', 'wespeaker', 's3prl', 'tensorflow',
+              'keras', 'matplotlib', 'PIL', 'cv2', 'pandas', 'sklearn',
+              'pytest', 'IPython', 'notebook', 'jupyter'],
     noarchive=False,
     optimize=0,
 )

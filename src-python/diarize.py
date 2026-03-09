@@ -87,7 +87,7 @@ _CFG_SOURCE_OVERRIDES = {
 
 class SpeakerDiarizer:
     def __init__(self):
-        self._model = None
+        self._session = None
         self._profiles = []
         self._next_id = 0
         self._model_loaded = False
@@ -107,6 +107,7 @@ class SpeakerDiarizer:
         self._cfg_source_overrides = {
             k: dict(v) for k, v in _CFG_SOURCE_OVERRIDES.items()
         }
+        self._mel_basis = None  # cached mel filterbank
 
     def set_source(self, source: str):
         """Set diarization source profile (compat API used by websocket route)."""
@@ -129,110 +130,105 @@ class SpeakerDiarizer:
             return
         self._model_loaded = True
         try:
-            # Must patch torchaudio before wespeaker model init; newer torchaudio
-            # may route load() through TorchCodec and break CAM++ extraction.
-            self._patch_torchaudio_load()
-            import wespeaker
-            model_name = os.getenv("DIARIZE_MODEL", "campplus")
-            self._model = wespeaker.load_model(model_name)
-            expected_dim = 512 if "campplus" in model_name else 192
-
-            self._model.set_device('cpu')
-            self._model.set_resample_rate(16000)
-
-            # Clear profiles nếu dimension không khớp
-            if self._profiles and len(self._profiles[0]["embedding"]) != expected_dim:
+            import onnxruntime as ort
+            # Find ONNX model path
+            model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+            # Support PyInstaller frozen path
+            if getattr(os.sys, 'frozen', False):
+                base = os.path.dirname(os.sys.executable)
+                model_dir = os.path.join(base, "models")
+                if not os.path.isdir(model_dir):
+                    model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+            onnx_path = os.path.join(model_dir, "voxceleb_CAM++.onnx")
+            if not os.path.exists(onnx_path):
+                print(f"[diarize] ONNX model not found at {onnx_path}")
+                self._session = None
+                return
+            so = ort.SessionOptions()
+            so.inter_op_num_threads = 1
+            so.intra_op_num_threads = 2
+            so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            self._session = ort.InferenceSession(onnx_path, sess_options=so)
+            print(f"[diarize] ONNX model loaded: {onnx_path}")
+            # Clear profiles if dimension mismatch
+            if self._profiles and len(self._profiles[0]["embedding"]) != 512:
                 print(f"[diarize] Clearing profiles (dim mismatch)")
                 self._profiles = []
                 self._next_id = 0
         except Exception as e:
             print(f"[diarize] Model load failed: {e}")
-            self._model = None
+            self._session = None
 
+
+    def _compute_fbank(self, samples: np.ndarray, sr: int = 16000,
+                       num_mel_bins: int = 80, frame_length_ms: float = 25.0,
+                       frame_shift_ms: float = 10.0) -> np.ndarray:
+        """Compute Kaldi-compatible log-mel filterbank features using numpy.
+        Matches wespeaker's kaldi.fbank() with hamming window, no energy."""
+        from scipy.signal import resample as scipy_resample
+        # Resample to 16kHz if needed
+        if sr != 16000:
+            samples = scipy_resample(samples, int(len(samples) * 16000 / sr)).astype(np.float32)
+            sr = 16000
+        # Scale by 2^15 (Kaldi convention)
+        samples = samples * (1 << 15)
+        frame_len = int(sr * frame_length_ms / 1000.0)
+        frame_shift = int(sr * frame_shift_ms / 1000.0)
+        n_fft = 1
+        while n_fft < frame_len:
+            n_fft *= 2
+        # Hamming window
+        window = 0.54 - 0.46 * np.cos(2.0 * np.pi * np.arange(frame_len) / (frame_len - 1))
+        window = window.astype(np.float32)
+        # Mel filterbank (cached)
+        if self._mel_basis is None or self._mel_basis.shape[0] != num_mel_bins:
+            self._mel_basis = self._create_mel_filterbank(sr, n_fft, num_mel_bins)
+        # Frame the signal
+        num_frames = max(1, 1 + (len(samples) - frame_len) // frame_shift)
+        frames = np.zeros((num_frames, frame_len), dtype=np.float32)
+        for i in range(num_frames):
+            start = i * frame_shift
+            end = min(start + frame_len, len(samples))
+            frames[i, :end - start] = samples[start:end]
+        # Apply window
+        frames *= window
+        # FFT → power spectrum
+        fft_out = np.fft.rfft(frames, n=n_fft)
+        power = np.abs(fft_out) ** 2
+        # Mel filterbank → log
+        mel_spec = np.dot(power, self._mel_basis.T)
+        mel_spec = np.maximum(mel_spec, 1e-10)
+        log_mel = np.log(mel_spec)
+        # CMN (Cepstral Mean Normalization)
+        log_mel = log_mel - np.mean(log_mel, axis=0)
+        return log_mel.astype(np.float32)
 
     @staticmethod
-    def _patch_torchaudio_load():
-        try:
-            import torchaudio
-            import sys
-            from types import ModuleType
-        except Exception:
-            return
-
-        if getattr(torchaudio, "_voicescribe_patched", False):
-            return
-
-        # --- 0. PyInstaller JIT fix: disable TorchScript when frozen ---
-        # s3prl's CMVN classes extend torch.jit.ScriptModule and use
-        # @torch.jit.script_method which requires .py source access.
-        # PyInstaller strips source files → JIT compilation fails.
-        # Replace ScriptModule with nn.Module so CMVN works as plain module.
-        if getattr(sys, 'frozen', False):
-            import torch
-            import torch.jit
-            import torch.nn as nn
-            if not getattr(torch.jit, '_voicescribe_jit_patched', False):
-                torch.jit._original_ScriptModule = torch.jit.ScriptModule
-                torch.jit.ScriptModule = nn.Module
-                # script_method decorator: just return the function unchanged
-                if hasattr(torch.jit, 'script_method'):
-                    torch.jit._original_script_method = torch.jit.script_method
-                torch.jit.script_method = lambda fn: fn
-                torch.jit._voicescribe_jit_patched = True
-                print("[diarize] PyInstaller JIT patch applied (ScriptModule → nn.Module)")
-
-        # --- 1. Vá lỗi API bị xóa (Sửa lỗi CAM++ not available) ---
-        if not hasattr(torchaudio, "set_audio_backend"):
-            torchaudio.set_audio_backend = lambda x: None
-
-        if not hasattr(torchaudio, "get_audio_backend"):
-            torchaudio.get_audio_backend = lambda: "ffmpeg"
-
-        # Giả lập module sox_effects để tránh ModuleNotFoundError
-        if "torchaudio.sox_effects" not in sys.modules:
-            sox_mod = ModuleType("torchaudio.sox_effects")
-            # Giả lập hàm apply_effects_tensor (trả về nguyên bản nếu không có sox)
-            sox_mod.apply_effects_tensor = lambda tensor, sr, effects: (tensor, sr)
-            sys.modules["torchaudio.sox_effects"] = sox_mod
-            torchaudio.sox_effects = sox_mod
-
-        # --- 2. Giữ nguyên logic Fallback WAV của bạn ---
-        original_load = getattr(torchaudio, "load", None)
-        if callable(original_load):
-            def _fallback_wav_load(path: str):
-                import wave
-                import torch
-                import numpy as np # Đảm bảo đã import numpy
-
-                with wave.open(str(path), "rb") as wf:
-                    channels = wf.getnchannels()
-                    sample_width = wf.getsampwidth()
-                    sample_rate = wf.getframerate()
-                    frames = wf.readframes(wf.getnframes())
-
-                dtype = {1: np.uint8, 2: np.int16, 4: np.int32}.get(sample_width)
-                if not dtype:
-                    raise RuntimeError(f"Unsupported WAV width: {sample_width}")
-
-                audio = np.frombuffer(frames, dtype=dtype).astype(np.float32)
-                if sample_width == 1: audio = (audio - 128.0) / 128.0
-                elif sample_width == 2: audio /= 32768.0
-                elif sample_width == 4: audio /= 2147483648.0
-
-                audio = audio.reshape(-1, channels).T if channels > 1 else audio.reshape(1, -1)
-                return torch.from_numpy(audio), int(sample_rate)
-
-            def _patched_load(path, *args, **kwargs):
-                try:
-                    return original_load(path, *args, **kwargs)
-                except Exception as e:
-                    if "TorchCodec" in str(e) or "backend" in str(e).lower():
-                        return _fallback_wav_load(path)
-                    raise e
-
-            torchaudio.load = _patched_load
-
-        torchaudio._voicescribe_patched = True
+    def _create_mel_filterbank(sr: int, n_fft: int, num_mel_bins: int,
+                               low_freq: float = 20.0, high_freq: float = 0.0) -> np.ndarray:
+        """Create mel-scale filterbank matrix (Kaldi compatible)."""
+        if high_freq <= 0:
+            high_freq = sr / 2.0
+        def hz_to_mel(hz):
+            return 1127.0 * np.log(1.0 + hz / 700.0)
+        def mel_to_hz(mel):
+            return 700.0 * (np.exp(mel / 1127.0) - 1.0)
+        mel_low = hz_to_mel(low_freq)
+        mel_high = hz_to_mel(high_freq)
+        mel_points = np.linspace(mel_low, mel_high, num_mel_bins + 2)
+        hz_points = mel_to_hz(mel_points)
+        bin_points = np.floor((n_fft + 1) * hz_points / sr).astype(int)
+        n_freq = n_fft // 2 + 1
+        filterbank = np.zeros((num_mel_bins, n_freq), dtype=np.float32)
+        for m in range(num_mel_bins):
+            left, center, right = bin_points[m], bin_points[m + 1], bin_points[m + 2]
+            for k in range(left, center):
+                if k < n_freq and center > left:
+                    filterbank[m, k] = (k - left) / (center - left)
+            for k in range(center, right):
+                if k < n_freq and right > center:
+                    filterbank[m, k] = (right - k) / (right - center)
+        return filterbank
 
     def reset(self):
         with self._lock:
@@ -331,36 +327,47 @@ class SpeakerDiarizer:
                 profile["mouth_vec"] = self._l2_normalize(prev * (1 - alpha_mouth) + mouth_vec * alpha_mouth)
                 profile["mouth_count"] = int(min(1000, profile.get("mouth_count", 0) + mouth_count))
 
+    @staticmethod
+    def _load_audio_numpy(audio_path: str) -> tuple:
+        """Load audio as float32 numpy array. Returns (samples_1d, sample_rate)."""
+        import wave
+        try:
+            with wave.open(audio_path, "rb") as wf:
+                channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                sr = wf.getframerate()
+                frames = wf.readframes(wf.getnframes())
+            dtype = {1: np.uint8, 2: np.int16, 4: np.int32}.get(sample_width)
+            if not dtype:
+                raise RuntimeError(f"Unsupported WAV width: {sample_width}")
+            audio = np.frombuffer(frames, dtype=dtype).astype(np.float32)
+            if sample_width == 1: audio = (audio - 128.0) / 128.0
+            elif sample_width == 2: audio /= 32768.0
+            elif sample_width == 4: audio /= 2147483648.0
+            # Mono mix
+            if channels > 1:
+                audio = audio.reshape(-1, channels).mean(axis=1)
+            return audio, sr
+        except Exception:
+            # Fallback: raw PCM 16-bit 16kHz mono
+            raw = open(audio_path, "rb").read()
+            samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            return samples, 16000
+
     def identify_speaker(self, audio_path: str, update_profiles: bool = True) -> dict:
         with self._lock:
             self._init_model()
         wav_path = audio_path + ".wav"
         try:
-            import torchaudio
-            import torch
-            import numpy as np
             import wave
-            # Try loading with torchaudio (handles wav, flac, mp3, etc.)
-            try:
-                waveform, sr = torchaudio.load(audio_path)
-            except Exception:
-                # Fallback: treat as raw PCM 16-bit 16kHz mono
-                raw = open(audio_path, "rb").read()
-                samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-                waveform = torch.from_numpy(samples).unsqueeze(0)
-                sr = 16000
-
-            # Convert to mono if stereo
-            if waveform.shape[0] > 1:
-                waveform = waveform.mean(dim=0, keepdim=True)
-
+            samples, sr = self._load_audio_numpy(audio_path)
             # Resample to 16kHz if needed
             if sr != 16000:
-                resampler = torchaudio.transforms.Resample(sr, 16000)
-                waveform = resampler(waveform)
-
-            # Write WAV manually (avoids torchcodec dependency)
-            pcm = (waveform.squeeze(0).numpy() * 32767).clip(-32768, 32767).astype(np.int16)
+                from scipy.signal import resample as scipy_resample
+                samples = scipy_resample(samples, int(len(samples) * 16000 / sr)).astype(np.float32)
+                sr = 16000
+            # Write WAV for pitch/mouthprint helpers
+            pcm = (samples * 32767).clip(-32768, 32767).astype(np.int16)
             with wave.open(wav_path, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
@@ -371,8 +378,8 @@ class SpeakerDiarizer:
             return {"speaker": "Speaker 1", "speaker_id": 0}
         try:
             with self._lock:
-                if self._model:
-                    return self._identify_campplus(wav_path, update_profiles=update_profiles)
+                if self._session:
+                    return self._identify_campplus(wav_path, samples, update_profiles=update_profiles)
                 else:
                     return self._identify_pitch(wav_path, update_profiles=update_profiles)
         finally:
@@ -381,13 +388,21 @@ class SpeakerDiarizer:
             except Exception:
                 pass
 
-    def _identify_campplus(self, wav_path: str, update_profiles: bool = True) -> dict:
+    def _identify_campplus(self, wav_path: str, samples: np.ndarray = None,
+                           update_profiles: bool = True) -> dict:
         try:
-            embedding = self._model.extract_embedding(wav_path)
-            if embedding is None:
-                return self._identify_pitch(wav_path, update_profiles=update_profiles)
-
-            emb_np = embedding.detach().cpu().numpy().flatten()
+            # Load samples if not provided
+            if samples is None:
+                samples = self._load_wav_samples(wav_path)
+            # Extract fbank features and run ONNX inference
+            fbank = self._compute_fbank(samples, sr=16000)
+            fbank_input = fbank[np.newaxis, :, :]  # Add batch dim: (1, T, 80)
+            outputs = self._session.run(['embs'], {'feats': fbank_input})
+            emb_np = outputs[0].flatten().astype(np.float32)
+            # L2 normalize
+            norm = np.linalg.norm(emb_np)
+            if norm >= 1e-8:
+                emb_np = emb_np / norm
 
             def _result(sid: int, is_new: bool = False) -> dict:
                 out = {"speaker": f"Speaker {sid + 1}", "speaker_id": sid, "embedding": emb_np.copy()}
