@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
-import { resetDiarize } from '../lib/api';
+import { resetDiarize, getSettings } from '../lib/api';
 import { fetchSidecar } from '../lib/sidecar';
 
 
@@ -11,6 +11,7 @@ export function RecordingPanel() {
         setRecording, setPaused, setSeconds,
         clearTranscript, setCurrentView,
     } = useAppStore();
+    const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
@@ -19,6 +20,7 @@ export function RecordingPanel() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animFrameRef = useRef<number>(0);
     const [volume, setVolume] = useState(0);
+    const [keyWarning, setKeyWarning] = useState<string | null>(null);
 
     // Timer
     useEffect(() => {
@@ -80,6 +82,23 @@ export function RecordingPanel() {
     }, []);
 
     const startRecording = useCallback(async () => {
+        // ── Check API key before recording ──
+        try {
+            const settings = await getSettings();
+            if (!settings?.nvidia_api_key) {
+                const { lang } = useAppStore.getState();
+                setKeyWarning(
+                    lang === 'vi'
+                        ? 'Vui lòng cấu hình Nvidia API Key trong Settings trước khi ghi âm.'
+                        : 'Please configure your Nvidia API Key in Settings before recording.'
+                );
+                return;
+            }
+        } catch {
+            // Backend unreachable — let it fall through, health check will show status
+        }
+        setKeyWarning(null);
+
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             streamRef.current = stream;
@@ -290,6 +309,18 @@ export function RecordingPanel() {
                         className="h-full bg-gradient-to-r from-primary to-pink-500 transition-all duration-100"
                         style={{ width: `${Math.min(volume * 500, 100)}%` }}
                     />
+                </div>
+            )}
+            {/* API Key Warning */}
+            {keyWarning && (
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-warning/10 border border-warning/30 text-sm">
+                    <span className="text-warning flex-1">{keyWarning}</span>
+                    <button
+                        onClick={() => { setSettingsOpen(true); setKeyWarning(null); }}
+                        className="px-4 py-1.5 rounded-lg bg-warning text-white text-xs font-semibold cursor-pointer hover:bg-warning/80 transition-colors whitespace-nowrap"
+                    >
+                        ⚙️ Settings
+                    </button>
                 </div>
             )}
 
