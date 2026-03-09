@@ -438,10 +438,10 @@ export function MeetingDetail() {
             const rawTitle = (meetingData?.title || `meeting-${meetingId}`).toString();
             const safeTitle = rawTitle.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() || `meeting-${meetingId}`;
             await downloadMeetingAudio(meetingId, `${safeTitle}.wav`, 'wav');
-            showToast(lang === 'vi' ? '✅ Đã tải ghi âm thành công!' : '✅ Audio downloaded!', 'success');
+            showToast(lang === 'vi' ? 'Đã tải ghi âm thành công!' : 'Audio downloaded!', 'success');
         } catch (e) {
             console.warn('[detail] Download audio failed:', e);
-            showToast(lang === 'vi' ? '❌ Tải ghi âm thất bại' : '❌ Audio download failed', 'error');
+            showToast(lang === 'vi' ? 'Tải ghi âm thất bại' : 'Audio download failed', 'error');
         } finally {
             setDownloadingAudio(false);
         }
