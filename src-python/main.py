@@ -12,11 +12,9 @@ import tempfile
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from types import ModuleType
 from uuid import uuid4
 
 import sys
-import torchaudio
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +25,6 @@ from db import Database
 from diarize import SpeakerDiarizer
 from i18n import t
 from stt import transcribe_nvidia, NvidiaStreamingSTT, HALLUCINATION_PATTERNS, get_language_code
-import torchaudio.transforms as T
 import collections
 import logging
 import threading
@@ -74,28 +71,6 @@ sys.stderr = _LogInterceptor(sys.stderr)
 # ─── Globals ───
 db = Database()
 diarizer = SpeakerDiarizer()
-
-# 1. Giả lập hàm set_audio_backend đã bị xóa
-if not hasattr(torchaudio, "set_audio_backend"):
-    torchaudio.set_audio_backend = lambda x: None
-
-# 2. Tạo một module giả để thay thế torchaudio.sox_effects
-if "torchaudio.sox_effects" not in sys.modules:
-    sox_mock = ModuleType("torchaudio.sox_effects")
-
-    # Giả lập hàm apply_effects_tensor bằng hàm Resample của Torchaudio mới
-    def mock_apply_effects(tensor, sample_rate, effects, **kwargs):
-        # CAM++ thường dùng sox để đưa về 16kHz
-        target_rate = 16000
-        if sample_rate != target_rate:
-            resampler = T.Resample(sample_rate, target_rate)
-            return resampler(tensor), target_rate
-        return tensor, sample_rate
-
-    sox_mock.apply_effects_tensor = mock_apply_effects
-    sys.modules["torchaudio.sox_effects"] = sox_mock
-    # Gắn ngược lại vào torchaudio để các thư viện khác tìm thấy
-    torchaudio.sox_effects = sox_mock
 
 
 def _voicescribe_data_dir() -> Path:
