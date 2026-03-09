@@ -1,34 +1,31 @@
 {
-  "name": "scribble",
-  "version": "1.0.0",
-  "description": "Scribble — AI Meeting Notes",
-  "main": "electron/main.js",
+  "name": "voicescribe",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "electron:dev": "electron .",
-    "electron:build": "electron-builder",
-    "electron:build:win": "electron-builder --win",
-    "electron:build:mac": "electron-builder --mac && npm rebuild better-sqlite3",
-    "postinstall": "electron-builder install-app-deps"
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.14.3",
-    "@grpc/proto-loader": "^0.8.0",
-    "better-sqlite3": "^11.7.0",
-    "cors": "^2.8.5",
-    "docx": "^9.6.0",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "ffmpeg-static": "^5.2.0",
-    "form-data": "^4.0.5",
-    "formdata-node": "^6.0.3",
-    "multer": "^1.4.5-lts.1",
-    "openai": "^4.82.0",
-    "uuid": "^11.1.0"
+    "@tanstack/react-query": "^5.90.21",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
-    "electron": "^35.0.0",
-    "electron-builder": "^26.0.0"
+    "@tailwindcss/vite": "^4.2.1",
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "tailwindcss": "^4.2.1",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4"
   }
 }

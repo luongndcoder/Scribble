@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Scribble",
+  "version": "1.0.0",
+  "identifier": "com.scribble.app",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Scribble — AI Meeting Notes",
+        "width": 960,
+        "height": 720,
+        "minWidth": 600,
+        "minHeight": 480,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:8765 http://127.0.0.1:8765 ws://localhost:8765 ws://127.0.0.1:8765; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' blob:; img-src 'self' data: blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/scribble-sidecar"
+    ],
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "10.15",
+      "frameworks": [],
+      "signingIdentity": "Scribble Dev"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "displayLanguageSelector": true,
+        "languages": [
+          "English",
+          "Vietnamese"
+        ]
+      }
+    },
+    "category": "Productivity",
+    "shortDescription": "AI Meeting Notes — Record, Transcribe, Translate",
+    "longDescription": "Scribble is an AI-powered meeting notes app. Record, transcribe in real-time, identify speakers, translate to multiple languages, and generate meeting minutes."
+  }
+}

@@ -1,0 +1,19 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+groq>=0.5.0
+openai>=1.14.0
+numpy>=1.20,<2.0
+torch>=2.4.0    # Hạ xuống để khớp với torchaudio
+torchaudio>=2.4.0   # Để có set_audio_backend
+wespeaker@git+https://github.com/wenet-e2e/wespeaker.git
+nvidia-riva-client>=2.15.0
+httpx>=0.27.0
+requests
+onnxruntime
+s3prl
+pyannote.audio>=3.1.1      # Bản 3.x ổn định hơn với torch 2.1
+hdbscan==0.8.37
+openai-whisper
+peft
+python-docx>=1.1.2
