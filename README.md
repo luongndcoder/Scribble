@@ -75,6 +75,18 @@ cd ..
 pnpm tauri dev
 ```
 
+### 🐳 Docker Compose (Web)
+
+```bash
+git clone https://github.com/luongndcoder/Scribble.git
+cd Scribble
+docker-compose up --build
+# → http://localhost:3000
+```
+
+> Dữ liệu SQLite lưu trong `./data/`. API key nhập từ giao diện Settings.
+
+
 ### 🔨 Build từ source
 
 #### macOS (Apple Silicon)
@@ -201,6 +213,18 @@ python main.py  # → http://127.0.0.1:8765
 cd ..
 pnpm tauri dev
 ```
+
+### 🐳 Docker Compose (Web)
+
+```bash
+git clone https://github.com/luongndcoder/Scribble.git
+cd Scribble
+docker-compose up --build
+# → http://localhost:3000
+```
+
+> SQLite data stored in `./data/`. API keys configured via Settings UI.
+
 
 ### 🔨 Build from Source
 

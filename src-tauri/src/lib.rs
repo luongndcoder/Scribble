@@ -476,8 +476,26 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     let state = app.state::<Mutex<SidecarState>>();
     let mut state = state.lock().map_err(|e| e.to_string())?;
 
-    if state.child.is_some() {
-        return Ok("Sidecar already running".to_string());
+    // Always kill old sidecar to ensure fresh start with latest code
+    if let Some(child) = state.child.take() {
+        let _ = child.kill();
+        println!("[sidecar] Killed previous sidecar process");
+        // Brief pause to let the port be released
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+
+    // Kill any stale process on port 8765 (handles crash leftovers)
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("sh")
+            .args(["-c", "lsof -ti:8765 | xargs kill -9 2>/dev/null"])
+            .output();
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "FOR /F \"tokens=5\" %P IN ('netstat -aon ^| findstr :8765 ^| findstr LISTENING') DO taskkill /F /PID %P 2>nul"])
+            .output();
     }
 
     let (mut rx, child) = app
@@ -501,7 +519,7 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
         }
     });
 
-    Ok("Sidecar started".to_string())
+    Ok("Sidecar started (fresh)".to_string())
 }
 
 #[tauri::command]
