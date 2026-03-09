@@ -13,7 +13,7 @@ const SIDECAR_HTTP_BASES = IS_TAURI
 
 const SIDECAR_WS_BASES = IS_TAURI
   ? ['ws://127.0.0.1:8765', 'ws://localhost:8765'] as const
-  : [`ws://${window.location.host}/ws`] as const;
+  : [`ws://${window.location.host}`] as const;
 
 export { SIDECAR_HTTP_BASES, SIDECAR_WS_BASES, IS_TAURI };
 
