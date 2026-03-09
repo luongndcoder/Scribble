@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
@@ -7,13 +7,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY src-python/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY src-python/requirements-docker.txt .
+RUN pip install --no-cache-dir --target=/install -r requirements-docker.txt
 
+# ── Runtime stage ──
+FROM python:3.10-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /root/.cache
+
+COPY --from=builder /install /usr/local/lib/python3.10/site-packages/
 COPY src-python/ .
 
 ENV VOICESCRIBE_DATA=/data
+ENV PYTHONDONTWRITEBYTECODE=1
 
 EXPOSE 8765
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8765"]
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8765"]
