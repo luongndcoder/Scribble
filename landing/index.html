@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scribble — AI Meeting Minutes | Real-time Transcription & Speaker Diarization</title>
+    <meta name="description"
+        content="Record, transcribe, identify speakers, and generate meeting minutes automatically. Open-source AI-powered meeting assistant for macOS and Windows.">
+    <meta name="keywords"
+        content="meeting minutes, transcription, speaker diarization, AI meeting assistant, real-time transcription, ONNX">
+    <meta property="og:title" content="Scribble — AI Meeting Minutes">
+    <meta property="og:description"
+        content="AI-powered meeting assistant. Record, transcribe, identify speakers, generate minutes. Free & open-source.">
+    <meta property="og:type" content="website">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
+</head>
+
+<body>
+    <!-- ─── Nav ─── -->
+    <nav class="nav" id="nav">
+        <div class="container nav-inner">
+            <a href="#" class="nav-brand">
+                <svg class="brand-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" x2="12" y1="19" y2="22" />
+                </svg>
+                <span>Scribble</span>
+            </a>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#how-it-works">How it works</a>
+                <a href="https://github.com/luongndcoder/Scribble" target="_blank" rel="noopener" class="nav-github">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                    </svg>
+                </a>
+                <a href="#download" class="btn btn-nav">Download</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ─── Hero ─── -->
+    <section class="hero">
+        <div class="container hero-inner">
+            <div class="hero-badge">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Open Source · MIT License
+            </div>
+            <h1>
+                Your meetings,<br>
+                <span class="gradient-text">perfectly captured.</span>
+            </h1>
+            <p class="hero-sub">
+                AI-powered meeting assistant that records, transcribes in real-time,
+                identifies speakers, and generates comprehensive minutes — all running locally on your machine.
+            </p>
+            <div class="hero-actions">
+                <a href="#download" class="btn btn-primary btn-lg">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download Free
+                </a>
+                <a href="https://github.com/luongndcoder/Scribble" class="btn btn-outline btn-lg" target="_blank"
+                    rel="noopener">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                    </svg>
+                    View on GitHub
+                </a>
+            </div>
+            <div class="hero-metrics">
+                <div class="metric">
+                    <span class="metric-value">~130MB</span>
+                    <span class="metric-label">Lightweight</span>
+                </div>
+                <div class="metric-dot"></div>
+                <div class="metric">
+                    <span class="metric-value">100%</span>
+                    <span class="metric-label">Private</span>
+                </div>
+                <div class="metric-dot"></div>
+                <div class="metric">
+                    <span class="metric-value">12+</span>
+                    <span class="metric-label">Languages</span>
+                </div>
+            </div>
+        </div>
+        <div class="hero-glow" aria-hidden="true"></div>
+    </section>
+
+    <!-- ─── Features ─── -->
+    <section id="features" class="features">
+        <div class="container">
+            <div class="section-head">
+                <span class="section-tag">Features</span>
+                <h2>Everything you need for<br><span class="gradient-text">perfect meetings</span></h2>
+                <p>No cloud dependency. No subscription. Just powerful AI running on your machine.</p>
+            </div>
+            <div class="features-grid">
+                <div class="f-card f-card--accent">
+                    <div class="f-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <line x1="12" x2="12" y1="19" y2="22" />
+                        </svg>
+                    </div>
+                    <h3>Real-time Transcription</h3>
+                    <p>Nvidia Riva streaming gRPC with sub-second latency. Words appear the moment they're spoken.</p>
+                </div>
+                <div class="f-card">
+                    <div class="f-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                        </svg>
+                    </div>
+                    <h3>Speaker Identification</h3>
+                    <p>ONNX Runtime + CAM++ diarization identifies who's speaking. Each voice auto-labeled in real-time.
+                    </p>
+                </div>
+                <div class="f-card">
+                    <div class="f-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="2" x2="22" y1="12" y2="12" />
+                            <path
+                                d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                        </svg>
+                    </div>
+                    <h3>Live Translation</h3>
+                    <p>Real-time cabin translation into 12+ languages. Translations stream below each transcript line.
+                    </p>
+                </div>
+                <div class="f-card">
+                    <div class="f-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" x2="8" y1="13" y2="13" />
+                            <line x1="16" x2="8" y1="17" y2="17" />
+                            <line x1="10" x2="8" y1="9" y2="9" />
+                        </svg>
+                    </div>
+                    <h3>AI Meeting Minutes</h3>
+                    <p>One-click summaries: title, key points, action items, decisions, risks. Export as Markdown or
+                        Word.</p>
+                </div>
+                <div class="f-card">
+                    <div class="f-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                            <polyline points="17 21 17 13 7 13 7 21" />
+                            <polyline points="7 3 7 8 15 8" />
+                        </svg>
+                    </div>
+                    <h3>Auto-save & Recovery</h3>
+                    <p>Transcripts save incrementally to SQLite. Even if the app crashes, your meeting data stays safe.
+                    </p>
+                </div>
+                <div class="f-card">
+                    <div class="f-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                    </div>
+                    <h3>Privacy First</h3>
+                    <p>Everything runs locally. API keys stored on your machine only. No data leaves without your
+                        consent.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── How It Works ─── -->
+    <section id="how-it-works" class="how-section">
+        <div class="container">
+            <div class="section-head">
+                <span class="section-tag">Quick Start</span>
+                <h2>Get started in<br><span class="gradient-text">3 simple steps</span></h2>
+            </div>
+            <div class="steps-row">
+                <div class="step-card">
+                    <div class="step-num">01</div>
+                    <h3>Download & Install</h3>
+                    <p>Grab the installer for macOS or Windows. One-click install, zero configuration.</p>
+                </div>
+                <div class="step-line" aria-hidden="true"></div>
+                <div class="step-card">
+                    <div class="step-num">02</div>
+                    <h3>Add Your API Key</h3>
+                    <p>Enter your Nvidia Riva key in Settings. Free tier available at build.nvidia.com.</p>
+                </div>
+                <div class="step-line" aria-hidden="true"></div>
+                <div class="step-card">
+                    <div class="step-num">03</div>
+                    <h3>Start Recording</h3>
+                    <p>Hit record — live transcription, speaker labels, and translation appear instantly.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── Download ─── -->
+    <section id="download" class="dl-section">
+        <div class="container">
+            <div class="section-head">
+                <span class="section-tag">Download</span>
+                <h2>Ready to <span class="gradient-text">transform<br>your meetings</span>?</h2>
+                <p>Free and open-source. Available for macOS and Windows.</p>
+            </div>
+            <div class="dl-grid">
+                <a href="https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_aarch64.dmg"
+                    class="dl-card" id="dl-macos">
+                    <div class="dl-top">
+                        <svg class="dl-os-icon" width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
+                        </svg>
+                        <div>
+                            <h3>macOS</h3>
+                            <span class="dl-arch">Apple Silicon (M1–M4)</span>
+                        </div>
+                    </div>
+                    <div class="dl-bottom">
+                        <span class="dl-filename">Scribble_1.1.0.dmg</span>
+                        <span class="dl-btn">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                        </span>
+                    </div>
+                </a>
+                <a href="https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_x64-setup.exe"
+                    class="dl-card" id="dl-windows">
+                    <div class="dl-top">
+                        <svg class="dl-os-icon" width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
+                        </svg>
+                        <div>
+                            <h3>Windows</h3>
+                            <span class="dl-arch">64-bit (x86_64)</span>
+                        </div>
+                    </div>
+                    <div class="dl-bottom">
+                        <span class="dl-filename">Scribble_1.1.0.exe</span>
+                        <span class="dl-btn">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                        </span>
+                    </div>
+                </a>
+            </div>
+            <p class="dl-note">
+                macOS first launch: if blocked, open Terminal and run
+                <code>xattr -cr /Applications/Scribble.app</code>
+            </p>
+        </div>
+    </section>
+
+    <!-- ─── Footer ─── -->
+    <footer class="footer">
+        <div class="container footer-inner">
+            <div class="footer-brand">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" x2="12" y1="19" y2="22" />
+                </svg>
+                <span>Scribble</span>
+                <span class="footer-sep">·</span>
+                <span class="footer-tagline">Open-source AI meeting assistant</span>
+            </div>
+            <div class="footer-links">
+                <a href="https://github.com/luongndcoder/Scribble" target="_blank" rel="noopener">GitHub</a>
+                <a href="https://github.com/luongndcoder/Scribble/releases" target="_blank" rel="noopener">Releases</a>
+                <a href="https://github.com/luongndcoder/Scribble/issues" target="_blank" rel="noopener">Issues</a>
+            </div>
+        </div>
+        <div class="container footer-copy">MIT License</div>
+    </footer>
+</body>
+
+</html>

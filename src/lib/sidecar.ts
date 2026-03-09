@@ -1,7 +1,21 @@
-const SIDECAR_HTTP_BASES = ['http://127.0.0.1:8765', 'http://localhost:8765'] as const;
-const SIDECAR_WS_BASES = ['ws://127.0.0.1:8765', 'ws://localhost:8765'] as const;
+/**
+ * Sidecar connectivity — adapts to Tauri (desktop) or Web (docker/browser) mode.
+ *
+ * Desktop (Tauri): connects to local sidecar at 127.0.0.1:8765
+ * Web (Docker):    uses relative URLs proxied by Nginx (/api/*)
+ */
 
-export { SIDECAR_HTTP_BASES, SIDECAR_WS_BASES };
+const IS_TAURI = typeof window !== 'undefined' && '__TAURI__' in window;
+
+const SIDECAR_HTTP_BASES = IS_TAURI
+  ? ['http://127.0.0.1:8765', 'http://localhost:8765'] as const
+  : ['/api'] as const;
+
+const SIDECAR_WS_BASES = IS_TAURI
+  ? ['ws://127.0.0.1:8765', 'ws://localhost:8765'] as const
+  : [`ws://${window.location.host}/ws`] as const;
+
+export { SIDECAR_HTTP_BASES, SIDECAR_WS_BASES, IS_TAURI };
 
 function normalizePath(path: string): string {
   if (!path) return '/';

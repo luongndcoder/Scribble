@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.github
+src-tauri/target
+src-python/dist
+src-python/build
+src-python/.venv
+data
+*.dmg
+*.exe
+landing

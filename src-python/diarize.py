@@ -135,8 +135,12 @@ class SpeakerDiarizer:
             model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
             # Support PyInstaller frozen path
             if getattr(os.sys, 'frozen', False):
-                base = os.path.dirname(os.sys.executable)
-                model_dir = os.path.join(base, "models")
+                # _MEIPASS is the correct path for bundled data in onefile mode
+                meipass = getattr(os.sys, '_MEIPASS', None)
+                if meipass:
+                    model_dir = os.path.join(meipass, "models")
+                if not meipass or not os.path.isdir(model_dir):
+                    model_dir = os.path.join(os.path.dirname(os.sys.executable), "models")
                 if not os.path.isdir(model_dir):
                     model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
             onnx_path = os.path.join(model_dir, "voxceleb_CAM++.onnx")
