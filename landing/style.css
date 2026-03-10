@@ -287,6 +287,65 @@ a {
     z-index: 1;
 }
 
+/* ─── Demo Section ─── */
+.demo-section {
+    padding: 0 0 var(--space-4xl);
+    position: relative;
+    z-index: 2;
+    margin-top: -40px;
+}
+
+.demo-frame {
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    border: 1px solid var(--border-hover);
+    background: var(--bg-card);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+    max-width: 860px;
+    margin: 0 auto;
+}
+
+.demo-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: rgba(0, 0, 0, 0.35);
+    border-bottom: 1px solid var(--border);
+}
+
+.demo-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #374151;
+}
+
+.demo-dot:nth-child(1) {
+    background: #ef4444;
+}
+
+.demo-dot:nth-child(2) {
+    background: #f59e0b;
+}
+
+.demo-dot:nth-child(3) {
+    background: #22c55e;
+}
+
+.demo-title {
+    margin-left: 8px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--font-body);
+}
+
+.demo-gif {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
 /* ─── Section Headers ─── */
 .section-head {
     text-align: center;
