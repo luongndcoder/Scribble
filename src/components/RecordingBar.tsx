@@ -6,6 +6,7 @@ import { fetchSidecar, SIDECAR_WS_BASES, waitForSidecarReady } from '../lib/side
 import { t } from '../i18n';
 
 const isTauri = !!(window as any).__TAURI_INTERNALS__;
+const isMac = navigator.platform?.toLowerCase().includes('mac') ?? false;
 
 async function safeInvoke(cmd: string, args?: any) {
     if (!isTauri) {
@@ -379,8 +380,8 @@ export function RecordingBar() {
             let stream: MediaStream;
 
             if (audioSource === 'system') {
-                if (isTauri) {
-                    // Tauri native system audio
+                if (isTauri && isMac) {
+                    // macOS: Tauri native system audio (CoreAudio)
                     const activeDraftId = useAppStore.getState().draftId;
                     await safeInvoke(
                         'start_system_audio',
@@ -492,8 +493,8 @@ export function RecordingBar() {
                 // Merge mic + system audio
                 const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-                if (isTauri) {
-                    // Tauri: mic from browser + system from native
+                if (isTauri && isMac) {
+                    // macOS: mic from browser + system from native
                     stream = micStream;
                     try {
                         const activeDraftId = useAppStore.getState().draftId;
