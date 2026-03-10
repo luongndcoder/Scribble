@@ -1,0 +1,91 @@
+name: Build Linux
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            ffmpeg
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install Python dependencies
+        working-directory: src-python
+        run: uv pip install --system -r requirements.txt
+
+      - name: Build sidecar
+        working-directory: src-python
+        run: python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+
+      - name: Copy sidecar binary
+        run: |
+          mkdir -p src-tauri/binaries
+          cp src-python/dist/scribble-sidecar src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build Tauri
+        run: npx tauri build
+
+      - name: Upload to Release v1.1.0
+        run: |
+          # Upload AppImage
+          APPIMAGE=$(find src-tauri/target -name "*.AppImage" | head -1)
+          if [ -n "$APPIMAGE" ]; then
+            cp "$APPIMAGE" "Scribble_1.1.0_amd64.AppImage"
+            gh release upload v1.1.0 "Scribble_1.1.0_amd64.AppImage" --clobber
+            echo "✅ Uploaded: Scribble_1.1.0_amd64.AppImage"
+          fi
+
+          # Upload deb
+          DEB=$(find src-tauri/target -name "*.deb" | head -1)
+          if [ -n "$DEB" ]; then
+            cp "$DEB" "scribble_1.1.0_amd64.deb"
+            gh release upload v1.1.0 "scribble_1.1.0_amd64.deb" --clobber
+            echo "✅ Uploaded: scribble_1.1.0_amd64.deb"
+          fi
+
+          if [ -z "$APPIMAGE" ] && [ -z "$DEB" ]; then
+            echo "❌ No Linux bundle found"
+            exit 1
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
