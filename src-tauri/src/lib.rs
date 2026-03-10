@@ -323,40 +323,287 @@ mod system_audio {
     }
 }
 
+// ─── System Audio Capture (Windows WASAPI Loopback) ─────────────────────────
+//
+// Captures system audio output using WASAPI loopback mode.
+// Same API as macOS CoreAudio: CaptureState with start/drain/stop.
+
+#[cfg(target_os = "windows")]
+mod system_audio_windows {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use ringbuf::{
+        traits::{Consumer, Producer, Split},
+        HeapCons, HeapProd, HeapRb,
+    };
+
+    pub struct CaptureState {
+        pub running: AtomicBool,
+        consumer: Mutex<Option<HeapCons<f32>>>,
+        stop_flag: Arc<AtomicBool>,
+        capture_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+        sample_rate: Mutex<u32>,
+    }
+
+    impl CaptureState {
+        pub fn new() -> Self {
+            Self {
+                running: AtomicBool::new(false),
+                consumer: Mutex::new(None),
+                stop_flag: Arc::new(AtomicBool::new(false)),
+                capture_thread: Mutex::new(None),
+                sample_rate: Mutex::new(0),
+            }
+        }
+    }
+
+    pub fn start_capture(state: &CaptureState) -> Result<u32, String> {
+        if state.running.load(Ordering::Relaxed) {
+            return Err("Already capturing".to_string());
+        }
+
+        let rb = HeapRb::<f32>::new(1024 * 128);
+        let (producer, consumer) = rb.split();
+        *state.consumer.lock().unwrap() = Some(consumer);
+
+        let stop_flag = state.stop_flag.clone();
+        stop_flag.store(false, Ordering::Release);
+
+        // Start WASAPI capture in a dedicated thread (COM must init per-thread)
+        let (tx, rx) = std::sync::mpsc::channel::<Result<u32, String>>();
+
+        let handle = std::thread::spawn(move || {
+            match wasapi_capture_loop(producer, stop_flag, tx) {
+                Ok(()) => println!("[system-audio-win] Capture thread exited cleanly"),
+                Err(e) => eprintln!("[system-audio-win] Capture thread error: {}", e),
+            }
+        });
+
+        // Wait for sample rate from capture thread
+        let sample_rate = rx.recv()
+            .map_err(|e| format!("Capture thread failed to start: {}", e))?
+            .map_err(|e| format!("WASAPI init failed: {}", e))?;
+
+        *state.sample_rate.lock().unwrap() = sample_rate;
+        *state.capture_thread.lock().unwrap() = Some(handle);
+        state.running.store(true, Ordering::Relaxed);
+
+        println!("[system-audio-win] Capture started at {} Hz", sample_rate);
+        Ok(sample_rate)
+    }
+
+    pub fn drain_buffer(state: &CaptureState) -> Vec<f32> {
+        let mut out = Vec::new();
+        if let Ok(mut guard) = state.consumer.lock() {
+            if let Some(consumer) = guard.as_mut() {
+                while let Some(s) = consumer.try_pop() {
+                    out.push(s);
+                }
+            }
+        }
+        out
+    }
+
+    pub fn stop_capture(state: &CaptureState) {
+        state.stop_flag.store(true, Ordering::Release);
+        // Wait for capture thread to finish
+        if let Some(handle) = state.capture_thread.lock().unwrap().take() {
+            let _ = handle.join();
+        }
+        *state.consumer.lock().unwrap() = None;
+        state.running.store(false, Ordering::Relaxed);
+        println!("[system-audio-win] Capture stopped");
+    }
+
+    fn wasapi_capture_loop(
+        mut producer: HeapProd<f32>,
+        stop_flag: Arc<AtomicBool>,
+        ready_tx: std::sync::mpsc::Sender<Result<u32, String>>,
+    ) -> Result<(), String> {
+        use windows::Win32::Media::Audio::*;
+        use windows::Win32::System::Com::*;
+        use windows::core::Interface;
+
+        unsafe {
+            // Initialize COM for this thread
+            CoInitializeEx(None, COINIT_MULTITHREADED)
+                .map_err(|e| format!("CoInitializeEx failed: {}", e))?;
+
+            // Get default audio output device
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(
+                &MMDeviceEnumerator,
+                None,
+                CLSCTX_ALL,
+            ).map_err(|e| format!("Failed to create device enumerator: {}", e))?;
+
+            let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)
+                .map_err(|e| format!("Failed to get default output device: {}", e))?;
+
+            // Activate audio client
+            let audio_client: IAudioClient = device.Activate(CLSCTX_ALL, None)
+                .map_err(|e| format!("Failed to activate audio client: {}", e))?;
+
+            // Get mix format
+            let mix_format_ptr = audio_client.GetMixFormat()
+                .map_err(|e| format!("Failed to get mix format: {}", e))?;
+            let mix_format = &*mix_format_ptr;
+            let sample_rate = mix_format.nSamplesPerSec;
+            let channels = mix_format.nChannels as usize;
+            let bits_per_sample = mix_format.wBitsPerSample;
+            let block_align = mix_format.nBlockAlign as usize;
+
+            println!("[system-audio-win] Mix format: {} Hz, {} ch, {} bits",
+                sample_rate, channels, bits_per_sample);
+
+            // Initialize in LOOPBACK mode (capture what speakers play)
+            let buffer_duration = 200_000_0; // 200ms in 100-nanosecond units
+            audio_client.Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                AUDCLNT_STREAMFLAGS_LOOPBACK,
+                buffer_duration,
+                0,
+                mix_format_ptr,
+                None,
+            ).map_err(|e| format!("Failed to initialize audio client: {}", e))?;
+
+            // Get capture client
+            let capture_client: IAudioCaptureClient = audio_client.GetService()
+                .map_err(|e| format!("Failed to get capture client: {}", e))?;
+
+            // Start capturing
+            audio_client.Start()
+                .map_err(|e| format!("Failed to start audio client: {}", e))?;
+
+            // Signal ready with sample rate
+            let _ = ready_tx.send(Ok(sample_rate));
+
+            // Capture loop
+            while !stop_flag.load(Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+
+                let mut packet_length = match capture_client.GetNextPacketSize() {
+                    Ok(len) => len,
+                    Err(_) => continue,
+                };
+
+                while packet_length > 0 {
+                    let mut buffer_ptr = std::ptr::null_mut();
+                    let mut num_frames = 0u32;
+                    let mut flags = 0u32;
+
+                    if capture_client.GetBuffer(
+                        &mut buffer_ptr,
+                        &mut num_frames,
+                        &mut flags,
+                        None,
+                        None,
+                    ).is_err() {
+                        break;
+                    }
+
+                    if num_frames > 0 && !buffer_ptr.is_null() {
+                        let is_silent = (flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)) != 0;
+
+                        if !is_silent {
+                            // Convert to mono f32
+                            let total_samples = num_frames as usize * channels;
+                            let samples: &[u8] = std::slice::from_raw_parts(
+                                buffer_ptr, num_frames as usize * block_align
+                            );
+
+                            // Handle float32 format (most common for WASAPI shared mode)
+                            if bits_per_sample == 32 {
+                                let float_samples: &[f32] = std::slice::from_raw_parts(
+                                    buffer_ptr as *const f32, total_samples
+                                );
+                                // Downmix to mono
+                                for frame in float_samples.chunks(channels) {
+                                    let mono: f32 = frame.iter().sum::<f32>() / channels as f32;
+                                    let _ = producer.try_push(mono);
+                                }
+                            } else if bits_per_sample == 16 {
+                                let i16_samples: &[i16] = std::slice::from_raw_parts(
+                                    buffer_ptr as *const i16, total_samples
+                                );
+                                for frame in i16_samples.chunks(channels) {
+                                    let mono: f32 = frame.iter()
+                                        .map(|&s| s as f32 / 32768.0)
+                                        .sum::<f32>() / channels as f32;
+                                    let _ = producer.try_push(mono);
+                                }
+                            }
+                            let _ = samples; // suppress unused warning
+                        } else {
+                            // Push silence frames to keep timing
+                            for _ in 0..num_frames {
+                                let _ = producer.try_push(0.0f32);
+                            }
+                        }
+                    }
+
+                    let _ = capture_client.ReleaseBuffer(num_frames);
+                    packet_length = capture_client.GetNextPacketSize().unwrap_or(0);
+                }
+            }
+
+            // Cleanup
+            let _ = audio_client.Stop();
+            CoUninitialize();
+            Ok(())
+        }
+    }
+}
+
 // ─── Tauri Commands ─────────────────────────────────────────────────────────
 
 #[cfg(target_os = "macos")]
-use system_audio::CaptureState;
+struct SystemAudioState(system_audio::CaptureState);
 
-#[cfg(target_os = "macos")]
-struct SystemAudioState(CaptureState);
+#[cfg(target_os = "windows")]
+struct SystemAudioState(system_audio_windows::CaptureState);
 
 #[tauri::command]
-async fn start_system_audio(app: tauri::AppHandle, draft_id: Option<i64>) -> Result<String, String> {
+async fn start_system_audio(app: tauri::AppHandle, _draft_id: Option<i64>) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         let state = app.state::<SystemAudioState>();
         let sample_rate = system_audio::start_capture(&state.0)?;
-
         let app_handle = app.clone();
-        let meeting_id = draft_id;
-
+        let meeting_id = _draft_id;
         tauri::async_runtime::spawn(async move {
-            // Always use WebSocket streaming (Nvidia Riva)
-            system_audio_ws_loop(&app_handle, sample_rate, meeting_id).await;
+            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, |st| {
+                system_audio::drain_buffer(&st.0)
+            }).await;
         });
-
         Ok(format!("System audio started at {} Hz", sample_rate))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let state = app.state::<SystemAudioState>();
+        let sample_rate = system_audio_windows::start_capture(&state.0)?;
+        let app_handle = app.clone();
+        let meeting_id = _draft_id;
+        tauri::async_runtime::spawn(async move {
+            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, |st| {
+                system_audio_windows::drain_buffer(&st.0)
+            }).await;
+        });
+        Ok(format!("System audio started at {} Hz", sample_rate))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app;
-        Err("System audio only supported on macOS".to_string())
+        Err("System audio not supported on this platform".to_string())
     }
 }
 
-#[cfg(target_os = "macos")]
-async fn system_audio_ws_loop(app_handle: &tauri::AppHandle, capture_rate: u32, meeting_id: Option<i64>) {
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+async fn system_audio_ws_loop<F>(
+    app_handle: &tauri::AppHandle,
+    capture_rate: u32,
+    meeting_id: Option<i64>,
+    drain_fn: F,
+) where F: Fn(&SystemAudioState) -> Vec<f32> {
     use tokio_tungstenite::{connect_async, tungstenite::Message};
     use futures_util::{SinkExt, StreamExt};
 
@@ -366,11 +613,11 @@ async fn system_audio_ws_loop(app_handle: &tauri::AppHandle, capture_rate: u32, 
     }
     let ws_stream = match connect_async(&url).await {
         Ok((stream, _)) => {
-            println!("[system-audio] ✅ WebSocket connected to {}", url);
+            println!("[system-audio] WebSocket connected to {}", url);
             stream
         }
         Err(e) => {
-            eprintln!("[system-audio] ❌ WebSocket connection failed: {}", e);
+            eprintln!("[system-audio] WebSocket connection failed: {}", e);
             return;
         }
     };
@@ -378,48 +625,38 @@ async fn system_audio_ws_loop(app_handle: &tauri::AppHandle, capture_rate: u32, 
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let app_for_rx = app_handle.clone();
 
-    // Reader task: receive interim/final JSON from sidecar
     let reader = tauri::async_runtime::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
                     let _ = app_for_rx.emit("system-audio-transcript", &text);
                 }
-                Ok(Message::Close(_)) => {
-                    println!("[system-audio] WebSocket closed by server");
-                    break;
-                }
-                Err(e) => {
-                    eprintln!("[system-audio] WebSocket read error: {}", e);
-                    break;
-                }
+                Ok(Message::Close(_)) => { println!("[system-audio] WebSocket closed"); break; }
+                Err(e) => { eprintln!("[system-audio] WebSocket error: {}", e); break; }
                 _ => {}
             }
         }
     });
 
-    // Writer loop: capture audio → downsample to 16kHz PCM16 → send
     let ratio = capture_rate as f64 / 16000.0;
-    let drain_interval_ms: u64 = 100; // Send small packets frequently for low latency
 
     loop {
-        tokio::time::sleep(std::time::Duration::from_millis(drain_interval_ms)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let state_ref = app_handle.state::<SystemAudioState>();
         if !state_ref.0.running.load(std::sync::atomic::Ordering::Relaxed) {
             break;
         }
 
-        let chunk = system_audio::drain_buffer(&state_ref.0);
+        let chunk = drain_fn(&state_ref);
         if chunk.is_empty() { continue; }
 
         // High-quality downsample to 16kHz using Hanning-windowed sinc filter
-        // Preserves voice formants and pitch characteristics for speaker diarization
         let output_len = (chunk.len() as f64 / ratio).floor() as usize;
         if output_len == 0 { continue; }
 
-        let filter_half = (ratio.ceil() as usize) * 2 + 1; // ~7 taps per side for 48→16kHz
-        let cutoff = 1.0 / ratio; // Normalized cutoff frequency
+        let filter_half = (ratio.ceil() as usize) * 2 + 1;
+        let cutoff = 1.0 / ratio;
 
         let mut pcm16 = Vec::with_capacity(output_len * 2);
         for i in 0..output_len {
@@ -431,16 +668,11 @@ async fn system_audio_ws_loop(app_handle: &tauri::AppHandle, capture_rate: u32, 
             for k in -(filter_half as i64)..=(filter_half as i64) {
                 let idx = center_int + k;
                 if idx < 0 || idx >= chunk.len() as i64 { continue; }
-
                 let x = idx as f64 - center;
-                // Sinc function
-                let sinc = if x.abs() < 1e-10 {
-                    1.0
-                } else {
+                let sinc = if x.abs() < 1e-10 { 1.0 } else {
                     let px = std::f64::consts::PI * x * cutoff;
                     (px).sin() / px
                 };
-                // Hanning window
                 let t = (k as f64 + filter_half as f64) / (2.0 * filter_half as f64);
                 let window = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * t).cos());
                 let w = sinc * window;
@@ -460,10 +692,9 @@ async fn system_audio_ws_loop(app_handle: &tauri::AppHandle, capture_rate: u32, 
         }
     }
 
-    // Cleanup
     let _ = ws_tx.close().await;
     reader.abort();
-    println!("[system-audio] WebSocket streaming stopped");
+    println!("[system-audio] Streaming stopped");
 }
 
 
@@ -476,10 +707,16 @@ async fn stop_system_audio(app: tauri::AppHandle) -> Result<String, String> {
         system_audio::stop_capture(&state.0);
         Ok("System audio stopped".to_string())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let state = app.state::<SystemAudioState>();
+        system_audio_windows::stop_capture(&state.0);
+        Ok("System audio stopped".to_string())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app;
-        Ok("Not on macOS".to_string())
+        Ok("System audio not supported".to_string())
     }
 }
 
@@ -682,7 +919,11 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
-                app.manage(SystemAudioState(CaptureState::new()));
+                app.manage(SystemAudioState(system_audio::CaptureState::new()));
+            }
+            #[cfg(target_os = "windows")]
+            {
+                app.manage(SystemAudioState(system_audio_windows::CaptureState::new()));
             }
 
             // Kill ALL stale sidecar processes SYNCHRONOUSLY before frontend loads

@@ -25,11 +25,19 @@ tokio = { version = "1", features = ["rt", "time", "macros"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
 dirs = "5"
+ringbuf = "0.4"
 
 # macOS: CoreAudio process tap via cidre (same as Meetily)
 [target.'cfg(target_os = "macos")'.dependencies]
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
-ringbuf = "0.4"
+
+# Windows: WASAPI loopback for system audio capture
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+] }
 
 # Linux: WebKitGTK for auto-granting microphone permission
 [target.'cfg(target_os = "linux")'.dependencies]
