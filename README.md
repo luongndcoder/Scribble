@@ -27,6 +27,8 @@
 |---------------|-------------------|---------------|------|
 | 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.1.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_aarch64.dmg) |
 | 🪟 **Windows** | 64-bit | `Scribble_1.1.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_x64-setup.exe) |
+| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.1.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_amd64.AppImage) |
+| 🐧 **Linux** | 64-bit (deb) | `scribble_1.1.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.1.0_amd64.deb) |
 
 > **⚠️ Lưu ý macOS:** Lần đầu mở app nếu gặp cảnh báo **"Scribble Not Opened"**, mở Terminal và chạy:
 > ```bash
@@ -127,7 +129,27 @@ npx tauri build -b nsis --target x86_64-pc-windows-msvc
 # → src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
 ```
 
-> **💡 CI/CD:** Windows build tự động qua GitHub Actions (`.github/workflows/build.yml`), trigger bằng `workflow_dispatch`.
+#### Linux (Ubuntu/Debian)
+
+```bash
+# 1. Build sidecar
+cd src-python
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+
+# 2. Copy sidecar vào Tauri
+cp dist/scribble-sidecar ../src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu
+
+# 3. Build AppImage + deb
+cd ..
+pnpm install
+npx tauri build
+# → src-tauri/target/release/bundle/appimage/*.AppImage
+# → src-tauri/target/release/bundle/deb/*.deb
+```
+
+> **💡 CI/CD:** Windows và Linux build tự động qua GitHub Actions, trigger bằng `workflow_dispatch`.
 
 ## 🔧 STT Backends
 
@@ -166,6 +188,8 @@ Hỗ trợ: OpenAI, Azure, Groq, Together, Ollama, ...
 |----|-------------|-----------|------|
 | 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.1.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_aarch64.dmg) |
 | 🪟 **Windows** | 64-bit | `Scribble_1.1.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_x64-setup.exe) |
+| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.1.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_amd64.AppImage) |
+| 🐧 **Linux** | 64-bit (deb) | `scribble_1.1.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.1.0_amd64.deb) |
 
 > **⚠️ macOS note:** If you see **"Scribble Not Opened"** on first launch, open Terminal and run:
 > ```bash
@@ -266,7 +290,27 @@ npx tauri build -b nsis --target x86_64-pc-windows-msvc
 # → src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
 ```
 
-> **💡 CI/CD:** Windows builds run automatically via GitHub Actions (`.github/workflows/build.yml`), triggered by `workflow_dispatch`.
+#### Linux (Ubuntu/Debian)
+
+```bash
+# 1. Build sidecar
+cd src-python
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+
+# 2. Copy sidecar to Tauri
+cp dist/scribble-sidecar ../src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu
+
+# 3. Build AppImage + deb
+cd ..
+pnpm install
+npx tauri build
+# → src-tauri/target/release/bundle/appimage/*.AppImage
+# → src-tauri/target/release/bundle/deb/*.deb
+```
+
+> **💡 CI/CD:** Windows and Linux builds run automatically via GitHub Actions, triggered by `workflow_dispatch`.
 
 ## 🔧 STT Backends
 
@@ -316,7 +360,7 @@ Scribble/
 ├── src-tauri/             # Tauri Rust shell
 │   ├── tauri.conf.json    # App config, icons, bundle settings
 │   └── binaries/          # Platform sidecar binaries
-├── .github/workflows/     # CI/CD (Windows build)
+├── .github/workflows/     # CI/CD (Windows + Linux builds)
 └── package.json
 ```
 
