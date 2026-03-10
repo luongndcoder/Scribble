@@ -513,32 +513,35 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
             .output();
     }
 
-    // --- Attempt 1: Tauri sidecar API ---
-    match app.shell().sidecar("scribble-sidecar") {
-        Ok(cmd) => {
-            match cmd.spawn() {
-                Ok((mut rx, child)) => {
-                    state.child = Some(SidecarChild::Tauri(child));
-                    tauri::async_runtime::spawn(async move {
-                        use tauri_plugin_shell::process::CommandEvent;
-                        while let Some(event) = rx.recv().await {
-                            match event {
-                                CommandEvent::Stdout(line) => println!("[sidecar] {}", String::from_utf8_lossy(&line)),
-                                CommandEvent::Stderr(line) => eprintln!("[sidecar] {}", String::from_utf8_lossy(&line)),
-                                CommandEvent::Terminated(p) => { println!("[sidecar] terminated: {:?}", p); break; }
-                                _ => {}
+    // --- Attempt 1: Tauri sidecar API (skip on Windows — silently fails with NSIS installs) ---
+    #[cfg(not(windows))]
+    {
+        match app.shell().sidecar("scribble-sidecar") {
+            Ok(cmd) => {
+                match cmd.spawn() {
+                    Ok((mut rx, child)) => {
+                        state.child = Some(SidecarChild::Tauri(child));
+                        tauri::async_runtime::spawn(async move {
+                            use tauri_plugin_shell::process::CommandEvent;
+                            while let Some(event) = rx.recv().await {
+                                match event {
+                                    CommandEvent::Stdout(line) => println!("[sidecar] {}", String::from_utf8_lossy(&line)),
+                                    CommandEvent::Stderr(line) => eprintln!("[sidecar] {}", String::from_utf8_lossy(&line)),
+                                    CommandEvent::Terminated(p) => { println!("[sidecar] terminated: {:?}", p); break; }
+                                    _ => {}
+                                }
                             }
-                        }
-                    });
-                    return Ok("Sidecar started (tauri API)".to_string());
-                }
-                Err(e) => {
-                    eprintln!("[sidecar] Tauri spawn failed: {}, trying direct spawn...", e);
+                        });
+                        return Ok("Sidecar started (tauri API)".to_string());
+                    }
+                    Err(e) => {
+                        eprintln!("[sidecar] Tauri spawn failed: {}, trying direct spawn...", e);
+                    }
                 }
             }
-        }
-        Err(e) => {
-            eprintln!("[sidecar] Tauri sidecar command failed: {}, trying direct spawn...", e);
+            Err(e) => {
+                eprintln!("[sidecar] Tauri sidecar command failed: {}, trying direct spawn...", e);
+            }
         }
     }
 
