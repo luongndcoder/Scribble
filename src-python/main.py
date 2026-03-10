@@ -48,7 +48,14 @@ class _LogInterceptor:
         self._original = original
 
     def write(self, msg):
-        self._original.write(msg)
+        try:
+            self._original.write(msg)
+        except (UnicodeEncodeError, OSError):
+            # Windows cp1252 can't handle emoji/unicode — replace and retry
+            try:
+                self._original.write(msg.encode('ascii', 'replace').decode('ascii'))
+            except Exception:
+                pass
         if msg and msg.strip():
             ts = time.strftime("%H:%M:%S")
             line = f"[{ts}] {msg.rstrip()}"
@@ -61,7 +68,10 @@ class _LogInterceptor:
                         pass
 
     def flush(self):
-        self._original.flush()
+        try:
+            self._original.flush()
+        except Exception:
+            pass
 
     def fileno(self):
         return self._original.fileno()
@@ -71,13 +81,14 @@ class _LogInterceptor:
 
 
 # Windows headless (CREATE_NO_WINDOW): stdout/stderr are None → redirect to log file
-if sys.stdout is None or sys.stderr is None:
+# Also handle Windows cp1252 encoding — always use UTF-8 log file on Windows
+if sys.stdout is None or sys.stderr is None or (sys.platform == 'win32' and getattr(sys.stdout, 'encoding', 'utf-8') != 'utf-8'):
     _data = Path(os.environ.get("VOICESCRIBE_DATA", Path.home() / ".voicescribe"))
     _data.mkdir(parents=True, exist_ok=True)
     _fallback_log = open(_data / "sidecar-output.log", "a", encoding="utf-8", buffering=1)
-    if sys.stdout is None:
+    if sys.stdout is None or (sys.platform == 'win32'):
         sys.stdout = _fallback_log
-    if sys.stderr is None:
+    if sys.stderr is None or (sys.platform == 'win32'):
         sys.stderr = _fallback_log
 
 sys.stdout = _LogInterceptor(sys.stdout)
