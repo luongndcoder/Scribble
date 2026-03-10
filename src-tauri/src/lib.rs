@@ -506,8 +506,10 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     }
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/IM", "scribble-sidecar.exe"])
+            .creation_flags(0x08000000)
             .output();
     }
 
@@ -554,23 +556,57 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
 
     let sidecar_path = exe_dir.join(sidecar_name);
 
+    // Write diagnostic log to ~/.voicescribe/ (visible on all platforms)
+    let log_dir = dirs::home_dir().unwrap_or_default().join(".voicescribe");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_path = log_dir.join("sidecar-launch.log");
+    let log_msg = format!(
+        "[{:?}] exe_dir={:?}, sidecar_path={:?}, exists={}, tauri_api_failed=true\n",
+        std::time::SystemTime::now(),
+        exe_dir, sidecar_path, sidecar_path.exists()
+    );
+    let _ = std::fs::write(&log_path, &log_msg);
+
     if !sidecar_path.exists() {
-        return Err(format!(
+        let err = format!(
             "Sidecar binary not found at {:?}. Checked: {:?}",
             sidecar_path, exe_dir
-        ));
+        );
+        let _ = std::fs::write(&log_path, format!("{}{}\n", log_msg, err));
+        return Err(err);
     }
 
-    println!("[sidecar] Direct spawning: {:?}", sidecar_path);
+    // Redirect sidecar output to log file for diagnostics
+    let sidecar_log = std::fs::File::create(log_dir.join("sidecar-output.log"))
+        .map_err(|e| format!("Cannot create sidecar log: {}", e))?;
+    let sidecar_err = sidecar_log.try_clone()
+        .map_err(|e| format!("Cannot clone log handle: {}", e))?;
 
-    let child = std::process::Command::new(&sidecar_path)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("Direct spawn failed: {} (path: {:?})", e, sidecar_path))?;
+    let mut cmd = std::process::Command::new(&sidecar_path);
+    cmd.stdout(sidecar_log)
+       .stderr(sidecar_err);
 
-    state.child = Some(SidecarChild::Direct(child));
-    Ok("Sidecar started (direct spawn)".to_string())
+    // Windows: CREATE_NO_WINDOW flag prevents console flash and some security blocks
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    match cmd.spawn() {
+        Ok(child) => {
+            let pid = child.id();
+            let success_msg = format!("{}Sidecar spawned OK, pid={}\n", log_msg, pid);
+            let _ = std::fs::write(&log_path, &success_msg);
+            state.child = Some(SidecarChild::Direct(child));
+            Ok(format!("Sidecar started (direct spawn, pid={})", pid))
+        }
+        Err(e) => {
+            let err_msg = format!("{}Direct spawn FAILED: {}\n", log_msg, e);
+            let _ = std::fs::write(&log_path, &err_msg);
+            Err(format!("Direct spawn failed: {} (path: {:?})", e, sidecar_path))
+        }
+    }
 }
 
 #[tauri::command]
@@ -656,8 +692,10 @@ pub fn run() {
             }
             #[cfg(windows)]
             {
+                use std::os::windows::process::CommandExt;
                 let _ = std::process::Command::new("taskkill")
                     .args(["/F", "/IM", "scribble-sidecar.exe"])
+                    .creation_flags(0x08000000)
                     .output();
             }
             // Brief pause for port release
@@ -728,8 +766,10 @@ pub fn run() {
             }
             #[cfg(windows)]
             {
+                use std::os::windows::process::CommandExt;
                 let _ = std::process::Command::new("taskkill")
                     .args(["/F", "/IM", "scribble-sidecar.exe"])
+                    .creation_flags(0x08000000)
                     .output();
             }
             println!("[exit] Sidecar cleaned up");
