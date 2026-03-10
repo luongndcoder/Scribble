@@ -70,6 +70,16 @@ class _LogInterceptor:
         return False
 
 
+# Windows headless (CREATE_NO_WINDOW): stdout/stderr are None → redirect to log file
+if sys.stdout is None or sys.stderr is None:
+    _data = Path(os.environ.get("VOICESCRIBE_DATA", Path.home() / ".voicescribe"))
+    _data.mkdir(parents=True, exist_ok=True)
+    _fallback_log = open(_data / "sidecar-output.log", "a", encoding="utf-8", buffering=1)
+    if sys.stdout is None:
+        sys.stdout = _fallback_log
+    if sys.stderr is None:
+        sys.stderr = _fallback_log
+
 sys.stdout = _LogInterceptor(sys.stdout)
 sys.stderr = _LogInterceptor(sys.stderr)
 
