@@ -97,7 +97,24 @@ def _safe_unlink(path: str):
         pass
 
 
+def _find_ffmpeg() -> str:
+    """Find ffmpeg binary, searching common locations on macOS/Linux."""
+    import shutil
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    for candidate in [
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+    ]:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    raise FileNotFoundError("ffmpeg not found. Install via: brew install ffmpeg")
+
+
 def _transcode_audio_for_export(source: Path, fmt: str) -> Path:
+    ffmpeg = _find_ffmpeg()
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{fmt}")
     tmp_path = Path(tmp.name)
     tmp.close()
@@ -109,9 +126,9 @@ def _transcode_audio_for_export(source: Path, fmt: str) -> Path:
         input_args = ["-i", str(source)]
 
     if fmt == "wav":
-        cmd = ["ffmpeg", "-y", *input_args, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", str(tmp_path)]
+        cmd = [ffmpeg, "-y", *input_args, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", str(tmp_path)]
     else:  # mp4
-        cmd = ["ffmpeg", "-y", *input_args, "-vn", "-acodec", "aac", "-b:a", "192k", str(tmp_path)]
+        cmd = [ffmpeg, "-y", *input_args, "-vn", "-acodec", "aac", "-b:a", "192k", str(tmp_path)]
 
     result = subprocess.run(cmd, capture_output=True, timeout=120)
     if result.returncode != 0:

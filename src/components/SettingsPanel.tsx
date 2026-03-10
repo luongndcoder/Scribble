@@ -29,6 +29,12 @@ export function SettingsPanel() {
 
     const handleSave = async () => {
         setSaving(true);
+        try { await saveSettings(buildSettingsBody()); } catch { }
+        setSaving(false);
+        setSettingsOpen(false);
+    };
+
+    const buildSettingsBody = () => {
         const body: any = {};
         if (nvidiaKey && !nvidiaKey.includes('••')) body.nvidia_api_key = nvidiaKey;
         body.stt_language = sttLang;
@@ -36,14 +42,14 @@ export function SettingsPanel() {
         if (llmKey && !llmKey.includes('••')) body.llm_api_key = llmKey;
         if (llmUrl) body.llm_base_url = llmUrl;
         if (llmModel) body.llm_model = llmModel;
-        try { await saveSettings(body); } catch { }
-        setSaving(false);
-        setSettingsOpen(false);
+        return body;
     };
 
     const testStt = async () => {
         setSttTest(t('testing', lang));
         try {
+            // Save current values first so diagnose uses them
+            await saveSettings(buildSettingsBody());
             const r = await diagnose(lang);
             setSttTest(r.stt?.status === 'ok' ? '✅ ' + r.stt.message : '❌ ' + (r.stt?.message || 'Error'));
         } catch { setSttTest('❌ Cannot connect'); }
@@ -52,6 +58,7 @@ export function SettingsPanel() {
     const testLlm = async () => {
         setLlmTest(t('testing', lang));
         try {
+            await saveSettings(buildSettingsBody());
             const r = await diagnose(lang);
             setLlmTest(r.llm?.status === 'ok' ? '✅ ' + r.llm.message : '❌ ' + (r.llm?.message || 'Error'));
         } catch { setLlmTest('❌ Cannot connect'); }

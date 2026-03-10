@@ -484,17 +484,17 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
 
-    // Kill any stale process on port 8765 (handles crash leftovers)
+    // Kill any stale sidecar processes (handles crash leftovers)
     #[cfg(unix)]
     {
-        let _ = std::process::Command::new("sh")
-            .args(["-c", "lsof -ti:8765 | xargs kill -9 2>/dev/null"])
+        let _ = std::process::Command::new("pkill")
+            .args(["-9", "scribble-sidecar"])
             .output();
     }
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "FOR /F \"tokens=5\" %P IN ('netstat -aon ^| findstr :8765 ^| findstr LISTENING') DO taskkill /F /PID %P 2>nul"])
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "scribble-sidecar.exe"])
             .output();
     }
 
@@ -585,7 +585,7 @@ async fn check_sidecar() -> Result<bool, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .manage(Mutex::new(SidecarState { child: None }))
@@ -594,6 +594,23 @@ pub fn run() {
             {
                 app.manage(SystemAudioState(CaptureState::new()));
             }
+
+            // Kill ALL stale sidecar processes SYNCHRONOUSLY before frontend loads
+            // Uses process name (not port) to kill both PyInstaller bootloader + worker
+            #[cfg(unix)]
+            {
+                let _ = std::process::Command::new("pkill")
+                    .args(["-9", "scribble-sidecar"])
+                    .output();
+            }
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/IM", "scribble-sidecar.exe"])
+                    .output();
+            }
+            // Brief pause for port release
+            std::thread::sleep(std::time::Duration::from_millis(500));
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -624,6 +641,25 @@ pub fn run() {
                 });
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            // Kill ALL sidecar processes on app exit (Cmd+Q, force quit, etc.)
+            #[cfg(unix)]
+            {
+                let _ = std::process::Command::new("pkill")
+                    .args(["-9", "scribble-sidecar"])
+                    .output();
+            }
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/IM", "scribble-sidecar.exe"])
+                    .output();
+            }
+            println!("[exit] Sidecar cleaned up");
+        }
+    });
 }

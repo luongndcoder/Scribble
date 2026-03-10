@@ -20,7 +20,12 @@ export function MeetingList() {
     const [editingTitle, setEditingTitle] = useState('');
     const [busyMap, setBusyMap] = useState<Record<string, boolean>>({});
 
-    useEffect(() => { loadMeetings(); }, []);
+    useEffect(() => {
+        loadMeetings();
+        const onOnline = () => loadMeetings();
+        window.addEventListener('backend-online', onOnline);
+        return () => window.removeEventListener('backend-online', onOnline);
+    }, []);
 
     const loadMeetings = async () => {
         try { setMeetings(await getMeetings()); } catch { }

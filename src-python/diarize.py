@@ -10,7 +10,7 @@ import time
 import numpy as np
 
 # ── Tunable parameters (configurable via env vars) ────────────────────────────
-MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.60"))
+MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.62"))
 STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.75"))
 MAX_SPEAKERS           = int(os.getenv("DIARIZE_MAX_SPEAKERS",             "8"))
 SWITCH_CONFIRM_HITS    = int(os.getenv("DIARIZE_SWITCH_CONFIRM_HITS",      "2"))
@@ -21,7 +21,7 @@ EMA_UPDATE_MIN_SIM     = float(os.getenv("DIARIZE_EMA_UPDATE_MIN_SIM",     "0.50
 
 # ── Internal constants (hardcoded — no need to tune via env) ──────────────────
 # Core
-AMBIGUOUS_GAP                       = 0.05
+AMBIGUOUS_GAP                       = 0.08
 # Pitch
 MIN_PITCH_FRAMES                    = 6
 PITCH_PENALTY_FACTOR                = 0.06
@@ -37,7 +37,7 @@ WEAK_MATCH_MARGIN                   = 0.04
 STICKY_RECENT_SEC                   = 5.0
 STICKY_SIM_MARGIN                   = 0.04
 LOW_PITCH_STICKY_BONUS              = 0.00
-STABLE_LAST_SPEAKER_BONUS           = 0.02
+STABLE_LAST_SPEAKER_BONUS           = 0.04
 # Switch confirmation
 SWITCH_STRONG_SIM                   = 0.75
 SWITCH_STRONG_GAP                   = 0.08

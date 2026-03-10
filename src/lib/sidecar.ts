@@ -5,7 +5,7 @@
  * Web (Docker):    uses relative URLs proxied by Nginx (/api/*)
  */
 
-const IS_TAURI = typeof window !== 'undefined' && '__TAURI__' in window;
+const IS_TAURI = typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
 
 const SIDECAR_HTTP_BASES = IS_TAURI
   ? ['http://127.0.0.1:8765', 'http://localhost:8765'] as const

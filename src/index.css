@@ -2777,16 +2777,16 @@ body.electron-app .draft-recovery-banner {
 
 /* ─── Busy Button Spinner ─── */
 .card-action-btn.is-busy svg {
-  animation: spin-pulse 0.8s linear infinite;
-  opacity: 0.6;
+  animation: busy-pulse 1s ease-in-out infinite;
+  opacity: 0.5;
 }
 
-@keyframes spin-pulse {
-  from {
-    transform: rotate(0deg);
+@keyframes busy-pulse {
+  0%, 100% {
+    opacity: 0.3;
   }
 
-  to {
-    transform: rotate(360deg);
+  50% {
+    opacity: 0.7;
   }
 }

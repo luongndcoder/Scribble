@@ -29,7 +29,8 @@ SIDECAR_NAME="scribble-sidecar"
 pyinstaller \
     --onefile \
     --name "$SIDECAR_NAME" \
-    --runtime-hook=pyi_rth_torchaudio.py \
+    --add-data "models:models" \
+    --hidden-import=onnxruntime \
     --hidden-import=uvicorn.logging \
     --hidden-import=uvicorn.protocols.http \
     --hidden-import=uvicorn.protocols.http.auto \
@@ -48,23 +49,12 @@ pyinstaller \
     --hidden-import=groq \
     --hidden-import=openai \
     --hidden-import=docx \
-    --hidden-import=wespeaker \
-    --hidden-import=wespeaker.cli \
-    --hidden-import=wespeaker.cli.speaker \
-    --hidden-import=wespeaker.cli.hub \
-    --hidden-import=wespeaker.models \
-    --hidden-import=torchaudio \
     --hidden-import=riva \
     --hidden-import=riva.client \
     --hidden-import=grpcio \
     --hidden-import=grpcio_tools \
     --hidden-import=charset_normalizer \
-    --collect-all wespeaker \
-    --collect-all torch \
-    --collect-all torchaudio \
     --collect-all riva \
-    --collect-all silero_vad \
-    --collect-data s3prl \
     --noconfirm \
     main.py
 

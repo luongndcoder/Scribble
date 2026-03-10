@@ -603,6 +603,7 @@ export function MeetingDetail() {
         if (!isSameMeeting) {
             setMeetingData(null);
             setTranscriptParts([]);
+            useAppStore.getState().setTransientSummary('');
             cancelEditTranscript();
             cancelEditSpeaker();
         }

@@ -14,75 +14,47 @@ const SIDECAR_BASES = SIDECAR_HTTP_BASES;
 
 function App() {
   const { currentView, settingsOpen, setSettingsOpen, lang, setLang } = useAppStore();
-  const [backendStatus, setBackendStatus] = useState<'starting' | 'online' | 'offline' | 'hidden'>('starting');
+  const [backendStatus, setBackendStatus] = useState<'online' | 'offline'>('offline');
 
   const showRecBar = currentView === 'recording' || currentView === 'detail';
   const backendLabel = useMemo(() => {
-    if (lang === 'vi') {
-      if (backendStatus === 'online') return '✓ Sẵn sàng';
-      if (backendStatus === 'offline') return 'Đang kết nối...';
-      if (backendStatus === 'starting') return 'Đang khởi động...';
-      return '';
-    }
-    if (backendStatus === 'online') return '✓ Ready';
-    if (backendStatus === 'offline') return 'Connecting...';
-    if (backendStatus === 'starting') return 'Starting up...';
-    return '';
+    if (lang === 'vi') return backendStatus === 'online' ? '✓ Sẵn sàng' : 'Đang kết nối...';
+    return backendStatus === 'online' ? '✓ Ready' : 'Connecting...';
   }, [backendStatus, lang]);
 
   useEffect(() => {
-    let isDisposed = false;
-    let failStreak = 0;
-    const startedAt = Date.now();
-    const GRACE_PERIOD_MS = 15_000; // Stay 'starting' for at least 15s
-    const OFFLINE_THRESHOLD = 5;     // Need 5+ consecutive fails
-    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+    let active = true;
+    let wasOffline = true;
 
     const check = async () => {
-      let ok = false;
-      for (const base of SIDECAR_BASES) {
-        try {
-          const res = await fetch(`${base}/health`, { cache: 'no-store' });
-          if (res.ok) {
-            ok = true;
-            break;
-          }
-        } catch { }
-      }
-
-      if (isDisposed) return;
-
-      if (ok) {
-        failStreak = 0;
-        setBackendStatus('online');
-        // Auto-hide the chip after 3s when online
-        if (hideTimer) clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => {
-          if (!isDisposed) setBackendStatus('hidden');
-        }, 3000);
-      } else {
-        failStreak += 1;
-        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-        setBackendStatus((prev) => {
-          // If was online, give benefit of the doubt (temporary network hiccup)
-          if (prev === 'online' || prev === 'hidden') {
-            return failStreak <= 2 ? prev : 'starting';
-          }
-          // During grace period, stay 'starting' — sidecar is booting
-          if (Date.now() - startedAt < GRACE_PERIOD_MS) return 'starting';
-          // After grace period, need enough failures to show offline
-          return failStreak >= OFFLINE_THRESHOLD ? 'offline' : 'starting';
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        const res = await fetch(`${SIDECAR_BASES[0]}/health`, {
+          cache: 'no-store',
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
+        if (active) {
+          const isOnline = res.ok;
+          setBackendStatus(isOnline ? 'online' : 'offline');
+          // Reload data when backend comes online
+          if (isOnline && wasOffline) {
+            window.dispatchEvent(new Event('backend-online'));
+          }
+          wasOffline = !isOnline;
+        }
+      } catch {
+        if (active) {
+          setBackendStatus('offline');
+          wasOffline = true;
+        }
       }
     };
 
-    void check();
-    const id = window.setInterval(() => { void check(); }, 2000);
-    return () => {
-      isDisposed = true;
-      window.clearInterval(id);
-      if (hideTimer) clearTimeout(hideTimer);
-    };
+    check();
+    const id = setInterval(check, 2000);
+    return () => { active = false; clearInterval(id); };
   }, []);
 
   return (
@@ -104,16 +76,14 @@ function App() {
                 </span>
               </div>
               <div className="topnav-right">
-                {backendStatus !== 'hidden' && (
-                  <div
-                    className={`backend-status-chip ${backendStatus}`}
-                    title={backendLabel}
-                    aria-live="polite"
-                  >
-                    <span className={`status-dot ${backendStatus === 'online' ? 'online' : backendStatus === 'offline' ? 'offline' : 'loading'}`} />
-                    <span>{backendLabel}</span>
-                  </div>
-                )}
+                <div
+                  className={`backend-status-chip ${backendStatus}`}
+                  title={backendLabel}
+                  aria-live="polite"
+                >
+                  <span className={`status-dot ${backendStatus === 'online' ? 'online' : 'offline'}`} />
+                  <span>{backendLabel}</span>
+                </div>
                 <button className="lang-toggle" onClick={() => setLang(lang === 'vi' ? 'en' : 'vi')}>
                   {lang === 'vi' ? 'VI' : 'EN'}
                 </button>
@@ -136,14 +106,10 @@ function App() {
               {showRecBar && <RecordingBar />}
             </>
 
-            {/* Startup banner — non-blocking, auto-hides when ready */}
-            {(backendStatus === 'starting' || backendStatus === 'offline') && (
+            {backendStatus === 'offline' && (
               <div className="startup-banner">
                 <div className="startup-banner-spinner" />
-                <span>{backendStatus === 'starting'
-                  ? (lang === 'vi' ? 'Đang khởi động...' : 'Starting up...')
-                  : (lang === 'vi' ? 'Đang kết nối lại...' : 'Reconnecting...')
-                }</span>
+                <span>{lang === 'vi' ? 'Đang kết nối...' : 'Connecting...'}</span>
               </div>
             )}
           </main>
