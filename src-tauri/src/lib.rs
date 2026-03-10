@@ -671,6 +671,28 @@ pub fn run() {
                 }
             });
 
+            // Linux: auto-grant microphone permission (WebKitGTK denies getUserMedia by default)
+            #[cfg(target_os = "linux")]
+            {
+                use tauri::Listener;
+                let main_window = app.get_webview_window("main");
+                if let Some(window) = main_window {
+                    let _ = window.with_webview(|webview| {
+                        use webkit2gtk::traits::WebViewExt;
+                        use webkit2gtk::traits::PermissionRequestExt;
+                        let wv = webview.inner();
+                        wv.connect_permission_request(|_wv, request| {
+                            if request.is::<webkit2gtk::UserMediaPermissionRequest>() {
+                                println!("[linux] Auto-granting microphone permission");
+                                request.allow();
+                                return true;
+                            }
+                            false
+                        });
+                    });
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

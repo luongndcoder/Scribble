@@ -30,3 +30,7 @@ dirs = "5"
 [target.'cfg(target_os = "macos")'.dependencies]
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
 ringbuf = "0.4"
+
+# Linux: WebKitGTK for auto-granting microphone permission
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "=2.0.1"
