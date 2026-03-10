@@ -2,8 +2,22 @@ use std::sync::Mutex;
 use tauri::{Manager, Emitter};
 use tauri_plugin_shell::ShellExt;
 
+enum SidecarChild {
+    Tauri(tauri_plugin_shell::process::CommandChild),
+    Direct(std::process::Child),
+}
+
+impl SidecarChild {
+    fn kill(self) {
+        match self {
+            SidecarChild::Tauri(c) => { let _ = c.kill(); }
+            SidecarChild::Direct(mut c) => { let _ = c.kill(); }
+        }
+    }
+}
+
 struct SidecarState {
-    child: Option<tauri_plugin_shell::process::CommandChild>,
+    child: Option<SidecarChild>,
 }
 
 // ─── macOS Permissions ──────────────────────────────────────────────────────
@@ -478,9 +492,8 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
 
     // Always kill old sidecar to ensure fresh start with latest code
     if let Some(child) = state.child.take() {
-        let _ = child.kill();
+        child.kill();
         println!("[sidecar] Killed previous sidecar process");
-        // Brief pause to let the port be released
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
 
@@ -498,28 +511,66 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
             .output();
     }
 
-    let (mut rx, child) = app
-        .shell()
-        .sidecar("scribble-sidecar")
-        .map_err(|e| format!("Failed to create sidecar command: {}", e))?
-        .spawn()
-        .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
-
-    state.child = Some(child);
-
-    tauri::async_runtime::spawn(async move {
-        use tauri_plugin_shell::process::CommandEvent;
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(line) => println!("[sidecar] {}", String::from_utf8_lossy(&line)),
-                CommandEvent::Stderr(line) => eprintln!("[sidecar] {}", String::from_utf8_lossy(&line)),
-                CommandEvent::Terminated(p) => { println!("[sidecar] terminated: {:?}", p); break; }
-                _ => {}
+    // --- Attempt 1: Tauri sidecar API ---
+    match app.shell().sidecar("scribble-sidecar") {
+        Ok(cmd) => {
+            match cmd.spawn() {
+                Ok((mut rx, child)) => {
+                    state.child = Some(SidecarChild::Tauri(child));
+                    tauri::async_runtime::spawn(async move {
+                        use tauri_plugin_shell::process::CommandEvent;
+                        while let Some(event) = rx.recv().await {
+                            match event {
+                                CommandEvent::Stdout(line) => println!("[sidecar] {}", String::from_utf8_lossy(&line)),
+                                CommandEvent::Stderr(line) => eprintln!("[sidecar] {}", String::from_utf8_lossy(&line)),
+                                CommandEvent::Terminated(p) => { println!("[sidecar] terminated: {:?}", p); break; }
+                                _ => {}
+                            }
+                        }
+                    });
+                    return Ok("Sidecar started (tauri API)".to_string());
+                }
+                Err(e) => {
+                    eprintln!("[sidecar] Tauri spawn failed: {}, trying direct spawn...", e);
+                }
             }
         }
-    });
+        Err(e) => {
+            eprintln!("[sidecar] Tauri sidecar command failed: {}, trying direct spawn...", e);
+        }
+    }
 
-    Ok("Sidecar started (fresh)".to_string())
+    // --- Attempt 2: Direct spawn (resolves binary next to main exe) ---
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("Cannot find current exe: {}", e))?
+        .parent()
+        .ok_or("Cannot find exe parent dir")?
+        .to_path_buf();
+
+    #[cfg(windows)]
+    let sidecar_name = "scribble-sidecar.exe";
+    #[cfg(not(windows))]
+    let sidecar_name = "scribble-sidecar";
+
+    let sidecar_path = exe_dir.join(sidecar_name);
+
+    if !sidecar_path.exists() {
+        return Err(format!(
+            "Sidecar binary not found at {:?}. Checked: {:?}",
+            sidecar_path, exe_dir
+        ));
+    }
+
+    println!("[sidecar] Direct spawning: {:?}", sidecar_path);
+
+    let child = std::process::Command::new(&sidecar_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Direct spawn failed: {} (path: {:?})", e, sidecar_path))?;
+
+    state.child = Some(SidecarChild::Direct(child));
+    Ok("Sidecar started (direct spawn)".to_string())
 }
 
 #[tauri::command]
@@ -527,7 +578,7 @@ async fn stop_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     let state = app.state::<Mutex<SidecarState>>();
     let mut state = state.lock().map_err(|e| e.to_string())?;
     if let Some(child) = state.child.take() {
-        child.kill().map_err(|e| format!("Failed to kill sidecar: {}", e))?;
+        child.kill();
         Ok("Sidecar stopped".to_string())
     } else {
         Ok("No sidecar running".to_string())
