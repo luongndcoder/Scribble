@@ -422,11 +422,11 @@ mod system_audio_windows {
     ) -> Result<(), String> {
         use windows::Win32::Media::Audio::*;
         use windows::Win32::System::Com::*;
-        use windows::core::Interface;
 
         unsafe {
             // Initialize COM for this thread
             CoInitializeEx(None, COINIT_MULTITHREADED)
+                .ok()
                 .map_err(|e| format!("CoInitializeEx failed: {}", e))?;
 
             // Get default audio output device
@@ -456,7 +456,7 @@ mod system_audio_windows {
                 sample_rate, channels, bits_per_sample);
 
             // Initialize in LOOPBACK mode (capture what speakers play)
-            let buffer_duration = 200_000_0; // 200ms in 100-nanosecond units
+            let buffer_duration: i64 = 2_000_000; // 200ms in 100-nanosecond units
             audio_client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
                 AUDCLNT_STREAMFLAGS_LOOPBACK,
@@ -464,7 +464,7 @@ mod system_audio_windows {
                 0,
                 mix_format_ptr,
                 None,
-            ).map_err(|e| format!("Failed to initialize audio client: {}", e))?;
+            ).ok().map_err(|e| format!("Failed to initialize audio client: {}", e))?;
 
             // Get capture client
             let capture_client: IAudioCaptureClient = audio_client.GetService()
@@ -472,7 +472,7 @@ mod system_audio_windows {
 
             // Start capturing
             audio_client.Start()
-                .map_err(|e| format!("Failed to start audio client: {}", e))?;
+                .ok().map_err(|e| format!("Failed to start audio client: {}", e))?;
 
             // Signal ready with sample rate
             let _ = ready_tx.send(Ok(sample_rate));
@@ -502,21 +502,16 @@ mod system_audio_windows {
                     }
 
                     if num_frames > 0 && !buffer_ptr.is_null() {
-                        let is_silent = (flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)) != 0;
+                        let silent = (flags & 0x2) != 0; // AUDCLNT_BUFFERFLAGS_SILENT = 0x2
 
-                        if !is_silent {
-                            // Convert to mono f32
+                        if !silent {
                             let total_samples = num_frames as usize * channels;
-                            let samples: &[u8] = std::slice::from_raw_parts(
-                                buffer_ptr, num_frames as usize * block_align
-                            );
 
                             // Handle float32 format (most common for WASAPI shared mode)
                             if bits_per_sample == 32 {
                                 let float_samples: &[f32] = std::slice::from_raw_parts(
                                     buffer_ptr as *const f32, total_samples
                                 );
-                                // Downmix to mono
                                 for frame in float_samples.chunks(channels) {
                                     let mono: f32 = frame.iter().sum::<f32>() / channels as f32;
                                     let _ = producer.try_push(mono);
@@ -532,9 +527,7 @@ mod system_audio_windows {
                                     let _ = producer.try_push(mono);
                                 }
                             }
-                            let _ = samples; // suppress unused warning
                         } else {
-                            // Push silence frames to keep timing
                             for _ in 0..num_frames {
                                 let _ = producer.try_push(0.0f32);
                             }
