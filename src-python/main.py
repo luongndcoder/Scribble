@@ -790,9 +790,9 @@ async def summarize(request: Request):
     body = await request.json()
     meeting_id = body.get("meetingId")
     language = body.get("language", "vi")
-    transcript = body.get("transcript")
+    transcript = body.get("transcript")  # Frontend always sends this (most complete)
 
-    # If transcript provided directly (unsaved meeting), use it
+    # Fallback to DB if no transcript provided
     if not transcript:
         if not meeting_id:
             return JSONResponse({"error": "No meetingId or transcript provided"}, status_code=400)
@@ -801,9 +801,29 @@ async def summarize(request: Request):
             return JSONResponse({"error": "Meeting not found"}, status_code=404)
         transcript = meeting["transcript"]
 
+    if not transcript or not str(transcript).strip():
+        return JSONResponse({"error": "Transcript is empty"}, status_code=400)
+
+    # Parse JSON array into readable speaker-labeled text for the LLM
+    transcript_str = str(transcript).strip()
+    if transcript_str.startswith("["):
+        try:
+            parts = json.loads(transcript_str)
+            lines = []
+            for p in parts:
+                if isinstance(p, dict):
+                    speaker = p.get("speaker", "Speaker")
+                    text = str(p.get("text", "")).strip()
+                    if text:
+                        lines.append(f"{speaker}: {text}")
+            if lines:
+                transcript_str = "\n".join(lines)
+        except Exception:
+            pass  # Use raw transcript if parsing fails
+
     from summarize import summarize_stream
     return StreamingResponse(
-        summarize_stream(transcript, language, db),
+        summarize_stream(transcript_str, language, db),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

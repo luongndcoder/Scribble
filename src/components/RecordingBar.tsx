@@ -797,6 +797,30 @@ export function RecordingBar() {
                 });
             }
         }
+        // Persist full transcript to DB (catches promoted interim + any silently-failed appendDraft)
+        const dId = useAppStore.getState().draftId;
+        if (dId) {
+            const allParts = useAppStore.getState().transcriptParts;
+            if (allParts.length > 0) {
+                const transcriptJson = JSON.stringify(
+                    allParts.map(p => ({
+                        text: p.text,
+                        speaker: p.speaker,
+                        speakerId: p.speakerId,
+                        startTime: p.startTime,
+                        endTime: p.endTime,
+                        chunkId: p.chunkId,
+                        chunkIds: p.chunkIds,
+                        translation: p.translation || '',
+                    }))
+                );
+                fetchSidecar(`/meetings/${dId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ transcript: transcriptJson, audioDuration: useAppStore.getState().seconds }),
+                }).catch(e => console.warn('[RecordingBar] stopRecording: failed to sync transcript:', e));
+            }
+        }
         setRecording(false); setPaused(false);
         setIsTranscribing(false);
         setInterimText('');
@@ -946,26 +970,44 @@ export function RecordingBar() {
         try {
             const state = useAppStore.getState();
             const mid = state.currentMeetingId || state.draftId;
+
+            // Always build transcript from in-memory parts (most complete source)
+            const transcriptText = JSON.stringify(
+                state.transcriptParts.map(p => ({
+                    speaker: p.speaker,
+                    text: p.text,
+                    timestamp: p.timestamp,
+                    translation: p.translation || '',
+                }))
+            );
+
+            // Sync full transcript to DB before summarizing
+            if (mid && state.transcriptParts.length > 0) {
+                try {
+                    await fetchSidecar(`/meetings/${mid}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ transcript: transcriptText }),
+                    });
+                    console.log('[RecordingBar] Synced full transcript to DB before summarize, parts:', state.transcriptParts.length);
+                } catch (syncErr) {
+                    console.warn('[RecordingBar] Failed to sync transcript to DB:', syncErr);
+                }
+            }
+
             const payload: any = { language: lang };
             if (mid) {
                 payload.meetingId = mid;
+                // Also send transcript as fallback in case DB data is incomplete
+                payload.transcript = transcriptText;
             } else {
-                // Build transcript from current parts for unsaved meeting
-                payload.transcript = JSON.stringify(
-                    state.transcriptParts.map(p => ({
-                        speaker: p.speaker,
-                        text: p.text,
-                        timestamp: p.timestamp,
-                        translation: p.translation || '',
-                    }))
-                );
+                payload.transcript = transcriptText;
             }
             const res = await fetchSidecar('/summarize', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
             let accumulated = '';
-            let hasSseError = false;
             await consumeSseResponse(res, {
                 onToken: (token) => {
                     accumulated += token;
@@ -994,7 +1036,6 @@ export function RecordingBar() {
                     });
                 },
                 onErrorEvent: (message) => {
-                    hasSseError = true;
                     console.warn('[RecordingBar] Summarize SSE error:', message);
                     setTransientSummary(lang === 'vi'
                         ? `Không thể tạo biên bản: ${message}`
@@ -1003,7 +1044,7 @@ export function RecordingBar() {
             });
 
             // Save final summary to DB
-            if (mid && accumulated && !hasSseError) {
+            if (mid && accumulated) {
                 try {
                     const extractedTitle = extractMinutesTitle(accumulated);
                     console.log('[RecordingBar] Extracted title:', extractedTitle, '| mid:', mid);
