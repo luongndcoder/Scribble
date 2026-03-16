@@ -39,6 +39,7 @@
             <div class="nav-links">
                 <a href="#features">Features</a>
                 <a href="#how-it-works">How it works</a>
+                <a href="#install">Install Guide</a>
                 <a href="https://github.com/luongndcoder/Scribble" target="_blank" rel="noopener" class="nav-github">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path
@@ -327,9 +328,122 @@
                 </a>
             </div>
             <p class="dl-note">
-                macOS first launch: if blocked, open Terminal and run
-                <code>xattr -cr /Applications/Scribble.app</code>
+                First time installing? Check our <a href="#install" class="dl-note-link">Installation Guide</a> below for platform-specific setup instructions.
             </p>
+        </div>
+    </section>
+
+    <!-- ─── Installation Guide ─── -->
+    <section id="install" class="install-section">
+        <div class="container">
+            <div class="section-head">
+                <span class="section-tag">Installation</span>
+                <h2>First-time <span class="gradient-text">setup guide</span></h2>
+                <p>Scribble is open-source and free. Since it's not signed with a commercial certificate, your OS may show a one-time security prompt.</p>
+            </div>
+
+            <div class="install-tabs">
+                <button class="install-tab active" data-tab="macos">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+                    macOS
+                </button>
+                <button class="install-tab" data-tab="windows">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+                    Windows
+                </button>
+            </div>
+
+            <!-- macOS Tab -->
+            <div class="install-content active" data-content="macos">
+                <div class="install-steps">
+                    <div class="install-step">
+                        <div class="install-step-num">1</div>
+                        <div class="install-step-body">
+                            <h4>Download & open the DMG</h4>
+                            <p>Double-click the downloaded <code>.dmg</code> file and drag <strong>Scribble</strong> into your <strong>Applications</strong> folder.</p>
+                        </div>
+                    </div>
+                    <div class="install-step">
+                        <div class="install-step-num">2</div>
+                        <div class="install-step-body">
+                            <h4>Bypass Gatekeeper warning</h4>
+                            <p>On first launch, macOS may show <em>"Scribble can't be opened because Apple cannot check it for malicious software."</em></p>
+                            <div class="install-methods">
+                                <div class="install-method">
+                                    <span class="method-label">Option A — System Settings</span>
+                                    <p>Open <strong>System Settings → Privacy & Security</strong>, scroll down and click <strong>"Open Anyway"</strong> next to the Scribble message.</p>
+                                </div>
+                                <div class="install-method">
+                                    <span class="method-label">Option B — Terminal (faster)</span>
+                                    <code class="install-code">xattr -cr /Applications/Scribble.app</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="install-step">
+                        <div class="install-step-num">3</div>
+                        <div class="install-step-body">
+                            <h4>Grant microphone access</h4>
+                            <p>macOS will ask for Microphone permission on first use. Click <strong>"Allow"</strong> to enable recording.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Windows Tab -->
+            <div class="install-content" data-content="windows">
+                <div class="install-steps">
+                    <div class="install-step">
+                        <div class="install-step-num">1</div>
+                        <div class="install-step-body">
+                            <h4>Run the installer</h4>
+                            <p>Double-click the downloaded <code>.exe</code> installer. Windows SmartScreen may show a warning.</p>
+                        </div>
+                    </div>
+                    <div class="install-step">
+                        <div class="install-step-num">2</div>
+                        <div class="install-step-body">
+                            <h4>Bypass SmartScreen</h4>
+                            <p>If you see <em>"Windows protected your PC"</em>, this is normal for new software.</p>
+                            <div class="install-methods">
+                                <div class="install-method">
+                                    <span class="method-label">Click "More info"</span>
+                                    <p>Then click <strong>"Run anyway"</strong> to proceed with the installation.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="install-step">
+                        <div class="install-step-num">3</div>
+                        <div class="install-step-body">
+                            <h4>Antivirus false positive</h4>
+                            <p>Some antivirus software may flag Scribble. This is a false positive common with Python-based apps.</p>
+                            <div class="install-methods">
+                                <div class="install-method">
+                                    <span class="method-label">How to whitelist</span>
+                                    <p>Open <strong>Windows Security → Virus & threat protection → Protection history</strong>. Find the blocked file, click <strong>"Actions" → "Allow"</strong>.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="install-faq">
+                <h3>Frequently Asked Questions</h3>
+                <details class="faq-item">
+                    <summary>Is Scribble safe to use?</summary>
+                    <p>Yes. Scribble is 100% open source — you can inspect every line of code on <a href="https://github.com/luongndcoder/Scribble" target="_blank" rel="noopener">GitHub</a>. Security warnings appear because the app has not been signed with a commercial code signing certificate.</p>
+                </details>
+                <details class="faq-item">
+                    <summary>Why does my antivirus flag Scribble?</summary>
+                    <p>Scribble uses a Python backend (packaged with PyInstaller) that some antivirus engines mistakenly flag. This is a well-known false positive affecting many Python applications.</p>
+                </details>
+                <details class="faq-item">
+                    <summary>How do I verify the download is safe?</summary>
+                    <p>Always download from the <a href="https://github.com/luongndcoder/Scribble/releases" target="_blank" rel="noopener">official GitHub Releases</a> page. You can compare the SHA256 hash of your download with the one listed on the release page.</p>
+                </details>
+            </div>
         </div>
     </section>
 
@@ -355,6 +469,17 @@
         </div>
         <div class="container footer-copy">MIT License</div>
     </footer>
+
+    <script>
+        document.querySelectorAll('.install-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.install-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.install-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.querySelector(`.install-content[data-content="${tab.dataset.tab}"]`).classList.add('active');
+            });
+        });
+    </script>
 </body>
 
 </html>

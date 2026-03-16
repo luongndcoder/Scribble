@@ -589,6 +589,224 @@ a {
     font-family: 'Space Grotesk', monospace;
 }
 
+.dl-note-link {
+    color: var(--primary-light);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.dl-note-link:hover {
+    color: var(--cta-light);
+}
+
+/* ─── Installation Guide ─── */
+.install-section {
+    padding: var(--space-4xl) 0;
+}
+
+.install-tabs {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-xl);
+}
+
+.install-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 10px 24px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-display);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.install-tab:hover {
+    border-color: var(--border-hover);
+    color: var(--text);
+}
+
+.install-tab.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+.install-content {
+    display: none;
+    max-width: 680px;
+    margin: 0 auto;
+}
+
+.install-content.active {
+    display: block;
+}
+
+.install-steps {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+.install-step {
+    display: flex;
+    gap: var(--space-md);
+    padding: var(--space-lg);
+    border-radius: var(--radius-xl);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s;
+}
+
+.install-step:hover {
+    border-color: var(--border-hover);
+}
+
+.install-step-num {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(37, 99, 235, 0.15);
+    color: var(--primary-light);
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.install-step-body h4 {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: var(--space-xs);
+}
+
+.install-step-body p {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.install-step-body code {
+    background: var(--bg-elevated);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    border: 1px solid var(--border);
+    font-family: 'Space Grotesk', monospace;
+}
+
+.install-methods {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+}
+
+.install-method {
+    padding: var(--space-md);
+    border-radius: var(--radius);
+    background: rgba(37, 99, 235, 0.05);
+    border: 1px solid rgba(37, 99, 235, 0.1);
+}
+
+.method-label {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--primary-light);
+    margin-bottom: var(--space-xs);
+}
+
+.install-method p {
+    font-size: 0.84rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.install-code {
+    display: block;
+    background: var(--bg) !important;
+    border: 1px solid var(--border) !important;
+    padding: var(--space-sm) var(--space-md) !important;
+    border-radius: var(--radius) !important;
+    font-size: 0.84rem !important;
+    color: var(--cta-light);
+    font-family: 'Space Grotesk', monospace;
+    user-select: all;
+}
+
+.install-faq {
+    max-width: 680px;
+    margin: var(--space-3xl) auto 0;
+}
+
+.install-faq h3 {
+    font-family: var(--font-display);
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: var(--space-lg);
+    text-align: center;
+}
+
+.faq-item {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: var(--space-sm);
+    overflow: hidden;
+    transition: border-color 0.2s;
+}
+
+.faq-item:hover {
+    border-color: var(--border-hover);
+}
+
+.faq-item summary {
+    padding: var(--space-md) var(--space-lg);
+    font-family: var(--font-display);
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.faq-item summary::after {
+    content: '+';
+    font-size: 1.2rem;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}
+
+.faq-item[open] summary::after {
+    content: '−';
+}
+
+.faq-item p {
+    padding: 0 var(--space-lg) var(--space-md);
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.65;
+}
+
+.faq-item a {
+    color: var(--primary-light);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 /* ─── Footer ─── */
 .footer {
     padding: var(--space-2xl) 0 var(--space-lg);
