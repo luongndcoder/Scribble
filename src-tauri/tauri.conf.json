@@ -38,6 +38,9 @@
     "externalBin": [
       "binaries/scribble-sidecar"
     ],
+    "resources": [
+      "binaries/ffmpeg*"
+    ],
     "macOS": {
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "10.15",

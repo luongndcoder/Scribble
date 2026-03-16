@@ -52,6 +52,17 @@ jobs:
           mkdir -p src-tauri/binaries
           cp src-python/dist/scribble-sidecar.exe src-tauri/binaries/scribble-sidecar-x86_64-pc-windows-msvc.exe
 
+      - name: Bundle ffmpeg for Windows
+        shell: bash
+        run: |
+          FFMPEG_PATH=$(which ffmpeg || echo "")
+          if [ -n "$FFMPEG_PATH" ]; then
+            cp "$FFMPEG_PATH" src-tauri/binaries/ffmpeg.exe
+            echo "✅ Bundled ffmpeg from $FFMPEG_PATH"
+          else
+            echo "⚠️ ffmpeg not found, audio conversion may not work"
+          fi
+
       - name: Install frontend dependencies
         run: pnpm install
 

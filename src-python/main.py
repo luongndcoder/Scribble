@@ -119,19 +119,49 @@ def _safe_unlink(path: str):
 
 
 def _find_ffmpeg() -> str:
-    """Find ffmpeg binary, searching common locations on macOS/Linux."""
+    """Find ffmpeg binary, searching common locations on macOS/Linux/Windows."""
     import shutil
+    import sys as _sys
     found = shutil.which("ffmpeg")
     if found:
         return found
-    for candidate in [
-        "/opt/homebrew/bin/ffmpeg",
-        "/usr/local/bin/ffmpeg",
-        "/usr/bin/ffmpeg",
-    ]:
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    raise FileNotFoundError("ffmpeg not found. Install via: brew install ffmpeg")
+    # Check next to the running sidecar executable (PyInstaller bundle)
+    exe_dir = Path(_sys.executable).parent
+    for name in ("ffmpeg.exe", "ffmpeg"):
+        candidate = exe_dir / name
+        if candidate.is_file():
+            return str(candidate)
+    if _sys.platform == "win32":
+        # Common Windows installation paths
+        win_candidates = [
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "ffmpeg" / "bin" / "ffmpeg.exe",
+            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "ffmpeg" / "bin" / "ffmpeg.exe",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "ffmpeg" / "bin" / "ffmpeg.exe",
+            # Chocolatey
+            Path(r"C:\ProgramData\chocolatey\bin\ffmpeg.exe"),
+            # Scoop
+            Path.home() / "scoop" / "apps" / "ffmpeg" / "current" / "bin" / "ffmpeg.exe",
+            Path.home() / "scoop" / "shims" / "ffmpeg.exe",
+        ]
+        for c in win_candidates:
+            try:
+                if c.is_file():
+                    return str(c)
+            except Exception:
+                pass
+        raise FileNotFoundError(
+            "ffmpeg not found. Install via: choco install ffmpeg  OR  "
+            "scoop install ffmpeg  OR  download from https://ffmpeg.org"
+        )
+    else:
+        for candidate in [
+            "/opt/homebrew/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+        ]:
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+        raise FileNotFoundError("ffmpeg not found. Install via: brew install ffmpeg")
 
 
 def _transcode_audio_for_export(source: Path, fmt: str) -> Path:
@@ -1061,6 +1091,11 @@ async def append_draft_audio(draft_id: int, audio: UploadFile = File(...)):
 
     audio_path = (m.get("audio_path") or "").strip()
     if audio_path:
+        existing_ext = Path(audio_path).suffix.lower()
+        upload_ext = Path(audio.filename or "").suffix.lower() or ".webm"
+        # If Nvidia STT is archiving .pcm, don't append .webm data (incompatible formats)
+        if existing_ext == ".pcm" and upload_ext != ".pcm":
+            return {"ok": True, "bytes": 0, "skipped": "pcm_active"}
         target = Path(audio_path)
         target.parent.mkdir(parents=True, exist_ok=True)
     else:

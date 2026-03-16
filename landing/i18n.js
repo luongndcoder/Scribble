@@ -242,7 +242,7 @@ const translations = {
     "m9.title": "Scribble is installed!",
     "m9.desc": "The app launches successfully. You'll see the main Scribble interface. Continue to Phase 2 to set up your API key.",
     "w1.title": "Download the installer",
-    "w1.desc": "Go to <a href=\"https://github.com/luongndcoder/Scribble/releases\" target=\"_blank\" rel=\"noopener\">GitHub Releases</a> and download <code>Scribble_1.1.0_x64-setup.exe</code>. Your browser will show a warning that it's not commonly downloaded — this is normal for new apps.",
+    "w1.desc": "Click the <strong>Download</strong> button in the <a href=\"#download\">section above</a> to download the <code>.exe</code> file. Your browser may show a warning that it\u2019s not commonly downloaded \u2014 this is normal for new apps.",
     "w2.title": "Click the \"⋯\" menu → Keep",
     "w2.desc": "Click the <strong>three-dot menu (⋯)</strong> on the download warning bar. Select <strong>\"Keep\"</strong> from the dropdown to keep the file instead of deleting it.",
     "w3.title": "Click \"Keep anyway\"",
