@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 
 <head>
     <meta charset="UTF-8">
@@ -37,16 +37,20 @@
                 <span>Scribble</span>
             </a>
             <div class="nav-links">
-                <a href="#features">Features</a>
-                <a href="#how-it-works">How it works</a>
-                <a href="#install">Install Guide</a>
+                <a href="#features" data-i18n="nav.features">Tính năng</a>
+                <a href="#how-it-works" data-i18n="nav.how">Cách hoạt động</a>
+                <a href="#install" data-i18n="nav.install">Hướng dẫn cài đặt</a>
                 <a href="https://github.com/luongndcoder/Scribble" target="_blank" rel="noopener" class="nav-github">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path
                             d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                     </svg>
                 </a>
-                <a href="#download" class="btn btn-nav">Download</a>
+                <div class="lang-switcher">
+                    <button class="lang-btn active" data-lang="vi">🇻🇳 VI</button>
+                    <button class="lang-btn" data-lang="en">🇬🇧 EN</button>
+                </div>
+                <a href="#download" class="btn btn-nav" data-i18n="nav.download">Tải xuống</a>
             </div>
         </div>
     </nav>
@@ -58,15 +62,14 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <polyline points="20 6 9 17 4 12" />
                 </svg>
-                Open Source · MIT License
+                <span data-i18n="hero.badge">Mã nguồn mở · Giấy phép MIT</span>
             </div>
             <h1>
-                Your meetings,<br>
-                <span class="gradient-text">perfectly captured.</span>
+                <span data-i18n="hero.title1">Cuộc họp của bạn,</span><br>
+                <span class="gradient-text" data-i18n="hero.title2">ghi chép hoàn hảo.</span>
             </h1>
-            <p class="hero-sub">
-                AI-powered meeting assistant that records, transcribes in real-time,
-                identifies speakers, and generates comprehensive minutes — all running locally on your machine.
+            <p class="hero-sub" data-i18n="hero.sub">
+                Trợ lý cuộc họp AI ghi âm, phiên âm thời gian thực, nhận diện người nói, và tạo biên bản tự động — tất cả chạy trên máy của bạn.
             </p>
             <div class="hero-actions">
                 <a href="#download" class="btn btn-primary btn-lg">
@@ -76,7 +79,7 @@
                         <polyline points="7 10 12 15 17 10" />
                         <line x1="12" y1="15" x2="12" y2="3" />
                     </svg>
-                    Download Free
+                    <span data-i18n="hero.btn.download">Tải miễn phí</span>
                 </a>
                 <a href="https://github.com/luongndcoder/Scribble" class="btn btn-outline btn-lg" target="_blank"
                     rel="noopener">
@@ -84,23 +87,23 @@
                         <path
                             d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                     </svg>
-                    View on GitHub
+                    <span data-i18n="hero.btn.github">Xem trên GitHub</span>
                 </a>
             </div>
             <div class="hero-metrics">
                 <div class="metric">
                     <span class="metric-value">~130MB</span>
-                    <span class="metric-label">Lightweight</span>
+                    <span class="metric-label" data-i18n="hero.metric.size">Nhẹ</span>
                 </div>
                 <div class="metric-dot"></div>
                 <div class="metric">
                     <span class="metric-value">100%</span>
-                    <span class="metric-label">Private</span>
+                    <span class="metric-label" data-i18n="hero.metric.private">Riêng tư</span>
                 </div>
                 <div class="metric-dot"></div>
                 <div class="metric">
                     <span class="metric-value">12+</span>
-                    <span class="metric-label">Languages</span>
+                    <span class="metric-label" data-i18n="hero.metric.lang">Ngôn ngữ</span>
                 </div>
             </div>
         </div>
@@ -114,7 +117,7 @@
                     <span class="demo-dot"></span>
                     <span class="demo-dot"></span>
                     <span class="demo-dot"></span>
-                    <span class="demo-title">Scribble — Live Demo</span>
+                    <span class="demo-title" data-i18n="demo.title">Scribble — Bản demo</span>
                 </div>
                 <img src="https://raw.githubusercontent.com/luongndcoder/Scribble/main/public/demo.gif"
                     alt="Scribble app demo showing real-time transcription and speaker diarization" class="demo-gif"
@@ -127,9 +130,9 @@
     <section id="features" class="features">
         <div class="container">
             <div class="section-head">
-                <span class="section-tag">Features</span>
-                <h2>Everything you need for<br><span class="gradient-text">perfect meetings</span></h2>
-                <p>No cloud dependency. No subscription. Just powerful AI running on your machine.</p>
+                <span class="section-tag" data-i18n="features.tag">Tính năng</span>
+                <h2><span data-i18n="features.title1">Mọi thứ bạn cần cho</span><br><span class="gradient-text" data-i18n="features.title2">cuộc họp hoàn hảo</span></h2>
+                <p data-i18n="features.sub">Không phụ thuộc cloud. Không đăng ký. AI mạnh mẽ chạy ngay trên máy bạn.</p>
             </div>
             <div class="features-grid">
                 <div class="f-card f-card--accent">
@@ -141,8 +144,8 @@
                             <line x1="12" x2="12" y1="19" y2="22" />
                         </svg>
                     </div>
-                    <h3>Real-time Transcription</h3>
-                    <p>Nvidia Riva streaming gRPC with sub-second latency. Words appear the moment they're spoken.</p>
+                    <h3 data-i18n="features.f1.title">Phiên âm thời gian thực</h3>
+                    <p data-i18n="features.f1.desc">Nvidia Riva streaming gRPC với độ trễ dưới một giây. Chữ hiện ngay khi được nói.</p>
                 </div>
                 <div class="f-card">
                     <div class="f-icon">
@@ -154,8 +157,8 @@
                             <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                         </svg>
                     </div>
-                    <h3>Speaker Identification</h3>
-                    <p>ONNX Runtime + CAM++ diarization identifies who's speaking. Each voice auto-labeled in real-time.
+                    <h3 data-i18n="features.f2.title">Nhận diện người nói</h3>
+                    <p data-i18n="features.f2.desc">ONNX Runtime + CAM++ diarization nhận diện ai đang nói. Mỗi giọng nói được tự động gán nhãn.
                     </p>
                 </div>
                 <div class="f-card">
@@ -168,8 +171,8 @@
                                 d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
                         </svg>
                     </div>
-                    <h3>Live Translation</h3>
-                    <p>Real-time cabin translation into 12+ languages. Translations stream below each transcript line.
+                    <h3 data-i18n="features.f3.title">Dịch trực tiếp</h3>
+                    <p data-i18n="features.f3.desc">Dịch trực tiếp sang 12+ ngôn ngữ. Bản dịch hiển thị ngay dưới mỗi dòng phiên âm.
                     </p>
                 </div>
                 <div class="f-card">
@@ -183,9 +186,8 @@
                             <line x1="10" x2="8" y1="9" y2="9" />
                         </svg>
                     </div>
-                    <h3>AI Meeting Minutes</h3>
-                    <p>One-click summaries: title, key points, action items, decisions, risks. Export as Markdown or
-                        Word.</p>
+                    <h3 data-i18n="features.f4.title">Biên bản cuộc họp AI</h3>
+                    <p data-i18n="features.f4.desc">Tóm tắt một cú click: tiêu đề, ý chính, hành động, quyết định, rủi ro. Xuất Markdown hoặc Word.</p>
                 </div>
                 <div class="f-card">
                     <div class="f-icon">
@@ -196,8 +198,8 @@
                             <polyline points="7 3 7 8 15 8" />
                         </svg>
                     </div>
-                    <h3>Auto-save & Recovery</h3>
-                    <p>Transcripts save incrementally to SQLite. Even if the app crashes, your meeting data stays safe.
+                    <h3 data-i18n="features.f5.title">Tự động lưu & Khôi phục</h3>
+                    <p data-i18n="features.f5.desc">Bản ghi lưu liên tục vào SQLite. Dù ứng dụng crash, dữ liệu cuộc họp vẫn an toàn.
                     </p>
                 </div>
                 <div class="f-card">
@@ -208,9 +210,8 @@
                             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                         </svg>
                     </div>
-                    <h3>Privacy First</h3>
-                    <p>Everything runs locally. API keys stored on your machine only. No data leaves without your
-                        consent.</p>
+                    <h3 data-i18n="features.f6.title">Bảo mật trên hết</h3>
+                    <p data-i18n="features.f6.desc">Mọi thứ chạy cục bộ. API keys chỉ lưu trên máy bạn. Không dữ liệu nào rời đi mà không có sự đồng ý.</p>
                 </div>
             </div>
         </div>
@@ -220,26 +221,26 @@
     <section id="how-it-works" class="how-section">
         <div class="container">
             <div class="section-head">
-                <span class="section-tag">Quick Start</span>
-                <h2>Get started in<br><span class="gradient-text">3 simple steps</span></h2>
+                <span class="section-tag" data-i18n="how.tag">Bắt đầu nhanh</span>
+                <h2><span data-i18n="how.title1">Bắt đầu trong</span><br><span class="gradient-text" data-i18n="how.title2">3 bước đơn giản</span></h2>
             </div>
             <div class="steps-row">
                 <div class="step-card">
                     <div class="step-num">01</div>
-                    <h3>Download & Install</h3>
-                    <p>Grab the installer for macOS or Windows. One-click install, zero configuration.</p>
+                    <h3 data-i18n="how.s1.title">Tải & Cài đặt</h3>
+                    <p data-i18n="how.s1.desc">Tải bản cài đặt cho macOS hoặc Windows. Cài đặt một click, không cần cấu hình.</p>
                 </div>
                 <div class="step-line" aria-hidden="true"></div>
                 <div class="step-card">
                     <div class="step-num">02</div>
-                    <h3>Add Your API Key</h3>
-                    <p>Enter your Nvidia Riva key in Settings. Free tier available at build.nvidia.com.</p>
+                    <h3 data-i18n="how.s2.title">Thêm API Key</h3>
+                    <p data-i18n="how.s2.desc">Nhập Nvidia Riva key trong Cài đặt. Gói miễn phí có tại build.nvidia.com.</p>
                 </div>
                 <div class="step-line" aria-hidden="true"></div>
                 <div class="step-card">
                     <div class="step-num">03</div>
-                    <h3>Start Recording</h3>
-                    <p>Hit record — live transcription, speaker labels, and translation appear instantly.</p>
+                    <h3 data-i18n="how.s3.title">Bắt đầu ghi âm</h3>
+                    <p data-i18n="how.s3.desc">Nhấn Record — phiên âm trực tiếp, nhãn người nói, và dịch thuật hiện ngay lập tức.</p>
                 </div>
             </div>
         </div>
@@ -249,9 +250,10 @@
     <section id="download" class="dl-section">
         <div class="container">
             <div class="section-head">
-                <span class="section-tag">Download</span>
-                <h2>Ready to <span class="gradient-text">transform<br>your meetings</span>?</h2>
-                <p>Free and open-source. Available for macOS and Windows.</p>
+                <span class="section-tag" data-i18n="dl.tag">Tải xuống</span>
+                <h2><span data-i18n="dl.title1">Sẵn sàng để </span><span class="gradient-text" data-i18n="dl.title2">thay đổi
+cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
+                <p data-i18n="dl.sub">Miễn phí và mã nguồn mở. Có sẵn cho macOS và Windows.</p>
             </div>
             <div class="dl-grid">
                 <a href="https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_aarch64.dmg"
@@ -328,7 +330,7 @@
                 </a>
             </div>
             <p class="dl-note">
-                First time installing? Check our <a href="#install" class="dl-note-link">Installation Guide</a> below for platform-specific setup instructions.
+                <span data-i18n="dl.note">Lần đầu cài đặt? Xem </span><a href="#install" class="dl-note-link" data-i18n="dl.note.link">Hướng dẫn cài đặt</a><span data-i18n="dl.note.suffix"> bên dưới để biết hướng dẫn thiết lập cho từng nền tảng.</span>
             </p>
         </div>
     </section>
@@ -337,9 +339,9 @@
     <section id="install" class="install-section">
         <div class="container">
             <div class="section-head">
-                <span class="section-tag">Setup Guide</span>
-                <h2>Complete <span class="gradient-text">setup walkthrough</span></h2>
-                <p>Follow these steps to get Scribble running in under 5 minutes. Screenshots included for every step.</p>
+                <span class="section-tag" data-i18n="install.tag">Hướng dẫn cài đặt</span>
+                <h2><span data-i18n="install.title1">Hướng dẫn </span><span class="gradient-text" data-i18n="install.title2">cài đặt đầy đủ</span></h2>
+                <p data-i18n="install.sub">Làm theo các bước sau để Scribble hoạt động trong vòng 5 phút. Ảnh chụp màn hình kèm theo mỗi bước.</p>
             </div>
 
             <!-- ═══ Phase 1: Download & Install ═══ -->
@@ -347,8 +349,8 @@
                 <div class="guide-phase-header">
                     <div class="guide-phase-num">Phase 1</div>
                     <div>
-                        <h3>Download & Install</h3>
-                        <p>Get Scribble on your machine</p>
+                        <h3 data-i18n="p1.title">Tải & Cài đặt</h3>
+                        <p data-i18n="p1.sub">Cài Scribble lên máy của bạn</p>
                     </div>
                 </div>
 
@@ -371,8 +373,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">1</div>
                                 <div class="guide-step-text">
-                                    <h4>Download the DMG file</h4>
-                                    <p>Go to <a href="https://github.com/luongndcoder/Scribble/releases" target="_blank" rel="noopener">GitHub Releases</a> and download the <code>.dmg</code> file (e.g. <code>Scribble_1.1.0_aarch64.dmg</code>). Find it in your <strong>Downloads</strong> folder.</p>
+                                    <h4 data-i18n="m1.title">Tải file DMG</h4>
+                                    <p data-i18n="m1.desc">Nhấn nút <strong>Tải xuống</strong> ở <a href="#download">phần bên trên</a> để tải file <code>.dmg</code>. Tìm file trong thư mục <strong>Downloads</strong> của bạn.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img">
@@ -388,8 +390,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">2</div>
                                 <div class="guide-step-text">
-                                    <h4>Handle "Not Opened" warning</h4>
-                                    <p>Double-click the <code>.dmg</code> file. macOS may show a <strong>"Scribble_1.1.0_aarch64.dmg Not Opened"</strong> warning because it's unsigned. Click <strong>"Done"</strong> for now — we'll fix this in the next step.</p>
+                                    <h4 data-i18n="m2.title">Xử lý cảnh báo "Not Opened"</h4>
+                                    <p data-i18n="m2.desc">Double-click file <code>.dmg</code>. macOS có thể hiện cảnh báo <strong>"Scribble_1.1.0_aarch64.dmg Not Opened"</strong> vì file chưa được ký. Nhấn <strong>"Done"</strong> — chúng ta sẽ sửa ở bước tiếp.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img guide-step-img--small">
@@ -405,11 +407,11 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">3</div>
                                 <div class="guide-step-text">
-                                    <h4>Allow in Privacy & Security</h4>
-                                    <p>Open <strong>System Settings → Privacy & Security</strong>. Scroll down to find the Scribble message and click <strong>"Open Anyway"</strong> to allow the DMG to run.</p>
+                                    <h4 data-i18n="m3.title">Cho phép trong Privacy & Security</h4>
+                                    <p data-i18n="m3.desc">Mở <strong>System Settings → Privacy & Security</strong>. Cuộn xuống tìm thông báo Scribble và nhấn <strong>"Open Anyway"</strong> để cho phép DMG chạy.</p>
                                     <div class="guide-tip">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                                        Alternative: run <code>xattr -cr ~/Downloads/Scribble*.dmg</code> in Terminal
+                                        <span data-i18n="m3.tip">Hoặc chạy lệnh: <code>xattr -cr ~/Downloads/Scribble*.dmg</code> trong Terminal</span>
                                     </div>
                                 </div>
                             </div>
@@ -426,8 +428,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">4</div>
                                 <div class="guide-step-text">
-                                    <h4>Confirm opening the DMG</h4>
-                                    <p>A confirmation dialog will appear asking to open the DMG. Click <strong>"Open Anyway"</strong> and enter your password to proceed.</p>
+                                    <h4 data-i18n="m4.title">Xác nhận mở DMG</h4>
+                                    <p data-i18n="m4.desc">Hộp thoại xác nhận sẽ xuất hiện. Nhấn <strong>"Open Anyway"</strong> và nhập mật khẩu để tiếp tục.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img guide-step-img--small">
@@ -443,8 +445,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">5</div>
                                 <div class="guide-step-text">
-                                    <h4>Drag Scribble to Applications</h4>
-                                    <p>The DMG will open showing the Scribble app icon and an <strong>Applications</strong> folder shortcut. <strong>Drag the Scribble icon into Applications</strong> to install.</p>
+                                    <h4 data-i18n="m5.title">Kéo Scribble vào Applications</h4>
+                                    <p data-i18n="m5.desc">DMG sẽ mở hiện icon Scribble và shortcut thư mục <strong>Applications</strong>. <strong>Kéo icon Scribble vào Applications</strong> để cài đặt.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img">
@@ -460,8 +462,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">6</div>
                                 <div class="guide-step-text">
-                                    <h4>Handle app "Not Opened" warning</h4>
-                                    <p>When you first launch Scribble from Applications, macOS shows another <strong>"Scribble Not Opened"</strong> warning. Click <strong>"Done"</strong> — we need to allow it through Privacy & Security again.</p>
+                                    <h4 data-i18n="m6.title">Xử lý cảnh báo "Not Opened" của ứng dụng</h4>
+                                    <p data-i18n="m6.desc">Khi bạn lần đầu mở Scribble từ Applications, macOS hiện thêm cảnh báo <strong>"Scribble Not Opened"</strong>. Nhấn <strong>"Done"</strong> — cần cho phép qua Privacy & Security lần nữa.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img guide-step-img--small">
@@ -477,11 +479,11 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">7</div>
                                 <div class="guide-step-text">
-                                    <h4>Allow app in Privacy & Security</h4>
-                                    <p>Go back to <strong>System Settings → Privacy & Security</strong>. You'll see the Scribble app has been blocked. Click <strong>"Open Anyway"</strong> once more.</p>
+                                    <h4 data-i18n="m7.title">Cho phép ứng dụng trong Privacy & Security</h4>
+                                    <p data-i18n="m7.desc">Quay lại <strong>System Settings → Privacy & Security</strong>. Bạn sẽ thấy Scribble bị chặn. Nhấn <strong>"Open Anyway"</strong> một lần nữa.</p>
                                     <div class="guide-tip">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                                        Or run: <code>xattr -cr /Applications/Scribble.app</code> to skip this step
+                                        <span data-i18n="m7.tip">Hoặc chạy: <code>xattr -cr /Applications/Scribble.app</code> để bỏ qua bước này</span>
                                     </div>
                                 </div>
                             </div>
@@ -498,8 +500,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">8</div>
                                 <div class="guide-step-text">
-                                    <h4>Confirm & open the app</h4>
-                                    <p>The Gatekeeper dialog appears one last time. Click <strong>"Open Anyway"</strong> and authenticate with your password or Touch ID.</p>
+                                    <h4 data-i18n="m8.title">Xác nhận & mở ứng dụng</h4>
+                                    <p data-i18n="m8.desc">Hộp thoại Gatekeeper xuất hiện lần cuối. Nhấn <strong>"Open Anyway"</strong> và xác thực bằng mật khẩu hoặc Touch ID.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img guide-step-img--small">
@@ -515,8 +517,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num guide-step-num--done">✓</div>
                                 <div class="guide-step-text">
-                                    <h4>Scribble is installed!</h4>
-                                    <p>The app launches successfully. You'll see the main Scribble interface. Continue to Phase 2 to set up your API key.</p>
+                                    <h4 data-i18n="m9.title">Đã cài xong Scribble!</h4>
+                                    <p data-i18n="m9.desc">Ứng dụng khởi chạy thành công. Bạn sẽ thấy giao diện chính Scribble. Tiếp tục Phase 2 để thiết lập API key.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img">
@@ -537,8 +539,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">1</div>
                                 <div class="guide-step-text">
-                                    <h4>Download the installer</h4>
-                                    <p>Go to <a href="https://github.com/luongndcoder/Scribble/releases" target="_blank" rel="noopener">GitHub Releases</a> and download <code>Scribble_1.1.0_x64-setup.exe</code>. Your browser will show a warning that it's not commonly downloaded — this is normal for new apps.</p>
+                                    <h4 data-i18n="w1.title">Tải bộ cài đặt</h4>
+                                    <p data-i18n="w1.desc">Nhấn nút <strong>Tải xuống</strong> ở <a href="#download">phần bên trên</a> để tải file <code>.exe</code>. Trình duyệt có thể hiện cảnh báo file ít được tải — điều này bình thường với ứng dụng mới.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img">
@@ -554,8 +556,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">2</div>
                                 <div class="guide-step-text">
-                                    <h4>Click the "⋯" menu → Keep</h4>
-                                    <p>Click the <strong>three-dot menu (⋯)</strong> on the download warning bar. Select <strong>"Keep"</strong> from the dropdown to keep the file instead of deleting it.</p>
+                                    <h4 data-i18n="w2.title">Nhấn menu "⋯" → Keep</h4>
+                                    <p data-i18n="w2.desc">Nhấn <strong>menu ba chấm (⋯)</strong> trên thanh cảnh báo tải xuống. Chọn <strong>"Keep"</strong> từ dropdown để giữ file thay vì xóa.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img">
@@ -571,8 +573,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">3</div>
                                 <div class="guide-step-text">
-                                    <h4>Click "Keep anyway"</h4>
-                                    <p>A second confirmation appears. Click <strong>"Keep anyway"</strong> to confirm saving the installer.</p>
+                                    <h4 data-i18n="w3.title">Nhấn "Keep anyway"</h4>
+                                    <p data-i18n="w3.desc">Xác nhận lần hai xuất hiện. Nhấn <strong>"Keep anyway"</strong> để xác nhận lưu bộ cài.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img">
@@ -588,8 +590,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">4</div>
                                 <div class="guide-step-text">
-                                    <h4>Open the installer</h4>
-                                    <p>Go to your <strong>Downloads</strong> folder and double-click <code>Scribble_1.1.0_x64-setup.exe</code> to start the installation.</p>
+                                    <h4 data-i18n="w4.title">Mở bộ cài đặt</h4>
+                                    <p data-i18n="w4.desc">Vào thư mục <strong>Downloads</strong> và double-click <code>Scribble_1.1.0_x64-setup.exe</code> để bắt đầu cài đặt.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img">
@@ -605,8 +607,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">5</div>
                                 <div class="guide-step-text">
-                                    <h4>Bypass SmartScreen — click "Show more"</h4>
-                                    <p>Windows Defender SmartScreen will show <strong>"This app might harm your device"</strong>. Click <strong>"Show more ∨"</strong> to reveal the option to proceed.</p>
+                                    <h4 data-i18n="w5.title">Bỏ qua SmartScreen — nhấn "Show more"</h4>
+                                    <p data-i18n="w5.desc">Windows Defender SmartScreen sẽ hiện <strong>"This app might harm your device"</strong>. Nhấn <strong>"Show more ∨"</strong> để hiện tùy chọn tiếp tục.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img guide-step-img--small">
@@ -622,8 +624,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num">6</div>
                                 <div class="guide-step-text">
-                                    <h4>Click "Install anyway"</h4>
-                                    <p>After clicking "Show more", the <strong>"Install anyway"</strong> button appears. Click it to proceed with the installation.</p>
+                                    <h4 data-i18n="w6.title">Nhấn "Install anyway"</h4>
+                                    <p data-i18n="w6.desc">Sau khi nhấn "Show more", nút <strong>"Install anyway"</strong> xuất hiện. Nhấn để tiếp tục cài đặt.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img guide-step-img--small">
@@ -639,8 +641,8 @@
                             <div class="guide-step-info">
                                 <div class="guide-step-num guide-step-num--done">✓</div>
                                 <div class="guide-step-text">
-                                    <h4>Installation complete!</h4>
-                                    <p>The installer wizard will guide you through the remaining steps. Choose your language, install location, and Scribble will be ready in seconds. Continue to Phase 2 to set up your API key.</p>
+                                    <h4 data-i18n="w7.title">Cài đặt hoàn tất!</h4>
+                                    <p data-i18n="w7.desc">Trình cài đặt sẽ hướng dẫn bạn qua các bước còn lại. Chọn ngôn ngữ, vị trí cài đặt, và Scribble sẽ sẵn sàng trong vài giây. Tiếp tục Phase 2 để thiết lập API key.</p>
                                 </div>
                             </div>
                         </div>
@@ -653,8 +655,8 @@
                 <div class="guide-phase-header">
                     <div class="guide-phase-num">Phase 2</div>
                     <div>
-                        <h3>Get your free NVIDIA API Key</h3>
-                        <p>Required for speech-to-text and AI features (free tier available)</p>
+                        <h3 data-i18n="p2.title">Lấy API Key NVIDIA miễn phí</h3>
+                        <p data-i18n="p2.sub">Cần thiết cho tính năng phiên âm và AI (có gói miễn phí)</p>
                     </div>
                 </div>
 
@@ -664,8 +666,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">1</div>
                             <div class="guide-step-text">
-                                <h4>Go to build.nvidia.com</h4>
-                                <p>Visit <a href="https://build.nvidia.com" target="_blank" rel="noopener"><strong>build.nvidia.com</strong></a> and click the <strong>"Login"</strong> button in the top-right corner. If you don't have an account yet, you'll need to create one.</p>
+                                <h4 data-i18n="n1.title">Truy cập build.nvidia.com</h4>
+                                <p data-i18n="n1.desc">Vào <a href="https://build.nvidia.com" target="_blank" rel="noopener"><strong>build.nvidia.com</strong></a> và nhấn nút <strong>"Login"</strong> ở góc trên bên phải. Nếu chưa có tài khoản, bạn cần tạo mới.</p>
                             </div>
                         </div>
                         <div class="guide-step-img">
@@ -681,8 +683,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">2</div>
                             <div class="guide-step-text">
-                                <h4>Create your account</h4>
-                                <p>Fill in your <strong>email</strong>, <strong>password</strong>, complete the hCaptcha, then click <strong>"Create Account"</strong>. You can also sign up with Google or GitHub.</p>
+                                <h4 data-i18n="n2.title">Tạo tài khoản</h4>
+                                <p data-i18n="n2.desc">Điền <strong>email</strong>, <strong>mật khẩu</strong>, hoàn thành hCaptcha, rồi nhấn <strong>"Create Account"</strong>. Bạn cũng có thể đăng ký qua Google hoặc GitHub.</p>
                             </div>
                         </div>
                         <div class="guide-step-img guide-step-img--small">
@@ -698,8 +700,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">3</div>
                             <div class="guide-step-text">
-                                <h4>Verify your email</h4>
-                                <p>NVIDIA will send a <strong>6-digit verification code</strong> to your email. Enter the code and click <strong>"Continue"</strong>.</p>
+                                <h4 data-i18n="n3.title">Xác minh email</h4>
+                                <p data-i18n="n3.desc">NVIDIA sẽ gửi <strong>mã 6 chữ số</strong> đến email. Nhập mã và nhấn <strong>"Continue"</strong>.</p>
                             </div>
                         </div>
                         <div class="guide-step-img">
@@ -715,8 +717,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">4</div>
                             <div class="guide-step-text">
-                                <h4>Complete registration</h4>
-                                <p>Review your preference settings (optional). Click <strong>"Submit"</strong> to finalize your account. You'll be redirected to the NVIDIA dashboard.</p>
+                                <h4 data-i18n="n4.title">Hoàn tất đăng ký</h4>
+                                <p data-i18n="n4.desc">Xem lại cài đặt tùy chọn (không bắt buộc). Nhấn <strong>"Submit"</strong> để hoàn tất tài khoản. Bạn sẽ được chuyển đến trang quản trị NVIDIA.</p>
                             </div>
                         </div>
                         <div class="guide-step-img">
@@ -732,8 +734,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">5</div>
                             <div class="guide-step-text">
-                                <h4>Create NVIDIA Cloud Account</h4>
-                                <p>You'll be asked to create an <strong>NVIDIA Cloud Account</strong>. Enter a <strong>Cloud Account Name</strong> (e.g. your name or organization), then click <strong>"Create NVIDIA Cloud Account"</strong>.</p>
+                                <h4 data-i18n="n5.title">Tạo NVIDIA Cloud Account</h4>
+                                <p data-i18n="n5.desc">Bạn sẽ được yêu cầu tạo <strong>NVIDIA Cloud Account</strong>. Nhập <strong>Cloud Account Name</strong> (ví dụ: tên bạn hoặc tổ chức), rồi nhấn <strong>"Create NVIDIA Cloud Account"</strong>.</p>
                             </div>
                         </div>
                         <div class="guide-step-img guide-step-img--small">
@@ -749,11 +751,11 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">6</div>
                             <div class="guide-step-text">
-                                <h4>Click "Verify" to get API access</h4>
-                                <p>After logging in, you'll see a yellow banner at the top: <strong>"Please verify your account to get API access"</strong>. Click the <strong>"Verify"</strong> button on the right side of the banner.</p>
+                                <h4 data-i18n="n6.title">Nhấn "Verify" để được cấp quyền API</h4>
+                                <p data-i18n="n6.desc">Sau khi đăng nhập, bạn sẽ thấy banner vàng phía trên: <strong>"Please verify your account to get API access"</strong>. Nhấn nút <strong>"Verify"</strong> bên phải banner.</p>
                                 <div class="guide-tip">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                                    This step is required — you cannot generate API keys without verifying your phone number.
+                                    <span data-i18n="n6.tip">Bước này bắt buộc — bạn không thể tạo API key mà không xác minh số điện thoại.</span>
                                 </div>
                             </div>
                         </div>
@@ -770,8 +772,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">7</div>
                             <div class="guide-step-text">
-                                <h4>Verify your phone number</h4>
-                                <p>A dialog will appear asking for your <strong>phone number</strong>. Select your <strong>Location</strong>, enter your <strong>Phone Number</strong>, then click <strong>"Send Code via SMS"</strong>. Enter the OTP code you receive to complete verification.</p>
+                                <h4 data-i18n="n7.title">Xác minh số điện thoại</h4>
+                                <p data-i18n="n7.desc">Hộp thoại yêu cầu <strong>số điện thoại</strong> sẽ xuất hiện. Chọn <strong>Location</strong>, nhập <strong>Phone Number</strong>, rồi nhấn <strong>"Send Code via SMS"</strong>. Nhập mã OTP nhận được để hoàn tất xác minh.</p>
                             </div>
                         </div>
                         <div class="guide-step-img guide-step-img--small">
@@ -787,8 +789,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">8</div>
                             <div class="guide-step-text">
-                                <h4>Navigate to API Keys</h4>
-                                <p>Click your <strong>profile icon</strong> in the top-right corner, then select <strong>"API Keys"</strong> from the dropdown menu.</p>
+                                <h4 data-i18n="n8.title">Đi tới API Keys</h4>
+                                <p data-i18n="n8.desc">Nhấn <strong>icon hồ sơ</strong> ở góc trên bên phải, rồi chọn <strong>"API Keys"</strong> từ menu dropdown.</p>
                             </div>
                         </div>
                         <div class="guide-step-img guide-step-img--small">
@@ -804,11 +806,11 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">9</div>
                             <div class="guide-step-text">
-                                <h4>Generate your API Key</h4>
-                                <p>Click <strong>"Generate API Key"</strong>. <strong>Copy the key immediately</strong> and save it somewhere safe — you won't be able to see it again!</p>
+                                <h4 data-i18n="n9.title">Tạo API Key</h4>
+                                <p data-i18n="n9.desc">Nhấn <strong>"Generate API Key"</strong>. <strong>Sao chép key ngay lập tức</strong> và lưu ở nơi an toàn — bạn sẽ không thể xem lại nó!</p>
                                 <div class="guide-tip">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                                    The free tier gives you 1,000 API credits/month — plenty for personal use.
+                                    <span data-i18n="n9.tip">Gói miễn phí cho bạn 1.000 API credit/tháng — đủ dùng cho cá nhân.</span>
                                 </div>
                             </div>
                         </div>
@@ -827,8 +829,8 @@
                 <div class="guide-phase-header">
                     <div class="guide-phase-num">Phase 3</div>
                     <div>
-                        <h3>Configure Scribble</h3>
-                        <p>Paste your API key and set up the AI model</p>
+                        <h3 data-i18n="p3.title">Cấu hình Scribble</h3>
+                        <p data-i18n="p3.sub">Dán API key và thiết lập mô hình AI</p>
                     </div>
                 </div>
 
@@ -838,8 +840,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">1</div>
                             <div class="guide-step-text">
-                                <h4>Open Settings → Riva (Speech-to-Text)</h4>
-                                <p>Launch Scribble, click the <strong>⚙️ Settings</strong> icon in the top-right corner. In the <strong>Riva</strong> section, you'll see the connection configuration fields.</p>
+                                <h4 data-i18n="c1.title">Mở Settings → Riva (Phiên âm)</h4>
+                                <p data-i18n="c1.desc">Mở Scribble, nhấn biểu tượng <strong>⚙️ Settings</strong> ở góc trên bên phải. Trong phần <strong>Riva</strong>, bạn sẽ thấy các trường cấu hình kết nối.</p>
                             </div>
                         </div>
                         <div class="guide-step-img">
@@ -855,8 +857,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">2</div>
                             <div class="guide-step-text">
-                                <h4>Enter Riva API Key & Server URL</h4>
-                                <p>Paste your NVIDIA API key into the <strong>API Key</strong> field. Then enter the server URL and click <strong>"Test Connection"</strong> to verify.</p>
+                                <h4 data-i18n="c2.title">Nhập Riva API Key & Server URL</h4>
+                                <p data-i18n="c2.desc">Dán NVIDIA API key vào trường <strong>API Key</strong>. Sau đó nhập server URL và nhấn <strong>"Test Connection"</strong> để kiểm tra.</p>
                                 <div class="guide-config-block">
                                     <div class="guide-config-row">
                                         <span class="guide-config-label">API Key</span>
@@ -882,8 +884,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">3</div>
                             <div class="guide-step-text">
-                                <h4>Configure AI Assistant API Key</h4>
-                                <p>Scroll down to the <strong>AI Assistant</strong> section. Paste the same NVIDIA API key into the <strong>API Key</strong> field.</p>
+                                <h4 data-i18n="c3.title">Cấu hình AI Assistant API Key</h4>
+                                <p data-i18n="c3.desc">Cuộn xuống phần <strong>AI Assistant</strong>. Dán cùng NVIDIA API key vào trường <strong>API Key</strong>.</p>
                             </div>
                         </div>
                         <div class="guide-step-img">
@@ -899,8 +901,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">4</div>
                             <div class="guide-step-text">
-                                <h4>Set AI Server URL & Model</h4>
-                                <p>Enter the server address and model name in the AI Assistant section. Click <strong>"Save"</strong> to apply all settings.</p>
+                                <h4 data-i18n="c4.title">Đặt AI Server URL & Model</h4>
+                                <p data-i18n="c4.desc">Nhập địa chỉ server và tên model trong phần AI Assistant. Nhấn <strong>"Save"</strong> để áp dụng tất cả cài đặt.</p>
                                 <div class="guide-config-block">
                                     <div class="guide-config-row">
                                         <span class="guide-config-label">Server URL</span>
@@ -913,7 +915,7 @@
                                 </div>
                                 <div class="guide-tip">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                                    You can use any compatible AI model. DeepSeek v3.2 is recommended for best results.
+                                    <span data-i18n="c4.tip">Bạn có thể dùng bất kỳ AI model tương thích nào. DeepSeek v3.2 được khuyên dùng cho kết quả tốt nhất.</span>
                                 </div>
                             </div>
                         </div>
@@ -932,8 +934,8 @@
                 <div class="guide-phase-header">
                     <div class="guide-phase-num">Phase 4</div>
                     <div>
-                        <h3>Start Recording</h3>
-                        <p>Grant permissions and begin your first session</p>
+                        <h3 data-i18n="p4.title">Bắt đầu ghi âm</h3>
+                        <p data-i18n="p4.sub">Cấp quyền và bắt đầu phiên đầu tiên</p>
                     </div>
                 </div>
 
@@ -943,8 +945,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">1</div>
                             <div class="guide-step-text">
-                                <h4>Grant Screen & System Audio <span class="guide-badge-macos">macOS only</span></h4>
-                                <p>When you first click <strong>"Record"</strong>, macOS will ask for <strong>Screen & System Audio Recording</strong> permission. Click <strong>"Open System Settings"</strong> to go directly to the permission panel.</p>
+                                <h4 data-i18n="perm1.title">Cấp quyền Screen & System Audio <span class="guide-badge-macos">macOS only</span></h4>
+                                <p data-i18n="perm1.desc">Khi bạn nhấn <strong>"Record"</strong> lần đầu, macOS sẽ yêu cầu quyền <strong>Screen & System Audio Recording</strong>. Nhấn <strong>"Open System Settings"</strong> để đến thẳng bảng cấp quyền.</p>
                             </div>
                         </div>
                         <div class="guide-step-img">
@@ -960,8 +962,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num">2</div>
                             <div class="guide-step-text">
-                                <h4>Enable Scribble in System Settings <span class="guide-badge-macos">macOS only</span></h4>
-                                <p>In <strong>System Settings → Privacy & Security → Screen & System Audio Recording</strong>, find <strong>Scribble</strong> in the list and <strong>toggle it ON</strong>. You may need to enter your password.</p>
+                                <h4 data-i18n="perm2.title">Bật Scribble trong System Settings <span class="guide-badge-macos">macOS only</span></h4>
+                                <p data-i18n="perm2.desc">Trong <strong>System Settings → Privacy & Security → Screen & System Audio Recording</strong>, tìm <strong>Scribble</strong> trong danh sách và <strong>bật ON</strong>. Có thể cần nhập mật khẩu.</p>
                             </div>
                         </div>
                         <div class="guide-step-img">
@@ -977,8 +979,8 @@
                         <div class="guide-step-info">
                             <div class="guide-step-num guide-step-num--done">✓</div>
                             <div class="guide-step-text">
-                                <h4>You're all set! Start your first meeting</h4>
-                                <p>Create a new meeting, hit <strong>Record</strong>, and watch real-time transcription with speaker diarization appear instantly. Scribble identifies speakers automatically and streams the transcript live.</p>
+                                <h4 data-i18n="perm3.title">Hoàn tất! Bắt đầu cuộc họp đầu tiên</h4>
+                                <p data-i18n="perm3.desc">Tạo cuộc họp mới, nhấn <strong>Record</strong>, và xem phiên âm thời gian thực với nhận diện người nói xuất hiện ngay lập tức. Scribble tự động nhận diện người nói và phát trực tiếp bản ghi.</p>
                             </div>
                         </div>
                         <div class="guide-step-img">
@@ -993,18 +995,18 @@
 
             <!-- FAQ -->
             <div class="install-faq">
-                <h3>Frequently Asked Questions</h3>
+                <h3 data-i18n="faq.title">Câu hỏi thường gặp</h3>
                 <details class="faq-item">
-                    <summary>Is Scribble safe to use?</summary>
-                    <p>Yes. Scribble is 100% open source — you can inspect every line of code on <a href="https://github.com/luongndcoder/Scribble" target="_blank" rel="noopener">GitHub</a>. Security warnings appear because the app has not been signed with a commercial code signing certificate.</p>
+                    <summary data-i18n="faq.q1">Scribble có an toàn không?</summary>
+                    <p data-i18n="faq.a1">Có. Scribble 100% mã nguồn mở — bạn có thể kiểm tra từng dòng code trên <a href="https://github.com/luongndcoder/Scribble" target="_blank" rel="noopener">GitHub</a>. Cảnh báo bảo mật xuất hiện vì ứng dụng chưa được ký bằng chứng chỉ thương mại.</p>
                 </details>
                 <details class="faq-item">
-                    <summary>Why does my antivirus flag Scribble?</summary>
-                    <p>Scribble uses a Python backend (packaged with PyInstaller) that some antivirus engines mistakenly flag. This is a well-known false positive affecting many Python applications.</p>
+                    <summary data-i18n="faq.q2">Tại sao phần mềm diệt virus báo Scribble?</summary>
+                    <p data-i18n="faq.a2">Scribble dùng backend Python (đóng gói bằng PyInstaller) mà một số phần mềm diệt virus nhầm báo là mã độc. Đây là lỗi dương tính giả phổ biến ảnh hưởng nhiều ứng dụng Python.</p>
                 </details>
                 <details class="faq-item">
-                    <summary>Do I need to pay for the NVIDIA API?</summary>
-                    <p>No. NVIDIA offers a free tier at <a href="https://build.nvidia.com" target="_blank" rel="noopener">build.nvidia.com</a> that provides enough credits for personal use. Sign up and generate an API key for free.</p>
+                    <summary data-i18n="faq.q3">Có cần trả phí cho NVIDIA API không?</summary>
+                    <p data-i18n="faq.a3">Không. NVIDIA cung cấp gói miễn phí tại <a href="https://build.nvidia.com" target="_blank" rel="noopener">build.nvidia.com</a> với đủ credit cho sử dụng cá nhân. Đăng ký và tạo API key miễn phí.</p>
                 </details>
             </div>
         </div>
@@ -1022,7 +1024,7 @@
                 </svg>
                 <span>Scribble</span>
                 <span class="footer-sep">·</span>
-                <span class="footer-tagline">Open-source AI meeting assistant</span>
+                <span class="footer-tagline" data-i18n="footer.tagline">Trợ lý cuộc họp AI mã nguồn mở</span>
             </div>
             <div class="footer-links">
                 <a href="https://github.com/luongndcoder/Scribble" target="_blank" rel="noopener">GitHub</a>
@@ -1043,6 +1045,8 @@
             });
         });
     </script>
+
+    <script src="i18n.js"></script>
 </body>
 
 </html>

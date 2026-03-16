@@ -1088,15 +1088,29 @@ async def diagnose(lang: str = "vi"):
     if not nvidia_key:
         results["stt"] = {"status": "warning", "message": t("nvidia_key_missing", lang)}
     else:
-        try:
-            from stt import _get_riva_asr, get_nvidia_model
+        def _test_riva_connection():
+            from stt import _get_riva_asr, _reset_riva_asr, get_nvidia_model
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
             stt_lang_diag = db.get_setting("stt_language") or "vi"
             lang_code = get_language_code(stt_lang_diag)
             model = get_nvidia_model(lang_code)
-            await loop.run_in_executor(None, _get_riva_asr, nvidia_key, model["function_id"])
+            _reset_riva_asr(model["function_id"])
+            executor = ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(_get_riva_asr, nvidia_key, model["function_id"])
+            try:
+                future.result(timeout=10)
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
+
+        try:
+            await loop.run_in_executor(None, _test_riva_connection)
             results["stt"] = {"status": "ok", "message": t("nvidia_connected", lang)}
         except Exception as e:
-            results["stt"] = {"status": "error", "message": f"{t('nvidia_connect_fail', lang)}: {str(e)[:80]}"}
+            err_str = str(e)
+            if "TimeoutError" in type(e).__name__ or "timed out" in err_str.lower():
+                results["stt"] = {"status": "error", "message": t("nvidia_connect_fail", lang) + ": Connection timed out (10s)"}
+            else:
+                results["stt"] = {"status": "error", "message": f"{t('nvidia_connect_fail', lang)}: {err_str[:80]}"}
 
     # Check LLM
     llm_key = db.get_setting("llm_api_key") or os.getenv("LLM_API_KEY", "")
