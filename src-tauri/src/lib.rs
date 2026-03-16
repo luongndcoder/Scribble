@@ -5,12 +5,70 @@ struct SidecarChild(std::process::Child);
 
 impl SidecarChild {
     fn kill(mut self) {
+        let pid = self.0.id();
         let _ = self.0.kill();
+        let _ = self.0.wait();
+        println!("[sidecar] Killed child PID {}", pid);
     }
 }
 
 struct SidecarState {
     child: Option<SidecarChild>,
+}
+
+/// Kill any process listening on the sidecar port (8765).
+/// This works regardless of the process name (handles PyInstaller's `Python` name).
+fn kill_sidecar_port() {
+    #[cfg(unix)]
+    {
+        // lsof -ti :8765 returns PIDs of processes using port 8765
+        if let Ok(output) = std::process::Command::new("lsof")
+            .args(["-ti", ":8765"])
+            .output()
+        {
+            let pids = String::from_utf8_lossy(&output.stdout);
+            for pid_str in pids.split_whitespace() {
+                if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                    println!("[cleanup] Killing PID {} on port 8765", pid);
+                    let _ = std::process::Command::new("kill")
+                        .args(["-9", &pid.to_string()])
+                        .output();
+                }
+            }
+        }
+        // Also try pkill as fallback for any sidecar-named processes
+        let _ = std::process::Command::new("pkill")
+            .args(["-9", "scribble-sidecar"])
+            .output();
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Find PID on port 8765 via netstat
+        if let Ok(output) = std::process::Command::new("cmd")
+            .args(["/C", "netstat -ano | findstr :8765 | findstr LISTENING"])
+            .creation_flags(0x08000000)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if let Some(pid_str) = line.split_whitespace().last() {
+                    if let Ok(pid) = pid_str.parse::<u32>() {
+                        println!("[cleanup] Killing PID {} on port 8765", pid);
+                        let _ = std::process::Command::new("taskkill")
+                            .args(["/F", "/PID", &pid.to_string()])
+                            .creation_flags(0x08000000)
+                            .output();
+                    }
+                }
+            }
+        }
+        // Also try taskkill by name as fallback
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "scribble-sidecar.exe"])
+            .creation_flags(0x08000000)
+            .output();
+    }
 }
 
 // ─── macOS Permissions ──────────────────────────────────────────────────────
@@ -937,21 +995,7 @@ pub fn run() {
             }
 
             // Kill ALL stale sidecar processes SYNCHRONOUSLY before frontend loads
-            // Uses process name (not port) to kill both PyInstaller bootloader + worker
-            #[cfg(unix)]
-            {
-                let _ = std::process::Command::new("pkill")
-                    .args(["-9", "scribble-sidecar"])
-                    .output();
-            }
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/F", "/IM", "scribble-sidecar.exe"])
-                    .creation_flags(0x08000000)
-                    .output();
-            }
+            kill_sidecar_port();
             // Brief pause for port release
             std::thread::sleep(std::time::Duration::from_millis(500));
 
@@ -1005,24 +1049,10 @@ pub fn run() {
                     if let Ok(mut guard) = state.lock() {
                         if let Some(child) = guard.child.take() {
                             child.kill();
-                            println!("[window-close] Killed sidecar via state");
                         }
                     }
-                    // Also pkill to catch any orphaned processes
-                    #[cfg(unix)]
-                    {
-                        let _ = std::process::Command::new("pkill")
-                            .args(["-9", "scribble-sidecar"])
-                            .output();
-                    }
-                    #[cfg(windows)]
-                    {
-                        use std::os::windows::process::CommandExt;
-                        let _ = std::process::Command::new("taskkill")
-                            .args(["/F", "/IM", "scribble-sidecar.exe"])
-                            .creation_flags(0x08000000)
-                            .output();
-                    }
+                    // Kill by port to catch orphaned/renamed processes
+                    kill_sidecar_port();
                     println!("[window-close] Sidecar cleanup done");
                 }
                 _ => {}
@@ -1034,20 +1064,7 @@ pub fn run() {
     app.run(|_app_handle, event| {
         if let tauri::RunEvent::Exit = event {
             // Kill ALL sidecar processes on app exit (Cmd+Q, force quit, etc.)
-            #[cfg(unix)]
-            {
-                let _ = std::process::Command::new("pkill")
-                    .args(["-9", "scribble-sidecar"])
-                    .output();
-            }
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/F", "/IM", "scribble-sidecar.exe"])
-                    .creation_flags(0x08000000)
-                    .output();
-            }
+            kill_sidecar_port();
             println!("[exit] Sidecar cleaned up");
         }
     });
