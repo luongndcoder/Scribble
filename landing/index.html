@@ -333,102 +333,593 @@
         </div>
     </section>
 
-    <!-- ─── Installation Guide ─── -->
+    <!-- ─── Installation Guide Tour ─── -->
     <section id="install" class="install-section">
         <div class="container">
             <div class="section-head">
-                <span class="section-tag">Installation</span>
-                <h2>First-time <span class="gradient-text">setup guide</span></h2>
-                <p>Scribble is open-source and free. Since it's not signed with a commercial certificate, your OS may show a one-time security prompt.</p>
+                <span class="section-tag">Setup Guide</span>
+                <h2>Complete <span class="gradient-text">setup walkthrough</span></h2>
+                <p>Follow these steps to get Scribble running in under 5 minutes. Screenshots included for every step.</p>
             </div>
 
-            <div class="install-tabs">
-                <button class="install-tab active" data-tab="macos">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-                    macOS
-                </button>
-                <button class="install-tab" data-tab="windows">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
-                    Windows
-                </button>
-            </div>
-
-            <!-- macOS Tab -->
-            <div class="install-content active" data-content="macos">
-                <div class="install-steps">
-                    <div class="install-step">
-                        <div class="install-step-num">1</div>
-                        <div class="install-step-body">
-                            <h4>Download & open the DMG</h4>
-                            <p>Double-click the downloaded <code>.dmg</code> file and drag <strong>Scribble</strong> into your <strong>Applications</strong> folder.</p>
-                        </div>
+            <!-- ═══ Phase 1: Download & Install ═══ -->
+            <div class="guide-phase">
+                <div class="guide-phase-header">
+                    <div class="guide-phase-num">Phase 1</div>
+                    <div>
+                        <h3>Download & Install</h3>
+                        <p>Get Scribble on your machine</p>
                     </div>
-                    <div class="install-step">
-                        <div class="install-step-num">2</div>
-                        <div class="install-step-body">
-                            <h4>Bypass Gatekeeper warning</h4>
-                            <p>On first launch, macOS may show <em>"Scribble can't be opened because Apple cannot check it for malicious software."</em></p>
-                            <div class="install-methods">
-                                <div class="install-method">
-                                    <span class="method-label">Option A — System Settings</span>
-                                    <p>Open <strong>System Settings → Privacy & Security</strong>, scroll down and click <strong>"Open Anyway"</strong> next to the Scribble message.</p>
+                </div>
+
+                <div class="install-tabs">
+                    <button class="install-tab active" data-tab="macos">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+                        macOS
+                    </button>
+                    <button class="install-tab" data-tab="windows">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
+                        Windows
+                    </button>
+                </div>
+
+                <!-- ──── macOS Steps ──── -->
+                <div class="install-content active" data-content="macos">
+                    <div class="guide-steps">
+                        <!-- M1: Download DMG -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">1</div>
+                                <div class="guide-step-text">
+                                    <h4>Download the DMG file</h4>
+                                    <p>Go to <a href="https://github.com/luongndcoder/Scribble/releases" target="_blank" rel="noopener">GitHub Releases</a> and download the <code>.dmg</code> file (e.g. <code>Scribble_1.1.0_aarch64.dmg</code>). Find it in your <strong>Downloads</strong> folder.</p>
                                 </div>
-                                <div class="install-method">
-                                    <span class="method-label">Option B — Terminal (faster)</span>
-                                    <code class="install-code">xattr -cr /Applications/Scribble.app</code>
+                            </div>
+                            <div class="guide-step-img">
+                                <picture>
+                                    <source srcset="images/guide/processed/mac_downloads_dmg.webp" type="image/webp">
+                                    <img src="images/guide/processed/mac_downloads_dmg.png" alt="macOS Downloads folder with Scribble DMG file highlighted" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- M2: DMG Not Opened -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">2</div>
+                                <div class="guide-step-text">
+                                    <h4>Handle "Not Opened" warning</h4>
+                                    <p>Double-click the <code>.dmg</code> file. macOS may show a <strong>"Scribble_1.1.0_aarch64.dmg Not Opened"</strong> warning because it's unsigned. Click <strong>"Done"</strong> for now — we'll fix this in the next step.</p>
                                 </div>
+                            </div>
+                            <div class="guide-step-img guide-step-img--small">
+                                <picture>
+                                    <source srcset="images/guide/processed/mac_dmg_not_opened.webp" type="image/webp">
+                                    <img src="images/guide/processed/mac_dmg_not_opened.png" alt="macOS warning — Scribble DMG Not Opened, Apple could not verify" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- M3: Privacy & Security → Open Anyway (DMG) -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">3</div>
+                                <div class="guide-step-text">
+                                    <h4>Allow in Privacy & Security</h4>
+                                    <p>Open <strong>System Settings → Privacy & Security</strong>. Scroll down to find the Scribble message and click <strong>"Open Anyway"</strong> to allow the DMG to run.</p>
+                                    <div class="guide-tip">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                        Alternative: run <code>xattr -cr ~/Downloads/Scribble*.dmg</code> in Terminal
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="guide-step-img">
+                                <picture>
+                                    <source srcset="images/guide/processed/mac_security_open_anyway_dmg.webp" type="image/webp">
+                                    <img src="images/guide/processed/mac_security_open_anyway_dmg.png" alt="macOS Privacy & Security — Open Anyway for DMG" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- M4: Gatekeeper confirm (DMG) -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">4</div>
+                                <div class="guide-step-text">
+                                    <h4>Confirm opening the DMG</h4>
+                                    <p>A confirmation dialog will appear asking to open the DMG. Click <strong>"Open Anyway"</strong> and enter your password to proceed.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img guide-step-img--small">
+                                <picture>
+                                    <source srcset="images/guide/processed/mac_gatekeeper_open_dmg.webp" type="image/webp">
+                                    <img src="images/guide/processed/mac_gatekeeper_open_dmg.png" alt="macOS Gatekeeper — Open Anyway confirmation for DMG" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- M5: DMG drag install -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">5</div>
+                                <div class="guide-step-text">
+                                    <h4>Drag Scribble to Applications</h4>
+                                    <p>The DMG will open showing the Scribble app icon and an <strong>Applications</strong> folder shortcut. <strong>Drag the Scribble icon into Applications</strong> to install.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img">
+                                <picture>
+                                    <source srcset="images/guide/processed/mac_dmg_drag_install.webp" type="image/webp">
+                                    <img src="images/guide/processed/mac_dmg_drag_install.png" alt="macOS DMG installer — drag Scribble icon to Applications folder" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- M6: App Not Opened -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">6</div>
+                                <div class="guide-step-text">
+                                    <h4>Handle app "Not Opened" warning</h4>
+                                    <p>When you first launch Scribble from Applications, macOS shows another <strong>"Scribble Not Opened"</strong> warning. Click <strong>"Done"</strong> — we need to allow it through Privacy & Security again.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img guide-step-img--small">
+                                <picture>
+                                    <source srcset="images/guide/processed/mac_app_not_opened.webp" type="image/webp">
+                                    <img src="images/guide/processed/mac_app_not_opened.png" alt="macOS warning — Scribble app Not Opened" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- M7: Privacy & Security → Open Anyway (App) -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">7</div>
+                                <div class="guide-step-text">
+                                    <h4>Allow app in Privacy & Security</h4>
+                                    <p>Go back to <strong>System Settings → Privacy & Security</strong>. You'll see the Scribble app has been blocked. Click <strong>"Open Anyway"</strong> once more.</p>
+                                    <div class="guide-tip">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                        Or run: <code>xattr -cr /Applications/Scribble.app</code> to skip this step
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="guide-step-img">
+                                <picture>
+                                    <source srcset="images/guide/processed/mac_security_open_anyway_app.webp" type="image/webp">
+                                    <img src="images/guide/processed/mac_security_open_anyway_app.png" alt="macOS Privacy & Security — Open Anyway for Scribble app" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- M8: Gatekeeper confirm (App) -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">8</div>
+                                <div class="guide-step-text">
+                                    <h4>Confirm & open the app</h4>
+                                    <p>The Gatekeeper dialog appears one last time. Click <strong>"Open Anyway"</strong> and authenticate with your password or Touch ID.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img guide-step-img--small">
+                                <picture>
+                                    <source srcset="images/guide/processed/mac_gatekeeper_confirm_app.webp" type="image/webp">
+                                    <img src="images/guide/processed/mac_gatekeeper_confirm_app.png" alt="macOS Gatekeeper final confirmation — Open Anyway with password" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- M9: App launched -->
+                        <div class="guide-step guide-step--success">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num guide-step-num--done">✓</div>
+                                <div class="guide-step-text">
+                                    <h4>Scribble is installed!</h4>
+                                    <p>The app launches successfully. You'll see the main Scribble interface. Continue to Phase 2 to set up your API key.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img">
+                                <picture>
+                                    <source srcset="images/guide/processed/mac_app_launched.webp" type="image/webp">
+                                    <img src="images/guide/processed/mac_app_launched.png" alt="Scribble app main screen after successful installation on macOS" loading="lazy">
+                                </picture>
                             </div>
                         </div>
                     </div>
-                    <div class="install-step">
-                        <div class="install-step-num">3</div>
-                        <div class="install-step-body">
-                            <h4>Grant microphone access</h4>
-                            <p>macOS will ask for Microphone permission on first use. Click <strong>"Allow"</strong> to enable recording.</p>
+                </div>
+
+                <!-- ──── Windows Steps ──── -->
+                <div class="install-content" data-content="windows">
+                    <div class="guide-steps">
+                        <!-- W1: Download warning -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">1</div>
+                                <div class="guide-step-text">
+                                    <h4>Download the installer</h4>
+                                    <p>Go to <a href="https://github.com/luongndcoder/Scribble/releases" target="_blank" rel="noopener">GitHub Releases</a> and download <code>Scribble_1.1.0_x64-setup.exe</code>. Your browser will show a warning that it's not commonly downloaded — this is normal for new apps.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img">
+                                <picture>
+                                    <source srcset="images/guide/processed/win_download_warning.webp" type="image/webp">
+                                    <img src="images/guide/processed/win_download_warning.png" alt="Edge browser download warning — file isn't commonly downloaded" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- W2: Click three dots → Keep -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">2</div>
+                                <div class="guide-step-text">
+                                    <h4>Click the "⋯" menu → Keep</h4>
+                                    <p>Click the <strong>three-dot menu (⋯)</strong> on the download warning bar. Select <strong>"Keep"</strong> from the dropdown to keep the file instead of deleting it.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img">
+                                <picture>
+                                    <source srcset="images/guide/processed/win_keep_menu.webp" type="image/webp">
+                                    <img src="images/guide/processed/win_keep_menu.png" alt="Edge browser — click three dots then Keep to save the download" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- W3: Keep anyway -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">3</div>
+                                <div class="guide-step-text">
+                                    <h4>Click "Keep anyway"</h4>
+                                    <p>A second confirmation appears. Click <strong>"Keep anyway"</strong> to confirm saving the installer.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img">
+                                <picture>
+                                    <source srcset="images/guide/processed/win_keep_anyway.webp" type="image/webp">
+                                    <img src="images/guide/processed/win_keep_anyway.png" alt="Edge browser — Keep anyway confirmation dialog" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- W4: Find in Downloads -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">4</div>
+                                <div class="guide-step-text">
+                                    <h4>Open the installer</h4>
+                                    <p>Go to your <strong>Downloads</strong> folder and double-click <code>Scribble_1.1.0_x64-setup.exe</code> to start the installation.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img">
+                                <picture>
+                                    <source srcset="images/guide/processed/win_downloads_folder.webp" type="image/webp">
+                                    <img src="images/guide/processed/win_downloads_folder.png" alt="Windows Downloads folder — Scribble setup.exe highlighted" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- W5: SmartScreen Show more -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">5</div>
+                                <div class="guide-step-text">
+                                    <h4>Bypass SmartScreen — click "Show more"</h4>
+                                    <p>Windows Defender SmartScreen will show <strong>"This app might harm your device"</strong>. Click <strong>"Show more ∨"</strong> to reveal the option to proceed.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img guide-step-img--small">
+                                <picture>
+                                    <source srcset="images/guide/processed/win_smartscreen_showmore.webp" type="image/webp">
+                                    <img src="images/guide/processed/win_smartscreen_showmore.png" alt="Windows SmartScreen — This app might harm your device, Show more" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- W6: SmartScreen Run anyway -->
+                        <div class="guide-step">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num">6</div>
+                                <div class="guide-step-text">
+                                    <h4>Click "Install anyway"</h4>
+                                    <p>After clicking "Show more", the <strong>"Install anyway"</strong> button appears. Click it to proceed with the installation.</p>
+                                </div>
+                            </div>
+                            <div class="guide-step-img guide-step-img--small">
+                                <picture>
+                                    <source srcset="images/guide/processed/win_smartscreen_runanyway.webp" type="image/webp">
+                                    <img src="images/guide/processed/win_smartscreen_runanyway.png" alt="Windows SmartScreen — Install anyway button" loading="lazy">
+                                </picture>
+                            </div>
+                        </div>
+
+                        <!-- W7: Installation complete -->
+                        <div class="guide-step guide-step--success">
+                            <div class="guide-step-info">
+                                <div class="guide-step-num guide-step-num--done">✓</div>
+                                <div class="guide-step-text">
+                                    <h4>Installation complete!</h4>
+                                    <p>The installer wizard will guide you through the remaining steps. Choose your language, install location, and Scribble will be ready in seconds. Continue to Phase 2 to set up your API key.</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Windows Tab -->
-            <div class="install-content" data-content="windows">
-                <div class="install-steps">
-                    <div class="install-step">
-                        <div class="install-step-num">1</div>
-                        <div class="install-step-body">
-                            <h4>Run the installer</h4>
-                            <p>Double-click the downloaded <code>.exe</code> installer. Windows SmartScreen may show a warning.</p>
+            <!-- ═══ Phase 2: NVIDIA Account & API Key ═══ -->
+            <div class="guide-phase">
+                <div class="guide-phase-header">
+                    <div class="guide-phase-num">Phase 2</div>
+                    <div>
+                        <h3>Get your free NVIDIA API Key</h3>
+                        <p>Required for speech-to-text and AI features (free tier available)</p>
+                    </div>
+                </div>
+
+                <div class="guide-steps">
+                    <!-- N1: Visit build.nvidia.com -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">1</div>
+                            <div class="guide-step-text">
+                                <h4>Go to build.nvidia.com</h4>
+                                <p>Visit <a href="https://build.nvidia.com" target="_blank" rel="noopener"><strong>build.nvidia.com</strong></a> and click the <strong>"Login"</strong> button in the top-right corner. If you don't have an account yet, you'll need to create one.</p>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/nvidia_homepage_login.webp" type="image/webp">
+                                <img src="images/guide/processed/nvidia_homepage_login.png" alt="NVIDIA Build portal — Sign in with email to get started" loading="lazy">
+                            </picture>
                         </div>
                     </div>
-                    <div class="install-step">
-                        <div class="install-step-num">2</div>
-                        <div class="install-step-body">
-                            <h4>Bypass SmartScreen</h4>
-                            <p>If you see <em>"Windows protected your PC"</em>, this is normal for new software.</p>
-                            <div class="install-methods">
-                                <div class="install-method">
-                                    <span class="method-label">Click "More info"</span>
-                                    <p>Then click <strong>"Run anyway"</strong> to proceed with the installation.</p>
+
+                    <!-- N2: Create account -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">2</div>
+                            <div class="guide-step-text">
+                                <h4>Create your account</h4>
+                                <p>Fill in your <strong>email</strong>, <strong>password</strong>, complete the hCaptcha, then click <strong>"Create Account"</strong>. You can also sign up with Google or GitHub.</p>
+                            </div>
+                        </div>
+                        <div class="guide-step-img guide-step-img--small">
+                            <picture>
+                                <source srcset="images/guide/processed/nvidia_create_account.webp" type="image/webp">
+                                <img src="images/guide/processed/nvidia_create_account.png" alt="NVIDIA account creation form — email, password, hCaptcha" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+
+                    <!-- N3: Verify email -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">3</div>
+                            <div class="guide-step-text">
+                                <h4>Verify your email</h4>
+                                <p>NVIDIA will send a <strong>6-digit verification code</strong> to your email. Enter the code and click <strong>"Continue"</strong>.</p>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/nvidia_verify_email.webp" type="image/webp">
+                                <img src="images/guide/processed/nvidia_verify_email.png" alt="NVIDIA verify your email — enter 6-digit code" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+
+                    <!-- N4: Almost done -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">4</div>
+                            <div class="guide-step-text">
+                                <h4>Complete registration</h4>
+                                <p>Review your preference settings (optional). Click <strong>"Submit"</strong> to finalize your account. You'll be redirected to the NVIDIA dashboard.</p>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/nvidia_almost_done.webp" type="image/webp">
+                                <img src="images/guide/processed/nvidia_almost_done.png" alt="NVIDIA Almost done — complete registration with Submit button" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+
+                    <!-- N5: Generate API Key -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">5</div>
+                            <div class="guide-step-text">
+                                <h4>Generate your API Key</h4>
+                                <p>Navigate to <strong>API Keys</strong> in your dashboard and click <strong>"Generate API Key"</strong>. <strong>Copy the key immediately</strong> and save it somewhere safe — you won't be able to see it again!</p>
+                                <div class="guide-tip">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                    The free tier gives you 1,000 API credits/month — plenty for personal use.
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    <div class="install-step">
-                        <div class="install-step-num">3</div>
-                        <div class="install-step-body">
-                            <h4>Antivirus false positive</h4>
-                            <p>Some antivirus software may flag Scribble. This is a false positive common with Python-based apps.</p>
-                            <div class="install-methods">
-                                <div class="install-method">
-                                    <span class="method-label">How to whitelist</span>
-                                    <p>Open <strong>Windows Security → Virus & threat protection → Protection history</strong>. Find the blocked file, click <strong>"Actions" → "Allow"</strong>.</p>
-                                </div>
-                            </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/nvidia_api_keys_generate.webp" type="image/webp">
+                                <img src="images/guide/processed/nvidia_api_keys_generate.png" alt="NVIDIA API Keys dashboard — Generate API Key button" loading="lazy">
+                            </picture>
                         </div>
                     </div>
                 </div>
             </div>
 
+            <!-- ═══ Phase 3: Configure Scribble ═══ -->
+            <div class="guide-phase">
+                <div class="guide-phase-header">
+                    <div class="guide-phase-num">Phase 3</div>
+                    <div>
+                        <h3>Configure Scribble</h3>
+                        <p>Paste your API key and set up the AI model</p>
+                    </div>
+                </div>
+
+                <div class="guide-steps">
+                    <!-- C1: Riva Settings -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">1</div>
+                            <div class="guide-step-text">
+                                <h4>Open Settings → Riva (Speech-to-Text)</h4>
+                                <p>Launch Scribble, click the <strong>⚙️ Settings</strong> icon in the top-right corner. In the <strong>Riva</strong> section, you'll see the connection configuration fields.</p>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/config_riva_settings.webp" type="image/webp">
+                                <img src="images/guide/processed/config_riva_settings.png" alt="Scribble Settings — Riva speech-to-text configuration section" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+
+                    <!-- C2: Riva fields -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">2</div>
+                            <div class="guide-step-text">
+                                <h4>Enter Riva API Key & Server URL</h4>
+                                <p>Paste your NVIDIA API key into the <strong>API Key</strong> field. Then enter the server URL and click <strong>"Test Connection"</strong> to verify.</p>
+                                <div class="guide-config-block">
+                                    <div class="guide-config-row">
+                                        <span class="guide-config-label">API Key</span>
+                                        <code class="guide-config-value">nvapi-xxxx (your NVIDIA API key)</code>
+                                    </div>
+                                    <div class="guide-config-row">
+                                        <span class="guide-config-label">Server URL</span>
+                                        <code class="guide-config-value">grpc.nvcf.nvidia.com:443</code>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/config_riva_fields.webp" type="image/webp">
+                                <img src="images/guide/processed/config_riva_fields.png" alt="Scribble Settings — Riva API Key and Server URL input fields" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+
+                    <!-- C3: AI API Key -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">3</div>
+                            <div class="guide-step-text">
+                                <h4>Configure AI Assistant API Key</h4>
+                                <p>Scroll down to the <strong>AI Assistant</strong> section. Paste the same NVIDIA API key into the <strong>API Key</strong> field.</p>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/config_ai_api_key.webp" type="image/webp">
+                                <img src="images/guide/processed/config_ai_api_key.png" alt="Scribble Settings — AI Assistant API Key configuration" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+
+                    <!-- C4: AI Server URL & Model -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">4</div>
+                            <div class="guide-step-text">
+                                <h4>Set AI Server URL & Model</h4>
+                                <p>Enter the server address and model name in the AI Assistant section. Click <strong>"Save"</strong> to apply all settings.</p>
+                                <div class="guide-config-block">
+                                    <div class="guide-config-row">
+                                        <span class="guide-config-label">Server URL</span>
+                                        <code class="guide-config-value">https://integrate.api.nvidia.com/v1</code>
+                                    </div>
+                                    <div class="guide-config-row">
+                                        <span class="guide-config-label">Model</span>
+                                        <code class="guide-config-value">deepseek-ai/deepseek-v3.2</code>
+                                    </div>
+                                </div>
+                                <div class="guide-tip">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                                    You can use any compatible AI model. DeepSeek v3.2 is recommended for best results.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/config_ai_server_model.webp" type="image/webp">
+                                <img src="images/guide/processed/config_ai_server_model.png" alt="Scribble Settings — AI Server URL and Model Name configuration" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ Phase 4: Permissions & Start ═══ -->
+            <div class="guide-phase">
+                <div class="guide-phase-header">
+                    <div class="guide-phase-num">Phase 4</div>
+                    <div>
+                        <h3>Start Recording</h3>
+                        <p>Grant permissions and begin your first session</p>
+                    </div>
+                </div>
+
+                <div class="guide-steps">
+                    <!-- P1: Screen Recording dialog -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">1</div>
+                            <div class="guide-step-text">
+                                <h4>Grant Screen & System Audio <span class="guide-badge-macos">macOS only</span></h4>
+                                <p>When you first click <strong>"Record"</strong>, macOS will ask for <strong>Screen & System Audio Recording</strong> permission. Click <strong>"Open System Settings"</strong> to go directly to the permission panel.</p>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/perm_screen_recording_dialog.webp" type="image/webp">
+                                <img src="images/guide/processed/perm_screen_recording_dialog.png" alt="macOS Screen Recording permission dialog — Open System Settings" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+
+                    <!-- P2: Privacy & Security toggle -->
+                    <div class="guide-step">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num">2</div>
+                            <div class="guide-step-text">
+                                <h4>Enable Scribble in System Settings <span class="guide-badge-macos">macOS only</span></h4>
+                                <p>In <strong>System Settings → Privacy & Security → Screen & System Audio Recording</strong>, find <strong>Scribble</strong> in the list and <strong>toggle it ON</strong>. You may need to enter your password.</p>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/perm_toggle_scribble.webp" type="image/webp">
+                                <img src="images/guide/processed/perm_toggle_scribble.png" alt="macOS Privacy & Security — toggle Scribble ON for Screen & System Audio Recording" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+
+                    <!-- P3: Final success -->
+                    <div class="guide-step guide-step--success">
+                        <div class="guide-step-info">
+                            <div class="guide-step-num guide-step-num--done">✓</div>
+                            <div class="guide-step-text">
+                                <h4>You're all set! Start your first meeting</h4>
+                                <p>Create a new meeting, hit <strong>Record</strong>, and watch real-time transcription with speaker diarization appear instantly. Scribble identifies speakers automatically and streams the transcript live.</p>
+                            </div>
+                        </div>
+                        <div class="guide-step-img">
+                            <picture>
+                                <source srcset="images/guide/processed/result_live_transcription.webp" type="image/webp">
+                                <img src="images/guide/processed/result_live_transcription.png" alt="Scribble live transcription with speaker diarization — final result" loading="lazy">
+                            </picture>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- FAQ -->
             <div class="install-faq">
                 <h3>Frequently Asked Questions</h3>
                 <details class="faq-item">
@@ -440,8 +931,8 @@
                     <p>Scribble uses a Python backend (packaged with PyInstaller) that some antivirus engines mistakenly flag. This is a well-known false positive affecting many Python applications.</p>
                 </details>
                 <details class="faq-item">
-                    <summary>How do I verify the download is safe?</summary>
-                    <p>Always download from the <a href="https://github.com/luongndcoder/Scribble/releases" target="_blank" rel="noopener">official GitHub Releases</a> page. You can compare the SHA256 hash of your download with the one listed on the release page.</p>
+                    <summary>Do I need to pay for the NVIDIA API?</summary>
+                    <p>No. NVIDIA offers a free tier at <a href="https://build.nvidia.com" target="_blank" rel="noopener">build.nvidia.com</a> that provides enough credits for personal use. Sign up and generate an API key for free.</p>
                 </details>
             </div>
         </div>

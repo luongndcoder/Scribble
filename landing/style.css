@@ -807,6 +807,229 @@ a {
     text-underline-offset: 2px;
 }
 
+/* ─── Guide Tour ─── */
+.guide-phase {
+    max-width: 780px;
+    margin: 0 auto var(--space-3xl);
+}
+
+.guide-phase-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    margin-bottom: var(--space-xl);
+    padding-bottom: var(--space-md);
+    border-bottom: 1px solid var(--border);
+}
+
+.guide-phase-num {
+    padding: 6px 16px;
+    border-radius: var(--radius-full);
+    background: var(--gradient);
+    color: #fff;
+    font-family: var(--font-display);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+}
+
+.guide-phase-header h3 {
+    font-family: var(--font-display);
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.guide-phase-header p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.guide-steps {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+.guide-step {
+    border-radius: var(--radius-xl);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.guide-step:hover {
+    border-color: var(--border-hover);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.guide-step--success {
+    border-color: rgba(34, 197, 94, 0.3);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.06) 0%, var(--bg-card) 100%);
+}
+
+.guide-step-info {
+    display: flex;
+    gap: var(--space-md);
+    padding: var(--space-lg);
+}
+
+.guide-step-num {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(37, 99, 235, 0.15);
+    color: var(--primary-light);
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.guide-step-num--done {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22C55E;
+    font-size: 1.1rem;
+}
+
+.guide-step-text h4 {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: var(--space-xs);
+}
+
+.guide-step-text p {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.65;
+}
+
+.guide-step-text a {
+    color: var(--primary-light);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.guide-step-text a:hover {
+    color: var(--cta-light);
+}
+
+.guide-step-text code {
+    background: var(--bg-elevated);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    border: 1px solid var(--border);
+    font-family: 'Space Grotesk', monospace;
+}
+
+.guide-step-img {
+    padding: 0 var(--space-lg) var(--space-lg);
+}
+
+.guide-step-img img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.guide-step-img--small {
+    max-width: 420px;
+    margin: 0 auto;
+    padding-left: var(--space-lg);
+    padding-right: var(--space-lg);
+}
+
+.guide-step-img--small img {
+    width: 100%;
+}
+
+/* Guide Tip Callout */
+.guide-tip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius);
+    background: rgba(37, 99, 235, 0.06);
+    border: 1px solid rgba(37, 99, 235, 0.12);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.guide-tip svg {
+    color: var(--primary-light);
+    flex-shrink: 0;
+}
+
+/* Config Block */
+.guide-config-block {
+    margin-top: var(--space-md);
+    border-radius: var(--radius);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.guide-config-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+}
+
+.guide-config-row + .guide-config-row {
+    border-top: 1px solid var(--border);
+}
+
+.guide-config-label {
+    font-family: var(--font-display);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.guide-config-value {
+    font-family: 'Space Grotesk', monospace;
+    font-size: 0.82rem;
+    color: var(--cta-light);
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    user-select: all;
+    word-break: break-all;
+}
+
+/* macOS Badge */
+.guide-badge-macos {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    background: rgba(37, 99, 235, 0.1);
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--primary-light);
+    vertical-align: middle;
+    margin-left: 6px;
+}
+
 /* ─── Footer ─── */
 .footer {
     padding: var(--space-2xl) 0 var(--space-lg);
@@ -887,6 +1110,12 @@ a {
         background: linear-gradient(180deg, var(--border), var(--primary), var(--border));
         margin: 0;
     }
+
+    .guide-config-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-xs);
+    }
 }
 
 @media (max-width: 600px) {
@@ -922,6 +1151,33 @@ a {
 
     .nav-links a:not(.btn-nav):not(.nav-github) {
         display: none;
+    }
+
+    .guide-phase-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-sm);
+    }
+
+    .guide-step-info {
+        flex-direction: column;
+    }
+
+    .guide-step-img {
+        padding: 0 var(--space-md) var(--space-md);
+    }
+
+    .guide-step-img--small {
+        max-width: 100%;
+        padding-left: var(--space-md);
+        padding-right: var(--space-md);
+    }
+
+    .guide-badge-macos {
+        display: block;
+        margin-left: 0;
+        margin-top: 4px;
+        width: fit-content;
     }
 }
 
