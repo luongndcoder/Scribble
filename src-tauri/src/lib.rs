@@ -457,7 +457,7 @@ mod system_audio_windows {
                 0,
                 mix_format_ptr,
                 None,
-            ).ok().map_err(|e| format!("Failed to initialize audio client: {}", e))?;
+            ).map_err(|e| format!("Failed to initialize audio client: {}", e))?;
 
             // Get capture client
             let capture_client: IAudioCaptureClient = audio_client.GetService()
@@ -465,7 +465,7 @@ mod system_audio_windows {
 
             // Start capturing
             audio_client.Start()
-                .ok().map_err(|e| format!("Failed to start audio client: {}", e))?;
+                .map_err(|e| format!("Failed to start audio client: {}", e))?;
 
             // Signal ready with sample rate
             let _ = ready_tx.send(Ok(sample_rate));
@@ -874,9 +874,10 @@ async fn download_and_save_file(url: String, filename: String) -> Result<String,
         v
     } else {
         // Relative path — try both sidecar bases
+        let normalized = if url.starts_with('/') { url.clone() } else { format!("/{}", url) };
         vec![
-            format!("http://127.0.0.1:8765{}", if url.starts_with('/') { &url } else { &format!("/{}", url) }),
-            format!("http://localhost:8765{}", if url.starts_with('/') { &url } else { &format!("/{}", url) }),
+            format!("http://127.0.0.1:8765{}", normalized),
+            format!("http://localhost:8765{}", normalized),
         ]
     };
 
