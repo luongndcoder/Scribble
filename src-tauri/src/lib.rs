@@ -998,11 +998,34 @@ pub fn run() {
             stop_system_audio,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                let handle = window.app_handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = stop_sidecar(handle).await;
-                });
+            match event {
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                    // Synchronously kill sidecar — must complete before process exits
+                    let state = window.app_handle().state::<Mutex<SidecarState>>();
+                    if let Ok(mut guard) = state.lock() {
+                        if let Some(child) = guard.child.take() {
+                            child.kill();
+                            println!("[window-close] Killed sidecar via state");
+                        }
+                    }
+                    // Also pkill to catch any orphaned processes
+                    #[cfg(unix)]
+                    {
+                        let _ = std::process::Command::new("pkill")
+                            .args(["-9", "scribble-sidecar"])
+                            .output();
+                    }
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        let _ = std::process::Command::new("taskkill")
+                            .args(["/F", "/IM", "scribble-sidecar.exe"])
+                            .creation_flags(0x08000000)
+                            .output();
+                    }
+                    println!("[window-close] Sidecar cleanup done");
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())
