@@ -31,21 +31,33 @@ function extractMinutesTitle(summary: string): string | null {
     }
 
     const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const h1 = lines.find((line) => /^#\s+/.test(line));
-    if (h1) return h1.replace(/^#\s+/, '').trim().slice(0, 160);
 
+    // # Heading (h1)
+    const h1 = lines.find((line) => /^#\s+/.test(line));
+    if (h1) return h1.replace(/^#\s+/, '').replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+/u, '').trim().slice(0, 160) || null;
+
+    // ## Heading (h2) — some LLMs skip h1
+    const h2 = lines.find((line) => /^##\s+/.test(line));
+    if (h2) return h2.replace(/^##\s+/, '').replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+/u, '').trim().slice(0, 160) || null;
+
+    // Explicit "Tiêu đề:" / "Title:"
     const explicitTitle = lines.find((line) => /^(tiêu đề|tieu de|title)\s*[:\-]/i.test(line));
     if (explicitTitle) {
         return explicitTitle
             .replace(/^(tiêu đề|tieu de|title)\s*[:\-]\s*/i, '')
             .trim()
-            .slice(0, 160);
+            .slice(0, 160) || null;
     }
 
+    // **Bold title** on first line
+    const boldMatch = lines[0]?.match(/^\*\*(.+?)\*\*/);
+    if (boldMatch) return boldMatch[1].trim().slice(0, 160) || null;
+
+    // Fallback: first content line that isn't a list/heading marker
     const firstContent = lines.find((line) =>
-        !/^##\s+/.test(line) && !/^[-*]\s+/.test(line) && !/^\d+\.\s+/.test(line)
+        !/^[-*]\s+/.test(line) && !/^\d+\.\s+/.test(line) && line.length > 3
     );
-    return firstContent ? firstContent.slice(0, 160) : null;
+    return firstContent ? firstContent.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+/u, '').trim().slice(0, 160) || null : null;
 }
 
 async function openNvidiaWebSocket(preferredHttpBase: string | null): Promise<WebSocket | null> {
@@ -994,15 +1006,20 @@ export function RecordingBar() {
             if (mid && accumulated && !hasSseError) {
                 try {
                     const extractedTitle = extractMinutesTitle(accumulated);
-                    await fetchSidecar(`/meetings/${mid}`, {
+                    console.log('[RecordingBar] Extracted title:', extractedTitle, '| mid:', mid);
+                    const putBody: any = {
+                        summary: accumulated,
+                        status: 'saved',
+                    };
+                    if (extractedTitle) putBody.title = extractedTitle;
+                    const putRes = await fetchSidecar(`/meetings/${mid}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            summary: accumulated,
-                            status: 'saved',
-                            ...(extractedTitle ? { title: extractedTitle } : {}),
-                        }),
+                        body: JSON.stringify(putBody),
                     });
+                    if (!putRes.ok) {
+                        console.warn('[RecordingBar] PUT /meetings failed:', putRes.status, await putRes.text().catch(() => ''));
+                    }
 
                     const refreshed = await fetchSidecar(`/meetings/${mid}`);
                     if (refreshed.ok) {
@@ -1025,7 +1042,9 @@ export function RecordingBar() {
                             return { meetings: next };
                         });
                     }
-                } catch { }
+                } catch (saveErr) {
+                    console.warn('[RecordingBar] Failed to save summary/title:', saveErr);
+                }
             }
         } catch (e) {
             console.warn('[RecordingBar] Summarize failed:', e);
