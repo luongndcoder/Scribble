@@ -64,22 +64,22 @@ jobs:
       - name: Build Tauri
         run: npx tauri build
 
-      - name: Upload to Release v1.1.0
+      - name: Upload to Release
         run: |
           # Upload AppImage
           APPIMAGE=$(find src-tauri/target -name "*.AppImage" | head -1)
           if [ -n "$APPIMAGE" ]; then
-            cp "$APPIMAGE" "Scribble_1.1.0_amd64.AppImage"
-            gh release upload v1.1.0 "Scribble_1.1.0_amd64.AppImage" --clobber
-            echo "✅ Uploaded: Scribble_1.1.0_amd64.AppImage"
+            cp "$APPIMAGE" "Scribble_1.0.0_amd64.AppImage"
+            gh release upload v1.0.0-beta.4 "Scribble_1.0.0_amd64.AppImage" --clobber
+            echo "✅ Uploaded: Scribble_1.0.0_amd64.AppImage"
           fi
 
           # Upload deb
           DEB=$(find src-tauri/target -name "*.deb" | head -1)
           if [ -n "$DEB" ]; then
-            cp "$DEB" "scribble_1.1.0_amd64.deb"
-            gh release upload v1.1.0 "scribble_1.1.0_amd64.deb" --clobber
-            echo "✅ Uploaded: scribble_1.1.0_amd64.deb"
+            cp "$DEB" "scribble_1.0.0_amd64.deb"
+            gh release upload v1.0.0-beta.4 "scribble_1.0.0_amd64.deb" --clobber
+            echo "✅ Uploaded: scribble_1.0.0_amd64.deb"
           fi
 
           if [ -z "$APPIMAGE" ] && [ -z "$DEB" ]; then
