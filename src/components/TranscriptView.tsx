@@ -1,6 +1,7 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore, TranscriptPart } from '../stores/appStore';
 import { fetchSidecar } from '../lib/sidecar';
+import { splitTextIntoSentences, splitTranslationForSentences } from '../lib/transcriptUtils';
 
 const SPEAKER_COLORS = ['#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 const abortControllers: Record<number, AbortController> = {};
@@ -163,6 +164,13 @@ function TranscriptItem({ part }: { part: TranscriptPart }) {
         return `${m}:${s.toString().padStart(2, '0')}`;
     };
 
+    const sentences = useMemo(() => splitTextIntoSentences(part.text), [part.text]);
+    const translations = useMemo(
+        () => splitTranslationForSentences(sentences, part.translation || ''),
+        [sentences, part.translation]
+    );
+    const showSentenceMode = sentences.length > 1;
+
     return (
         <div className="group flex gap-3 hover:bg-bg-elevated/50 rounded-lg p-2 transition-colors">
             {/* Speaker badge */}
@@ -188,13 +196,29 @@ function TranscriptItem({ part }: { part: TranscriptPart }) {
                         {part.timestamp}
                     </span>
                 </div>
-                <p className="text-sm text-text leading-relaxed">{part.text}</p>
 
-                {/* Translation */}
-                {part.translation && (
-                    <div className="mt-1 text-sm text-primary/80 italic border-l-2 border-primary/30 pl-2">
-                        {part.translation}
+                {showSentenceMode ? (
+                    <div className="space-y-2">
+                        {sentences.map((sentence, si) => (
+                            <div key={si}>
+                                <p className="text-sm text-text leading-relaxed">{sentence}</p>
+                                {translations[si] && (
+                                    <p className="text-sm text-primary/70 italic pl-3 mt-0.5 leading-relaxed">
+                                        ↪ {translations[si]}
+                                    </p>
+                                )}
+                            </div>
+                        ))}
                     </div>
+                ) : (
+                    <>
+                        <p className="text-sm text-text leading-relaxed">{part.text}</p>
+                        {part.translation && (
+                            <div className="mt-1 text-sm text-primary/80 italic border-l-2 border-primary/30 pl-2">
+                                {part.translation}
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </div>

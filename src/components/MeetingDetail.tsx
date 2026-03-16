@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { splitTextIntoSentences, splitTranslationForSentences } from '../lib/transcriptUtils';
 import { TranscriptPart, useAppStore } from '../stores/appStore';
 import { getMeeting, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile } from '../lib/api';
 import { fetchSidecar } from '../lib/sidecar';
@@ -1038,10 +1039,7 @@ export function MeetingDetail() {
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="transcript-text">{part.text}</div>
-                                    )}
-                                    {part.translation && (
-                                        <div className="transcript-translation">{part.translation}</div>
+                                        <TranscriptSentences text={part.text} translation={part.translation || ''} />
                                     )}
                                 </div>
                             );
@@ -1127,5 +1125,37 @@ export function MeetingDetail() {
                 </div>
             )}
         </section>
+    );
+}
+
+function TranscriptSentences({ text, translation }: { text: string; translation: string }) {
+    const sentences = useMemo(() => splitTextIntoSentences(text), [text]);
+    const translations = useMemo(
+        () => splitTranslationForSentences(sentences, translation),
+        [sentences, translation]
+    );
+
+    if (sentences.length <= 1) {
+        return (
+            <>
+                <div className="transcript-text">{text}</div>
+                {translation && (
+                    <div className="transcript-translation">{translation}</div>
+                )}
+            </>
+        );
+    }
+
+    return (
+        <div className="transcript-sentences">
+            {sentences.map((sentence, si) => (
+                <div key={si} className="sentence-group">
+                    <div className="transcript-text">{sentence}</div>
+                    {translations[si] && (
+                        <div className="sentence-translation">↪ {translations[si]}</div>
+                    )}
+                </div>
+            ))}
+        </div>
     );
 }

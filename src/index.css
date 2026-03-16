@@ -2490,6 +2490,32 @@ body.electron-app .draft-recovery-banner {
   }
 }
 
+/* ─── Sentence-Level Transcript ─── */
+.transcript-sentences {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sentence-group {
+  padding: 2px 0;
+}
+
+.sentence-group + .sentence-group {
+  border-top: 1px solid var(--border, #e5e7eb);
+  padding-top: 6px;
+}
+
+.sentence-translation {
+  font-size: 0.82rem;
+  color: #2563eb;
+  font-style: italic;
+  padding-left: 12px;
+  margin-top: 2px;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
 /* ─── Speaker Diarization Badges ─── */
 .speaker-badge {
   display: inline-block;
