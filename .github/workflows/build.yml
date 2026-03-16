@@ -70,14 +70,14 @@ jobs:
         shell: bash
         run: npx tauri build -b nsis --target x86_64-pc-windows-msvc
 
-      - name: Upload to Release v1.1.0
+      - name: Upload to Release
         shell: bash
         run: |
           INSTALLER=$(find src-tauri/target -name "*.exe" -path "*/nsis/*" | head -1)
           if [ -n "$INSTALLER" ]; then
-            cp "$INSTALLER" "Scribble_1.1.0_x64-setup.exe"
-            gh release upload v1.1.0 "Scribble_1.1.0_x64-setup.exe" --clobber
-            echo "✅ Uploaded: Scribble_1.1.0_x64-setup.exe"
+            cp "$INSTALLER" "Scribble_1.0.0_x64-setup.exe"
+            gh release upload v1.0.0-beta.4 "Scribble_1.0.0_x64-setup.exe" --clobber
+            echo "✅ Uploaded: Scribble_1.0.0_x64-setup.exe"
           else
             echo "❌ No NSIS installer found"
             exit 1

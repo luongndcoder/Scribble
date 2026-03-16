@@ -65,3 +65,4 @@ Thumbs.db
 *.sln
 *.sw?
 .vercel
+releases/
