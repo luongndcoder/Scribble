@@ -15,7 +15,7 @@ STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.75
 MAX_SPEAKERS           = int(os.getenv("DIARIZE_MAX_SPEAKERS",             "8"))
 SWITCH_CONFIRM_HITS    = int(os.getenv("DIARIZE_SWITCH_CONFIRM_HITS",      "2"))
 NEW_SPEAKER_CONFIRM_HITS = int(os.getenv("DIARIZE_NEW_SPEAKER_CONFIRM_HITS", "2"))
-CROSS_GENDER_PENALTY   = float(os.getenv("DIARIZE_CROSS_GENDER_PENALTY",   "0.04"))
+CROSS_GENDER_PENALTY   = float(os.getenv("DIARIZE_CROSS_GENDER_PENALTY",   "0.06"))
 MERGE_SIM_THRESHOLD    = float(os.getenv("DIARIZE_MERGE_SIM_THRESHOLD",    "0.94"))
 EMA_UPDATE_MIN_SIM     = float(os.getenv("DIARIZE_EMA_UPDATE_MIN_SIM",     "0.50"))
 
@@ -29,7 +29,7 @@ PITCH_DIFF_DENOM                    = 120.0
 FEMALE_F0_HZ                        = 165.0
 MALE_F0_HZ                          = 145.0
 CROSS_GENDER_MIN_DIFF               = 25.0
-CROSS_GENDER_EXTRA_THRESHOLD        = 0.05
+CROSS_GENDER_EXTRA_THRESHOLD        = 0.07
 CROSS_GENDER_STRONG_MATCH_THRESHOLD = 0.85
 SOFT_CROSS_GENDER_FACTOR            = 0.003
 # Sticky / hysteresis
@@ -37,7 +37,7 @@ WEAK_MATCH_MARGIN                   = 0.04
 STICKY_RECENT_SEC                   = 5.0
 STICKY_SIM_MARGIN                   = 0.04
 LOW_PITCH_STICKY_BONUS              = 0.00
-STABLE_LAST_SPEAKER_BONUS           = 0.04
+STABLE_LAST_SPEAKER_BONUS           = 0.05
 # Switch confirmation
 SWITCH_STRONG_SIM                   = 0.75
 SWITCH_STRONG_GAP                   = 0.08
@@ -46,7 +46,7 @@ INSTANT_SWITCH_GAP                  = 0.15
 # New speaker debounce
 NEW_SPEAKER_MIN_SECONDS             = 1.5
 SAME_ZONE_WEAK_PITCH_DIFF_FEMALE    = 40.0
-SAME_ZONE_WEAK_PITCH_DIFF_MALE      = 60.0
+SAME_ZONE_WEAK_PITCH_DIFF_MALE      = 70.0
 NEW_SPEAKER_SELF_SIM                = 0.65
 NEW_SPEAKER_CONFIRM_WINDOW_SEC      = 8.0
 # Mouthprint
@@ -479,7 +479,7 @@ class SpeakerDiarizer:
                 if same_zone and not is_cross_gender:
                     tone_penalty = self._vi_tone_penalty(pitch_stats, p.get("pitch_stats"))
                     if curr_zone == "male":
-                        tone_penalty *= 1.15
+                        tone_penalty *= 1.05
                     adj_sim -= tone_penalty
                     if tone_penalty > 0:
                         dbg = f"{dbg},tp={tone_penalty:.3f}" if dbg else f"tp={tone_penalty:.3f}"
