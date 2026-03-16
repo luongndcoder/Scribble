@@ -242,5 +242,5 @@ export const saveSettings = (data: any) =>
     });
 
 // ─── Diagnostics ───
-export const diagnose = (lang: string) =>
-    request<any>(`/diagnose?lang=${lang}`);
+export const diagnose = (lang: string, signal?: AbortSignal) =>
+    request<any>(`/diagnose?lang=${lang}`, { signal });

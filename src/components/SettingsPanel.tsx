@@ -48,20 +48,35 @@ export function SettingsPanel() {
     const testStt = async () => {
         setSttTest(t('testing', lang));
         try {
-            // Save current values first so diagnose uses them
             await saveSettings(buildSettingsBody());
-            const r = await diagnose(lang);
-            setSttTest(r.stt?.status === 'ok' ? '✅ ' + r.stt.message : '❌ ' + (r.stt?.message || 'Error'));
-        } catch { setSttTest('❌ Cannot connect'); }
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 15000);
+            try {
+                const r = await diagnose(lang, controller.signal);
+                clearTimeout(timeout);
+                setSttTest(r.stt?.status === 'ok' ? '✅ ' + r.stt.message : '❌ ' + (r.stt?.message || 'Error'));
+            } catch (e: any) {
+                clearTimeout(timeout);
+                setSttTest(e?.name === 'AbortError' ? '❌ Connection timed out (15s)' : '❌ Cannot connect to sidecar');
+            }
+        } catch { setSttTest('❌ Cannot save settings'); }
     };
 
     const testLlm = async () => {
         setLlmTest(t('testing', lang));
         try {
             await saveSettings(buildSettingsBody());
-            const r = await diagnose(lang);
-            setLlmTest(r.llm?.status === 'ok' ? '✅ ' + r.llm.message : '❌ ' + (r.llm?.message || 'Error'));
-        } catch { setLlmTest('❌ Cannot connect'); }
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 15000);
+            try {
+                const r = await diagnose(lang, controller.signal);
+                clearTimeout(timeout);
+                setLlmTest(r.llm?.status === 'ok' ? '✅ ' + r.llm.message : '❌ ' + (r.llm?.message || 'Error'));
+            } catch (e: any) {
+                clearTimeout(timeout);
+                setLlmTest(e?.name === 'AbortError' ? '❌ Connection timed out (15s)' : '❌ Cannot connect to sidecar');
+            }
+        } catch { setLlmTest('❌ Cannot save settings'); }
     };
 
     return (

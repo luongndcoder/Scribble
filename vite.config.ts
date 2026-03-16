@@ -18,5 +18,12 @@ export default defineConfig(async () => ({
     watch: {
       ignored: ["**/src-tauri/**", "**/src-python/**"],
     },
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8765',
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api/, ''),
+      },
+    },
   },
 }));
