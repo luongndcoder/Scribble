@@ -25,38 +25,8 @@ if [ "$OS" = "linux" ]; then TRIPLE="${ARCH}-unknown-linux-gnu"; fi
 
 SIDECAR_NAME="scribble-sidecar"
 
-# Build
-pyinstaller \
-    --onefile \
-    --name "$SIDECAR_NAME" \
-    --add-data "models:models" \
-    --hidden-import=onnxruntime \
-    --hidden-import=uvicorn.logging \
-    --hidden-import=uvicorn.protocols.http \
-    --hidden-import=uvicorn.protocols.http.auto \
-    --hidden-import=uvicorn.protocols.http.h11_impl \
-    --hidden-import=uvicorn.protocols.websockets \
-    --hidden-import=uvicorn.protocols.websockets.auto \
-    --hidden-import=uvicorn.lifespan \
-    --hidden-import=uvicorn.lifespan.on \
-    --hidden-import=fastapi \
-    --hidden-import=starlette \
-    --hidden-import=starlette.responses \
-    --hidden-import=starlette.background \
-    --hidden-import=multipart \
-    --hidden-import=multipart.multipart \
-    --hidden-import=httpx \
-    --hidden-import=groq \
-    --hidden-import=openai \
-    --hidden-import=docx \
-    --hidden-import=riva \
-    --hidden-import=riva.client \
-    --hidden-import=grpcio \
-    --hidden-import=grpcio_tools \
-    --hidden-import=charset_normalizer \
-    --collect-all riva \
-    --noconfirm \
-    main.py
+# Build using spec file (AV-optimized: no UPX, excludes, version info)
+pyinstaller scribble-sidecar.spec --noconfirm --clean
 
 # Copy to Tauri binaries
 mkdir -p "$TARGET_DIR"

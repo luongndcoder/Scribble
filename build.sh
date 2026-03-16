@@ -22,14 +22,20 @@ fi
 
 echo "🔨 Building Scribble for: $PLATFORM"
 
-# ── Step 1: Build Python sidecar ──
+# ── Step 1: Build Python sidecar (AV-optimized: no UPX, excludes, version info) ──
 echo ""
 echo "📦 Building Python sidecar..."
 cd "$SIDECAR_DIR"
 
+# Activate venv if exists, otherwise use system python3
+if [ -f "$SIDECAR_DIR/.venv/bin/activate" ]; then
+    source "$SIDECAR_DIR/.venv/bin/activate"
+fi
+PYTHON_CMD="${PYTHON_CMD:-python3}"
+
 if [ "$PLATFORM" = "windows" ]; then
     SIDECAR_NAME="scribble-sidecar-x86_64-pc-windows-msvc.exe"
-    python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+    $PYTHON_CMD -m PyInstaller scribble-sidecar.spec --noconfirm --clean
     cp dist/scribble-sidecar.exe "$BINARIES_DIR/$SIDECAR_NAME"
 elif [ "$PLATFORM" = "macos" ]; then
     ARCH="$(uname -m)"
@@ -38,11 +44,11 @@ elif [ "$PLATFORM" = "macos" ]; then
     else
         SIDECAR_NAME="scribble-sidecar-x86_64-apple-darwin"
     fi
-    python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+    $PYTHON_CMD -m PyInstaller scribble-sidecar.spec --noconfirm --clean
     cp dist/scribble-sidecar "$BINARIES_DIR/$SIDECAR_NAME"
 elif [ "$PLATFORM" = "linux" ]; then
     SIDECAR_NAME="scribble-sidecar-x86_64-unknown-linux-gnu"
-    python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+    $PYTHON_CMD -m PyInstaller scribble-sidecar.spec --noconfirm --clean
     cp dist/scribble-sidecar "$BINARIES_DIR/$SIDECAR_NAME"
 fi
 echo "✅ Sidecar built: $SIDECAR_NAME"

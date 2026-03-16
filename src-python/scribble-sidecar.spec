@@ -1,12 +1,84 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
 from PyInstaller.utils.hooks import collect_all
 
 datas = [('models', 'models')]
 binaries = []
-hiddenimports = ['onnxruntime', 'uvicorn.logging', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.http.h11_impl', 'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan', 'uvicorn.lifespan.on', 'fastapi', 'starlette', 'starlette.responses', 'starlette.background', 'multipart', 'multipart.multipart', 'httpx', 'groq', 'openai', 'docx', 'riva', 'riva.client', 'grpcio', 'grpcio_tools', 'charset_normalizer']
+hiddenimports = [
+    'onnxruntime',
+    'uvicorn.logging',
+    'uvicorn.protocols.http',
+    'uvicorn.protocols.http.auto',
+    'uvicorn.protocols.http.h11_impl',
+    'uvicorn.protocols.websockets',
+    'uvicorn.protocols.websockets.auto',
+    'uvicorn.lifespan',
+    'uvicorn.lifespan.on',
+    'fastapi',
+    'starlette',
+    'starlette.responses',
+    'starlette.background',
+    'multipart',
+    'multipart.multipart',
+    'httpx',
+    'groq',
+    'openai',
+    'docx',
+    'riva',
+    'riva.client',
+    'grpcio',
+    'grpcio_tools',
+    'charset_normalizer',
+]
 tmp_ret = collect_all('riva')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
+# ── Aggressive excludes ──
+# These are transitive deps pulled in by collect_all('riva') and other packages.
+# None of these are needed for the sidecar (FastAPI + STT + Diarization).
+excludes = [
+    # Deep Learning frameworks (NOT needed — we use onnxruntime only)
+    'torch', 'torchvision', 'torchaudio', 'torchtext',
+    'tensorflow', 'tf2onnx', 'keras',
+    'transformers', 'diffusers', 'accelerate', 'safetensors',
+    'modelscope',
+
+    # LangChain / LLM frameworks (NOT needed — we call API directly)
+    'langchain', 'langchain_community', 'langchain_core', 'langchain_text_splitters',
+    'langsmith', 'langgraph',
+
+    # AWS / Cloud SDKs
+    'botocore', 'boto3', 'aiobotocore', 's3transfer',
+
+    # Data science (NOT needed)
+    'pandas', 'pyarrow', 'datasets', 'sklearn', 'scikit-learn',
+    'sympy', 'numba', 'llvmlite',
+    'matplotlib', 'PIL', 'pillow', 'cv2', 'opencv',
+    'networkx', 'nltk', 'spacy',
+
+    # Jupyter / IPython
+    'IPython', 'ipykernel', 'ipywidgets', 'jupyter', 'jupyter_client',
+    'jupyter_core', 'notebook', 'nbformat', 'nbconvert',
+    'jedi', 'parso', 'traitlets',
+
+    # ML experiment tracking
+    'wandb', 'tensorboard', 'mlflow',
+    'fontTools',
+
+    # Database / ORM (NOT needed)
+    'sqlalchemy', 'alembic',
+
+    # Other unnecessary
+    'tkinter', '_tkinter', 'turtle',
+    'unittest', 'pydoc', 'doctest',
+    'xmlrpc', 'ftplib', 'imaplib', 'smtplib', 'poplib', 'nntplib',
+    'test', 'tests',
+    'setuptools', 'pip', 'wheel', 'pkg_resources',
+    'pygments',
+    'pytz',
+    'googleapiclient', 'google_auth_httplib2',
+    'anthropic',
+]
 
 a = Analysis(
     ['main.py'],
@@ -17,7 +89,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
     optimize=0,
 )
@@ -33,7 +105,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,  # UPX compression triggers AV heuristics — disabled
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
@@ -42,4 +114,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version='version_info.txt' if sys.platform == 'win32' else None,
 )

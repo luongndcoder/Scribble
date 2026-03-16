@@ -5,7 +5,7 @@ REM Prerequisites: Python 3.10+, Node.js 20+, Rust, pnpm
 echo === Building Scribble for Windows ===
 echo.
 
-REM Step 1: Build Python sidecar
+REM Step 1: Build Python sidecar (AV-optimized: no UPX, excludes, version info)
 echo [1/3] Building Python sidecar...
 cd src-python
 pip install -r requirements.txt

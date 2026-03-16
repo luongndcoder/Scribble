@@ -121,32 +121,28 @@ export async function downloadMeetingAudio(
 ) {
     const path = `/meetings/${id}/audio?format=${encodeURIComponent(format)}`;
 
-    // In Tauri: use invoke to save via Rust, or open URL directly
+    // In Tauri: use invoke to save via Rust (tries multiple sidecar URLs)
     if ((window as any).__TAURI_INTERNALS__) {
         const { invoke } = await import('@tauri-apps/api/core');
-        try {
-            // Use Rust command to download and save directly (avoids JS memory overhead)
-            const savedPath = await invoke('download_and_save_file', {
-                url: sidecarUrl(SIDECAR_HTTP_BASES[0], path),
-                filename: fallbackName,
-            });
-            return savedPath;
-        } catch (e) {
-            console.warn('[api] Tauri download_and_save_file failed, trying JS fallback:', e);
-            // JS fallback: fetch then save via Rust
-            const res = await fetchSidecar(path);
-            if (!res.ok) throw new Error(await readResponseError(res));
-            const arrayBuffer = await res.arrayBuffer();
-            const bytes = Array.from(new Uint8Array(arrayBuffer));
-            await invoke('save_audio_file', {
-                bytes,
-                filename: fallbackName,
-            });
-            return;
+
+        // Try each sidecar base URL via Rust download (avoids JS memory issues)
+        for (const base of SIDECAR_HTTP_BASES) {
+            try {
+                const savedPath = await invoke('download_and_save_file', {
+                    url: sidecarUrl(base, path),
+                    filename: fallbackName,
+                });
+                return savedPath;
+            } catch (e) {
+                console.warn(`[api] Rust download via ${base} failed:`, e);
+            }
         }
+
+        // If all Rust downloads failed, throw with context
+        throw new Error('Audio download failed: could not connect to sidecar from any URL');
     }
 
-    // Browser fallback
+    // Browser fallback (non-Tauri)
     const res = await fetchSidecar(path);
     if (!res.ok) {
         throw new Error(await readResponseError(res));

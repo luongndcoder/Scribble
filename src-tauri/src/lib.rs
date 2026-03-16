@@ -1,18 +1,11 @@
 use std::sync::Mutex;
 use tauri::{Manager, Emitter};
-use tauri_plugin_shell::ShellExt;
 
-enum SidecarChild {
-    Tauri(tauri_plugin_shell::process::CommandChild),
-    Direct(std::process::Child),
-}
+struct SidecarChild(std::process::Child);
 
 impl SidecarChild {
-    fn kill(self) {
-        match self {
-            SidecarChild::Tauri(c) => { let _ = c.kill(); }
-            SidecarChild::Direct(mut c) => { let _ = c.kill(); }
-        }
+    fn kill(mut self) {
+        let _ = self.0.kill();
     }
 }
 
@@ -743,39 +736,7 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
             .output();
     }
 
-    // --- Attempt 1: Tauri sidecar API (skip on Windows — silently fails with NSIS installs) ---
-    #[cfg(not(windows))]
-    {
-        match app.shell().sidecar("scribble-sidecar") {
-            Ok(cmd) => {
-                match cmd.spawn() {
-                    Ok((mut rx, child)) => {
-                        state.child = Some(SidecarChild::Tauri(child));
-                        tauri::async_runtime::spawn(async move {
-                            use tauri_plugin_shell::process::CommandEvent;
-                            while let Some(event) = rx.recv().await {
-                                match event {
-                                    CommandEvent::Stdout(line) => println!("[sidecar] {}", String::from_utf8_lossy(&line)),
-                                    CommandEvent::Stderr(line) => eprintln!("[sidecar] {}", String::from_utf8_lossy(&line)),
-                                    CommandEvent::Terminated(p) => { println!("[sidecar] terminated: {:?}", p); break; }
-                                    _ => {}
-                                }
-                            }
-                        });
-                        return Ok("Sidecar started (tauri API)".to_string());
-                    }
-                    Err(e) => {
-                        eprintln!("[sidecar] Tauri spawn failed: {}, trying direct spawn...", e);
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[sidecar] Tauri sidecar command failed: {}, trying direct spawn...", e);
-            }
-        }
-    }
-
-    // --- Attempt 2: Direct spawn (resolves binary next to main exe) ---
+    // --- Resolve sidecar binary from onedir resource folder ---
     let exe_dir = std::env::current_exe()
         .map_err(|e| format!("Cannot find current exe: {}", e))?
         .parent()
@@ -787,27 +748,51 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     #[cfg(not(windows))]
     let sidecar_name = "scribble-sidecar";
 
-    let sidecar_path = exe_dir.join(sidecar_name);
+    // Determine the platform-specific sidecar folder name
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    let sidecar_folder = "scribble-sidecar-x86_64-pc-windows-msvc";
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let sidecar_folder = "scribble-sidecar-aarch64-apple-darwin";
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    let sidecar_folder = "scribble-sidecar-x86_64-apple-darwin";
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    let sidecar_folder = "scribble-sidecar-x86_64-unknown-linux-gnu";
+
+    // Search order: onedir folder next to exe, then macOS Resources, then legacy flat binary
+    let candidates = vec![
+        exe_dir.join(sidecar_folder).join(sidecar_name),
+        // macOS .app bundle: Resources is sibling to MacOS
+        exe_dir.join("../Resources").join(sidecar_folder).join(sidecar_name),
+        // Legacy: flat binary next to exe (backward compat)
+        exe_dir.join(sidecar_name),
+    ];
+
+    let sidecar_path = candidates.iter()
+        .find(|p| p.exists())
+        .cloned();
 
     // Write diagnostic log to ~/.voicescribe/ (visible on all platforms)
     let log_dir = dirs::home_dir().unwrap_or_default().join(".voicescribe");
     let _ = std::fs::create_dir_all(&log_dir);
     let log_path = log_dir.join("sidecar-launch.log");
     let log_msg = format!(
-        "[{:?}] exe_dir={:?}, sidecar_path={:?}, exists={}, tauri_api_failed=true\n",
+        "[{:?}] exe_dir={:?}, candidates={:?}, resolved={:?}\n",
         std::time::SystemTime::now(),
-        exe_dir, sidecar_path, sidecar_path.exists()
+        exe_dir, candidates, sidecar_path
     );
     let _ = std::fs::write(&log_path, &log_msg);
 
-    if !sidecar_path.exists() {
-        let err = format!(
-            "Sidecar binary not found at {:?}. Checked: {:?}",
-            sidecar_path, exe_dir
-        );
-        let _ = std::fs::write(&log_path, format!("{}{}\n", log_msg, err));
-        return Err(err);
-    }
+    let sidecar_path = match sidecar_path {
+        Some(p) => p,
+        None => {
+            let err = format!(
+                "Sidecar binary not found. Searched: {:?}",
+                candidates
+            );
+            let _ = std::fs::write(&log_path, format!("{}{}\n", log_msg, err));
+            return Err(err);
+        }
+    };
 
     // Redirect sidecar output to log file for diagnostics
     let sidecar_log = std::fs::File::create(log_dir.join("sidecar-output.log"))
@@ -831,7 +816,7 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
             let pid = child.id();
             let success_msg = format!("{}Sidecar spawned OK, pid={}\n", log_msg, pid);
             let _ = std::fs::write(&log_path, &success_msg);
-            state.child = Some(SidecarChild::Direct(child));
+            state.child = Some(SidecarChild(child));
             Ok(format!("Sidecar started (direct spawn, pid={})", pid))
         }
         Err(e) => {
@@ -874,23 +859,54 @@ async fn download_and_save_file(url: String, filename: String) -> Result<String,
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
     let save_path = downloads_dir.join(&filename);
 
-    let response = reqwest::get(&url)
-        .await
-        .map_err(|e| format!("Download failed: {}", e))?;
+    // Build list of URLs to try (handles both absolute URLs and relative paths)
+    let urls_to_try: Vec<String> = if url.starts_with("http://") || url.starts_with("https://") {
+        // Absolute URL provided — also try with localhost if 127.0.0.1 was used, and vice versa
+        let alt = if url.contains("127.0.0.1") {
+            Some(url.replace("127.0.0.1", "localhost"))
+        } else if url.contains("localhost") {
+            Some(url.replace("localhost", "127.0.0.1"))
+        } else {
+            None
+        };
+        let mut v = vec![url.clone()];
+        if let Some(a) = alt { v.push(a); }
+        v
+    } else {
+        // Relative path — try both sidecar bases
+        vec![
+            format!("http://127.0.0.1:8765{}", if url.starts_with('/') { &url } else { &format!("/{}", url) }),
+            format!("http://localhost:8765{}", if url.starts_with('/') { &url } else { &format!("/{}", url) }),
+        ]
+    };
 
-    if !response.status().is_success() {
-        return Err(format!("Download failed with status: {}", response.status()));
+    let mut last_err = String::from("No URLs to try");
+    for try_url in &urls_to_try {
+        match reqwest::get(try_url).await {
+            Ok(response) => {
+                if !response.status().is_success() {
+                    last_err = format!("HTTP {} from {}", response.status(), try_url);
+                    continue;
+                }
+                match response.bytes().await {
+                    Ok(bytes) => {
+                        std::fs::write(&save_path, &bytes)
+                            .map_err(|e| format!("Failed to save to {:?}: {}", save_path, e))?;
+                        println!("[download] Saved {} bytes to {:?} (from {})", bytes.len(), save_path, try_url);
+                        return Ok(save_path.to_string_lossy().to_string());
+                    }
+                    Err(e) => {
+                        last_err = format!("Failed to read response from {}: {}", try_url, e);
+                    }
+                }
+            }
+            Err(e) => {
+                last_err = format!("Connection to {} failed: {}", try_url, e);
+            }
+        }
     }
 
-    let bytes = response.bytes()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
-
-    std::fs::write(&save_path, &bytes)
-        .map_err(|e| format!("Failed to save file: {}", e))?;
-
-    println!("[download] Saved {} bytes to {:?}", bytes.len(), save_path);
-    Ok(save_path.to_string_lossy().to_string())
+    Err(format!("Download failed after trying all URLs: {}", last_err))
 }
 
 #[tauri::command]
