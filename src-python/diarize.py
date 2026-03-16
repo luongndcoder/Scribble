@@ -37,7 +37,7 @@ WEAK_MATCH_MARGIN                   = 0.04
 STICKY_RECENT_SEC                   = 5.0
 STICKY_SIM_MARGIN                   = 0.04
 LOW_PITCH_STICKY_BONUS              = 0.00
-STABLE_LAST_SPEAKER_BONUS           = 0.05
+STABLE_LAST_SPEAKER_BONUS           = 0.06
 # Switch confirmation
 SWITCH_STRONG_SIM                   = 0.75
 SWITCH_STRONG_GAP                   = 0.08
@@ -46,7 +46,7 @@ INSTANT_SWITCH_GAP                  = 0.15
 # New speaker debounce
 NEW_SPEAKER_MIN_SECONDS             = 1.5
 SAME_ZONE_WEAK_PITCH_DIFF_FEMALE    = 40.0
-SAME_ZONE_WEAK_PITCH_DIFF_MALE      = 70.0
+SAME_ZONE_WEAK_PITCH_DIFF_MALE      = 90.0
 NEW_SPEAKER_SELF_SIM                = 0.65
 NEW_SPEAKER_CONFIRM_WINDOW_SEC      = 8.0
 # Mouthprint
@@ -479,7 +479,7 @@ class SpeakerDiarizer:
                 if same_zone and not is_cross_gender:
                     tone_penalty = self._vi_tone_penalty(pitch_stats, p.get("pitch_stats"))
                     if curr_zone == "male":
-                        tone_penalty *= 1.05
+                        tone_penalty *= 0.85  # dampen male same-zone penalty to prevent over-splitting
                     adj_sim -= tone_penalty
                     if tone_penalty > 0:
                         dbg = f"{dbg},tp={tone_penalty:.3f}" if dbg else f"tp={tone_penalty:.3f}"
@@ -541,9 +541,9 @@ class SpeakerDiarizer:
             if (best_profile is not None and pitch_mean is not None
                     and best_profile.get("pitch_mean") is not None
                     and pitch_mean < FEMALE_F0_HZ and best_profile.get("pitch_mean") < FEMALE_F0_HZ):
-                male_reduction = 0.03  # conservative — prevents merging different male voices
+                male_reduction = 0.06  # aggressive — strongly prefer matching existing male profile
                 if pitch_mean <= 130.0 and best_profile.get("pitch_mean", 999) <= 130.0:
-                    male_reduction += 0.01  # small extra for genuinely bass voices ≤130 Hz
+                    male_reduction += 0.02  # extra for bass voices ≤130 Hz
                 adaptive_threshold -= male_reduction
 
             if best_cross_gender:
@@ -658,7 +658,7 @@ class SpeakerDiarizer:
                                   and last_profile.get("pitch_mean") is not None and last_profile.get("pitch_mean") < FEMALE_F0_HZ)
                 is_female_sticky = (pitch_mean is not None and pitch_mean >= FEMALE_F0_HZ
                                     and last_profile.get("pitch_mean") is not None and last_profile.get("pitch_mean") >= FEMALE_F0_HZ)
-                eff_margin = STICKY_SIM_MARGIN + (0.02 if is_male_sticky else 0.0)
+                eff_margin = STICKY_SIM_MARGIN + (0.04 if is_male_sticky else 0.0)
                 sticky_threshold = adaptive_threshold - WEAK_MATCH_MARGIN
 
                 if (not last_cross_gender and not last_far_pitch and not last_far_mouth
