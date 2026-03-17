@@ -1015,6 +1015,7 @@ pub fn run() {
                     let _ = window.with_webview(|webview| {
                         use webkit2gtk::WebViewExt;
                         use webkit2gtk::PermissionRequestExt;
+                        use webkit2gtk::glib::ObjectExt;
                         let wv = webview.inner();
                         wv.connect_permission_request(|_wv, request: &webkit2gtk::PermissionRequest| {
                             if request.is::<webkit2gtk::UserMediaPermissionRequest>() {
