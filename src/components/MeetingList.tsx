@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
 import {
     getMeetings,
@@ -19,6 +19,13 @@ export function MeetingList() {
     const [editingMeetingId, setEditingMeetingId] = useState<number | null>(null);
     const [editingTitle, setEditingTitle] = useState('');
     const [busyMap, setBusyMap] = useState<Record<string, boolean>>({});
+    const [searchQuery, setSearchQuery] = useState('');
+
+    const filteredMeetings = useMemo(() => {
+        if (!searchQuery.trim()) return meetings;
+        const q = searchQuery.toLowerCase();
+        return meetings.filter((m) => String(m.title || '').toLowerCase().includes(q));
+    }, [meetings, searchQuery]);
 
     useEffect(() => {
         loadMeetings();
@@ -64,12 +71,18 @@ export function MeetingList() {
         try {
             await resetDiarize();
         } catch { }
-        useAppStore.getState().clearTranscript();
-        useAppStore.getState().setDraftId(null);
-        useAppStore.getState().setSeconds(0);
-        setActiveTab('recording');
+        const store = useAppStore.getState();
+        // Reset all state for a fresh meeting
+        store.clearTranscript();
+        store.setDraftId(null);
+        store.setSeconds(0);
+        store.setInterimText('');
+        store.setInterimSpeaker('Speaker 1', 0);
+        store.setIsTranscribing(false);
+        store.setTransientSummary('');
         setCurrentMeetingId(null);
-        setCurrentView('recording');
+        setActiveTab('recording');
+        setCurrentView('detail');
     };
 
     const parseSqliteTimestamp = (raw: string): Date => {
@@ -243,10 +256,61 @@ export function MeetingList() {
                     </button>
                 </div>
             </div>
+
+            {/* Search + Stats row */}
+            {meetings.length > 0 && (
+                <div className="meetings-toolbar">
+                    <div className="meetings-search-wrap">
+                        <svg className="meetings-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                        </svg>
+                        <input
+                            className="meetings-search-input"
+                            type="search"
+                            placeholder={lang === 'vi' ? 'Tìm cuộc họp...' : 'Search meetings...'}
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                        {searchQuery && (
+                            <button className="meetings-search-clear" onClick={() => setSearchQuery('')} aria-label="Clear search">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
+                    <span className="meetings-count">
+                        {filteredMeetings.length !== meetings.length
+                            ? `${filteredMeetings.length} / ${meetings.length}`
+                            : meetings.length}{' '}
+                        {lang === 'vi' ? 'cuộc họp' : 'meetings'}
+                    </span>
+                </div>
+            )}
+
             <div className="meetings-grid">
-                {meetings.length === 0 ? (
-                    <div className="list-empty">{lang === 'vi' ? 'Chưa có cuộc họp nào' : 'No meetings yet'}</div>
-                ) : meetings.map((m) => (
+                {filteredMeetings.length === 0 && meetings.length === 0 ? (
+                    <div className="list-empty">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3, marginBottom: 12 }}>
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" />
+                        </svg>
+                        <div>{lang === 'vi' ? 'Chưa có cuộc họp nào' : 'No meetings yet'}</div>
+                        <div style={{ fontSize: '0.82rem', marginTop: 4, opacity: 0.6 }}>
+                            {lang === 'vi' ? 'Nhấn "Cuộc họp mới" để bắt đầu' : 'Click "New Meeting" to get started'}
+                        </div>
+                    </div>
+                ) : filteredMeetings.length === 0 ? (
+                    <div className="list-empty">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3, marginBottom: 10 }}>
+                            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                        </svg>
+                        <div>{lang === 'vi' ? 'Không tìm thấy cuộc họp nào' : 'No meetings found'}</div>
+                        <div style={{ fontSize: '0.82rem', marginTop: 4, opacity: 0.6 }}>
+                            {lang === 'vi' ? `Không khớp với "${searchQuery}"` : `No match for "${searchQuery}"`}
+                        </div>
+                    </div>
+                ) : filteredMeetings.map((m) => (
                     <div className="meeting-card" key={m.id}>
                         <div className="meeting-card-info" onClick={() => openMeeting(m)}>
                             <div className={`meeting-card-title ${editingMeetingId === m.id ? 'editing' : ''}`}>
@@ -257,6 +321,7 @@ export function MeetingList() {
                                             className="meeting-title-input"
                                             value={editingTitle}
                                             onChange={(e) => setEditingTitle(e.target.value)}
+                                            onBlur={() => void saveRename(m.id)}
                                             onKeyDown={(e) => {
                                                 if (e.key === 'Escape') {
                                                     e.preventDefault();
@@ -264,24 +329,11 @@ export function MeetingList() {
                                                 }
                                                 if (e.key === 'Enter') {
                                                     e.preventDefault();
-                                                    void saveRename(m.id);
+                                                    (e.target as HTMLInputElement).blur();
                                                 }
                                             }}
                                             autoFocus
                                         />
-                                        <button
-                                            className="card-inline-btn"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                void saveRename(m.id);
-                                            }}
-                                            disabled={!editingTitle.trim() || isBusy('rename', m.id)}
-                                        >
-                                            {lang === 'vi' ? 'Lưu' : 'Save'}
-                                        </button>
-                                        <button className="card-inline-btn" onClick={(e) => cancelRename(e)}>
-                                            {lang === 'vi' ? 'Hủy' : 'Cancel'}
-                                        </button>
                                     </div>
                                 ) : (
                                     m.title || 'Untitled Meeting'
@@ -308,7 +360,7 @@ export function MeetingList() {
                             <button
                                 className={`card-action-btn${isBusy('audio', m.id) ? ' is-busy' : ''}`}
                                 onClick={(e) => void exportAudio(e, m)}
-                                disabled={isBusy('audio', m.id) || m.audio_duration <= 0}
+                                disabled={isBusy('audio', m.id)}
                                 title={lang === 'vi' ? 'Tải file ghi âm' : 'Download audio'}
                                 aria-label={lang === 'vi' ? 'Tải file ghi âm' : 'Download audio'}
                             >

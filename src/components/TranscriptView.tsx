@@ -9,19 +9,11 @@ const abortControllers: Record<number, AbortController> = {};
 export function TranscriptView() {
     const { transcriptParts, translationEnabled, setTranslationEnabled, translationLang, setTranslationLang } = useAppStore();
     const bottomRef = useRef<HTMLDivElement>(null);
-    const interimRef = useRef<HTMLDivElement>(null);
     const scrollRaf = useRef<number>(0);
 
-    // Direct DOM subscription for interim text — zero re-renders
+    // Auto-scroll on transcript changes
     useEffect(() => {
-        const unsub = useAppStore.subscribe((state) => {
-            if (interimRef.current) {
-                const text = state.interimText;
-                interimRef.current.style.display = (state.isTranscribing && text) ? 'flex' : 'none';
-                const textEl = interimRef.current.querySelector('.interim-text');
-                if (textEl) textEl.textContent = text;
-            }
-            // Throttled scroll
+        const unsub = useAppStore.subscribe(() => {
             cancelAnimationFrame(scrollRaf.current);
             scrollRaf.current = requestAnimationFrame(() => {
                 bottomRef.current?.scrollIntoView({ behavior: 'auto' });
@@ -142,12 +134,6 @@ export function TranscriptView() {
                 {transcriptParts.map((part, idx) => (
                     <TranscriptItem key={idx} part={part} />
                 ))}
-
-                {/* Live typing indicator — updated via ref, no re-renders */}
-                <div className="interim-bubble" ref={interimRef} style={{ display: 'none' }}>
-                    <span className="interim-dot" />
-                    <span className="interim-text"></span>
-                </div>
 
                 <div ref={bottomRef} />
             </div>

@@ -1,57 +1,68 @@
 """
-Summarization module — SSE streaming via LLM
+Summarization module -- SSE streaming via LLM
+Supports single-pass (short transcripts) and MapReduce (long transcripts).
 """
 
 import os
 import json
 from typing import Generator
 
+from logger import get_logger
 
-SUMMARY_PROMPT_VI = """Bạn là trợ lý viết MoM (Minutes of Meeting) cấp senior cho đội ngũ customer-facing.
+log = get_logger(__name__)
 
-Mục tiêu MoM:
-- Không chỉ tường thuật nội dung, mà phải là công cụ communication, quản trị rủi ro và điều phối kỳ vọng stakeholders.
-- Người đọc gồm: người tham gia họp và người không tham gia họp.
 
-Các nội dung bắt buộc:
-1. Thời gian và thành phần tham gia (nêu rõ vai trò nếu có).
-2. Link recording gốc.
-3. Mục tiêu cuộc họp: vấn đề/nguyên nhân và output cần đạt.
-4. Nội dung trao đổi chính (key discussion): lọc ý quan trọng, không tường thuật lan man.
-5. Các quyết định quan trọng đã chốt.
-6. Action items theo What - Who - When (task gì, PIC là ai/đơn vị nào, deadline/checkpoint khi nào).
+# ── Thresholds ──
+SINGLE_PASS_MAX_CHARS = 120_000  # ~30k tokens
+CHUNK_CHARS = 8_000              # ~2k tokens per chunk
+OVERLAP_CHARS = 500              # context overlap between chunks
 
-Nếu là họp với khách hàng (external), cần làm rõ:
-- 1-3 điểm Mobio nhất định cần khách hàng nhớ hoặc thực hiện.
-- Dự báo/cảnh báo rủi ro có thể ảnh hưởng action items.
-- Văn phong: chuyên nghiệp, khách quan, sắc nét, thuyết phục.
+# ── Prompts ──
+SUMMARY_PROMPT_VI = """Ban la tro ly viet MoM (Minutes of Meeting) cap senior cho doi ngu customer-facing.
 
-Nếu là MoM nội bộ (internal), cần bổ sung:
-- Customer Insights & Politics: thái độ stakeholders, ai ủng hộ/ai gây khó khăn.
-- Game Plan: kế hoạch ứng phó và chuẩn bị cho buổi họp tiếp theo.
-- Ghi chú người viết: cảm nhận/đánh giá cá nhân cần lưu ý nội bộ.
-- Implicit info: thông tin ngầm quan trọng cho người đọc MoM.
-- Văn phong: chi tiết, thẳng thắn, không nói giảm nói tránh.
+Muc tieu MoM:
+- Khong chi tuong thuat noi dung, ma phai la cong cu communication, quan tri rui ro va dieu phoi ky vong stakeholders.
+- Nguoi doc gom: nguoi tham gia hop va nguoi khong tham gia hop.
 
-Lưu ý chất lượng:
-- Không bịa thông tin. Nếu thiếu dữ liệu, ghi rõ "Chưa có dữ liệu".
-- Không liệt kê toàn bộ transcript; chỉ giữ nội dung then chốt.
-- Nhấn mạnh mức độ nóng/rủi ro đúng thực tế.
+Cac noi dung bat buoc:
+1. Thoi gian & thanh phan tham gia (neu ro vai tro neu co).
+2. Link recording goc.
+3. Muc tieu cuoc hop: van de/nguyen nhan va output can dat.
+4. Noi dung trao doi chinh (key discussion): loc y quan trong, khong tuong thuat lan man.
+5. Cac quyet dinh quan trong da chot.
+6. Action items theo What - Who - When (task gi, PIC la ai/don vi nao, deadline/checkpoint khi nao).
 
-Yêu cầu đầu ra:
-- Trả về tiếng Việt, dạng Markdown dễ đọc.
-- Dòng đầu tiên bắt buộc: `# <Tên biên bản ngắn gọn>`.
-- Dùng đúng cấu trúc sau:
-## 1. Thời gian & thành phần tham gia
-## 2. Link recording gốc
-## 3. Mục tiêu cuộc họp
+Neu la hop voi khach hang (external), can lam ro:
+- 1-3 diem Mobio nhat dinh can khach hang nho hoac thuc hien.
+- Du bao/canh bao rui ro co the anh huong action items.
+- Van phong: chuyen nghiep, khach quan, sac net, thuyet phuc.
+
+Neu la MoM noi bo (internal), can bo sung:
+- Customer Insights & Politics: thai do stakeholders, ai ung ho/ai gay kho khan.
+- Game Plan: ke hoach ung pho va chuan bi cho buoi hop tiep theo.
+- Ghi chu nguoi viet: cam nhan/danh gia ca nhan can luu y noi bo.
+- Implicit info: thong tin ngam quan trong cho nguoi doc MoM.
+- Van phong: chi tiet, thang than, khong noi giam noi tranh.
+
+Luu y chat luong:
+- Khong bia thong tin. Neu thieu du lieu, ghi ro "Chua co du lieu".
+- Khong liet ke toan bo transcript; chi giu noi dung then chot.
+- Nhan manh muc do nong/rui ro dung thuc te.
+
+Yeu cau dau ra:
+- Tra ve tieng Viet, dang Markdown de doc.
+- Dong dau tien bat buoc: `# <Ten bien ban ngan gon>`.
+- Dung dung cau truc sau:
+## 1. Thoi gian & thanh phan tham gia
+## 2. Link recording goc
+## 3. Muc tieu cuoc hop
 ## 4. Key discussion
 ## 5. Key decisions
 ## 6. Action items (What - Who - When)
-## 7. Rủi ro & cảnh báo
-## 8. External MoM (nếu có khách hàng, không thì ghi "Không áp dụng")
-## 9. Internal MoM (insights/politics, game plan, ghi chú, implicit info)
-## 10. 1-3 ưu tiên follow-up ngay
+## 7. Rui ro & canh bao
+## 8. External MoM (neu co khach hang, khong thi ghi "Khong ap dung")
+## 9. Internal MoM (insights/politics, game plan, ghi chu, implicit info)
+## 10. 1-3 uu tien follow-up ngay
 """
 
 SUMMARY_PROMPT_EN = """You are a senior MoM (Minutes of Meeting) assistant.
@@ -77,30 +88,120 @@ Rules:
 - Return Markdown only.
 """
 
+CHUNK_SUMMARY_PROMPT_VI = """Tom tat doan hoi thoai sau. Giu lai cac y chinh, quyet dinh, action items, va ten nguoi noi.
+Khong bo sung thong tin. Tra ve tieng Viet, dang bullet points ngan gon (toi da 300 tu)."""
 
-def summarize_stream(transcript: str, language: str, db) -> Generator[str, None, None]:
-    """Stream meeting summary token-by-token via SSE."""
+CHUNK_SUMMARY_PROMPT_EN = """Summarize the following conversation segment. Keep key points, decisions, action items, and speaker names.
+Do not add information. Return concise bullet points (max 300 words)."""
+
+REDUCE_PROMPT_VI = """Duoi day la cac ban tom tat tung phan cua mot cuoc hop dai.
+Hay tong hop thanh MoM hoan chinh theo cau truc yeu cau."""
+
+REDUCE_PROMPT_EN = """Below are partial summaries from different segments of a long meeting.
+Synthesize them into a complete MoM following the required structure."""
+
+
+def _chunk_transcript(transcript: str) -> list[str]:
+    """Split transcript into overlapping chunks of ~CHUNK_CHARS each."""
+    lines = transcript.split('\n')
+    segments: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for line in lines:
+        current.append(line)
+        current_len += len(line) + 1  # +1 for newline
+
+        if current_len >= CHUNK_CHARS:
+            segments.append('\n'.join(current))
+            # Keep overlap for context continuity
+            overlap_lines: list[str] = []
+            overlap_len = 0
+            for i in range(len(current) - 1, -1, -1):
+                overlap_len += len(current[i]) + 1
+                if overlap_len >= OVERLAP_CHARS:
+                    break
+                overlap_lines.insert(0, current[i])
+            current = overlap_lines
+            current_len = overlap_len
+
+    # Don't forget the last chunk
+    if current:
+        segments.append('\n'.join(current))
+
+    return segments
+
+
+def summarize_stream(transcript: str, language: str, db, *, start_time: str = "", end_time: str = "") -> Generator[str, None, None]:
+    """Stream meeting summary token-by-token via SSE.
+    Uses single-pass for short transcripts, MapReduce for long ones.
+    """
     from openai import OpenAI
 
     api_key = db.get_setting("llm_api_key") or os.getenv("LLM_API_KEY", "")
-    base_url = db.get_setting("llm_base_url") or os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
     model = db.get_setting("llm_model") or os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+    # Resolve base URL using provider map (same logic as diagnose.py)
+    from api.settings import _PROVIDER_URLS
+    llm_provider = db.get_setting("llm_provider") or "openai"
+    if llm_provider == "compatible":
+        base_url = (db.get_setting("llm_base_url") or os.getenv("LLM_BASE_URL", "")).rstrip("/")
+    else:
+        base_url = _PROVIDER_URLS.get(llm_provider, "").rstrip("/")
+    if not base_url:
+        base_url = "https://api.openai.com/v1"
 
     if not api_key:
         yield f"event: error\ndata: {json.dumps({'error': 'LLM API key not set'})}\n\n"
         return
 
     client = OpenAI(api_key=api_key, base_url=base_url)
-    prompt = SUMMARY_PROMPT_VI if language == "vi" else SUMMARY_PROMPT_EN
 
+    # Select base prompt based on language
+    if language == "vi":
+        prompt = SUMMARY_PROMPT_VI
+    elif language == "en":
+        prompt = SUMMARY_PROMPT_EN
+    else:
+        # For other languages, use English prompt + language instruction
+        lang_names = {
+            "ja": "Japanese", "ko": "Korean", "zh": "Chinese",
+            "fr": "French", "de": "German", "es": "Spanish",
+            "th": "Thai", "id": "Indonesian", "pt": "Portuguese",
+        }
+        lang_name = lang_names.get(language, language)
+        prompt = SUMMARY_PROMPT_EN + f"\n\nIMPORTANT: You MUST write the entire output in {lang_name}. All section headers and content must be in {lang_name}."
+
+    # Build timestamp context
+    time_context = ""
+    if start_time or end_time:
+        time_context = "\n\n--- Meeting Time Info ---\n"
+        if start_time:
+            time_context += f"Recording started: {start_time}\n"
+        if end_time:
+            time_context += f"Recording ended: {end_time}\n"
+        time_context += "---\n"
+
+    # ── Single-pass for short transcripts ──
+    if len(transcript) < SINGLE_PASS_MAX_CHARS:
+        yield from _single_pass(client, model, prompt, transcript, time_context)
+        return
+
+    # ── MapReduce for long transcripts ──
+    yield from _map_reduce(client, model, prompt, transcript, language, time_context)
+
+
+def _single_pass(client, model: str, prompt: str, transcript: str, time_context: str = "") -> Generator[str, None, None]:
+    """Single LLM call for short transcripts."""
     try:
         yield f"event: progress\ndata: {json.dumps({'step': 'summarizing', 'progress': 0.1})}\n\n"
 
+        user_content = f"{time_context}Transcript:\n{transcript}" if time_context else f"Transcript:\n{transcript}"
         stream = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": f"Transcript:\n{transcript}"},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.3,
             max_tokens=4000,
@@ -114,4 +215,63 @@ def summarize_stream(transcript: str, language: str, db) -> Generator[str, None,
 
         yield f"event: done\ndata: {json.dumps({})}\n\n"
     except Exception as e:
+        yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+
+def _map_reduce(client, model: str, final_prompt: str, transcript: str, language: str, time_context: str = "") -> Generator[str, None, None]:
+    """MapReduce: chunk -> summarize each -> synthesize final summary."""
+    try:
+        # Phase 1: Split
+        chunks = _chunk_transcript(transcript)
+        total = len(chunks)
+        log.info("[summarize] MapReduce: %d chars -> %d chunks", len(transcript), total)
+
+        yield f"event: progress\ndata: {json.dumps({'step': 'chunking', 'total': total})}\n\n"
+
+        chunk_prompt = CHUNK_SUMMARY_PROMPT_VI if language == "vi" else CHUNK_SUMMARY_PROMPT_EN
+
+        # Phase 2: Map — summarize each chunk
+        partial_summaries: list[str] = []
+        for i, chunk_text in enumerate(chunks):
+            yield f"event: progress\ndata: {json.dumps({'step': 'analyzing', 'current': i + 1, 'total': total})}\n\n"
+
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": chunk_prompt},
+                    {"role": "user", "content": chunk_text},
+                ],
+                temperature=0.2,
+                max_tokens=1000,
+            )
+            summary = response.choices[0].message.content or ""
+            partial_summaries.append(f"--- Phan {i + 1}/{total} ---\n{summary}")
+            log.info("[summarize] chunk %d/%d done (%d chars)", i + 1, total, len(summary))
+
+        # Phase 3: Reduce — synthesize into final MoM
+        yield f"event: progress\ndata: {json.dumps({'step': 'finalizing'})}\n\n"
+
+        reduce_intro = REDUCE_PROMPT_VI if language == "vi" else REDUCE_PROMPT_EN
+        combined = "\n\n".join(partial_summaries)
+
+        user_content = f"{time_context}{combined}" if time_context else combined
+        stream = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": f"{final_prompt}\n\n{reduce_intro}"},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.3,
+            max_tokens=4000,
+            stream=True,
+        )
+
+        for chunk in stream:
+            token = chunk.choices[0].delta.content if chunk.choices[0].delta.content else None
+            if token:
+                yield f"data: {json.dumps({'token': token})}\n\n"
+
+        yield f"event: done\ndata: {json.dumps({})}\n\n"
+    except Exception as e:
+        log.error("[summarize] MapReduce error: %s", e)
         yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"

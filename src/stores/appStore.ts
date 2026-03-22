@@ -10,6 +10,7 @@ export interface TranscriptPart {
     endTime: string;
     timestamp: string;
     translation: string;
+    _baseText?: string; // Text before current in-progress chunk (for replace-in-place)
 }
 
 export interface Meeting {
@@ -28,11 +29,13 @@ interface AppState {
     paused: boolean;
     seconds: number;
     draftId: number | null;
+    recordingStartedAt: string;
 
     // Transcript
     transcriptParts: TranscriptPart[];
     isTranscribing: boolean;
     interimText: string;
+    interimTranslation: string;
     interimSpeaker: string;
     interimSpeakerId: number;
 
@@ -51,15 +54,18 @@ interface AppState {
     currentMeetingId: number | null;
     transientSummary: string;
     summaryLoading: boolean;
+    summaryLang: string;
 
     // Actions
     setRecording: (v: boolean) => void;
     setPaused: (v: boolean) => void;
     setSeconds: (v: number) => void;
     setDraftId: (v: number | null) => void;
+    setRecordingStartedAt: (v: string) => void;
     addTranscriptPart: (part: TranscriptPart) => void;
     appendToLastPart: (text: string, endTime: string, chunkId?: string) => void;
     replaceLastPartText: (text: string, endTime: string, chunkId?: string) => void;
+    revertLastPartToBase: () => void;
     updateTranscriptTranslation: (idx: number, translation: string) => void;
     updateTranscriptSpeakerByChunk: (chunkId: string, speakerId: number, speaker: string) => void;
     setTranscriptParts: (parts: TranscriptPart[]) => void;
@@ -76,7 +82,9 @@ interface AppState {
     setSummaryLoading: (v: boolean) => void;
     setIsTranscribing: (v: boolean) => void;
     setInterimText: (v: string) => void;
+    setInterimTranslation: (v: string) => void;
     setInterimSpeaker: (speaker: string, speakerId: number) => void;
+    setSummaryLang: (v: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -84,13 +92,15 @@ export const useAppStore = create<AppState>((set) => ({
     paused: false,
     seconds: 0,
     draftId: null,
+    recordingStartedAt: '',
     transcriptParts: [],
     isTranscribing: false,
     interimText: '',
+    interimTranslation: '',
     interimSpeaker: 'Speaker 1',
     interimSpeakerId: 0,
-    translationEnabled: false,
-    translationLang: 'en',
+    translationEnabled: localStorage.getItem('scribble:translationEnabled') === 'true',
+    translationLang: localStorage.getItem('scribble:translationLang') || 'en',
     currentView: 'list',
     activeTab: 'recording',
     settingsOpen: false,
@@ -99,11 +109,13 @@ export const useAppStore = create<AppState>((set) => ({
     currentMeetingId: null,
     transientSummary: '',
     summaryLoading: false,
+    summaryLang: localStorage.getItem('scribble:summaryLang') || 'vi',
 
     setRecording: (v) => set({ recording: v }),
     setPaused: (v) => set({ paused: v }),
     setSeconds: (v) => set({ seconds: v }),
     setDraftId: (v) => set({ draftId: v }),
+    setRecordingStartedAt: (v) => set({ recordingStartedAt: v }),
     addTranscriptPart: (part) =>
         set((s) => ({ transcriptParts: [...s.transcriptParts, part] })),
     appendToLastPart: (text, endTime, chunkId) =>
@@ -111,7 +123,33 @@ export const useAppStore = create<AppState>((set) => ({
             const parts = [...s.transcriptParts];
             if (parts.length > 0) {
                 const last = { ...parts[parts.length - 1] };
+                // Save current text as base before appending new chunk
+                last._baseText = last.text;
                 last.text += ' ' + text;
+                last.endTime = endTime;
+                if (chunkId) {
+                    const ids = Array.isArray(last.chunkIds) ? [...last.chunkIds] : [];
+                    if (last.chunkId && !ids.includes(last.chunkId)) ids.push(last.chunkId);
+                    if (!ids.includes(chunkId)) ids.push(chunkId);
+                    last.chunkIds = ids;
+                    last.chunkId = chunkId; // Update to new chunk_id
+                }
+                parts[parts.length - 1] = last;
+            }
+            return { transcriptParts: parts };
+        }),
+    replaceLastPartText: (text, endTime, chunkId) =>
+        set((s) => {
+            const parts = [...s.transcriptParts];
+            if (parts.length > 0) {
+                const last = { ...parts[parts.length - 1] };
+                // If there's a _baseText (from appendToLastPart), prepend it
+                // so we only replace the current chunk's portion, not the whole text
+                if (last._baseText) {
+                    last.text = last._baseText + ' ' + text;
+                } else {
+                    last.text = text;
+                }
                 last.endTime = endTime;
                 if (chunkId) {
                     const ids = Array.isArray(last.chunkIds) ? [...last.chunkIds] : [];
@@ -124,21 +162,25 @@ export const useAppStore = create<AppState>((set) => ({
             }
             return { transcriptParts: parts };
         }),
-    replaceLastPartText: (text, endTime, chunkId) =>
+    revertLastPartToBase: () =>
         set((s) => {
             const parts = [...s.transcriptParts];
             if (parts.length > 0) {
                 const last = { ...parts[parts.length - 1] };
-                last.text = text;
-                last.endTime = endTime;
-                if (chunkId) {
-                    const ids = Array.isArray(last.chunkIds) ? [...last.chunkIds] : [];
-                    if (last.chunkId && !ids.includes(last.chunkId)) ids.push(last.chunkId);
-                    if (!ids.includes(chunkId)) ids.push(chunkId);
-                    last.chunkIds = ids;
-                    if (!last.chunkId) last.chunkId = chunkId;
+                if (last._baseText) {
+                    // Restore to text before the wrong chunk was appended
+                    last.text = last._baseText;
+                    last._baseText = undefined;
+                    // Remove the latest chunkId (the wrong one)
+                    if (Array.isArray(last.chunkIds) && last.chunkIds.length > 1) {
+                        last.chunkIds = last.chunkIds.slice(0, -1);
+                        last.chunkId = last.chunkIds[last.chunkIds.length - 1];
+                    }
+                    parts[parts.length - 1] = last;
+                } else {
+                    // No base text — the entire part was the wrong chunk, remove it
+                    parts.pop();
                 }
-                parts[parts.length - 1] = last;
             }
             return { transcriptParts: parts };
         }),
@@ -166,8 +208,14 @@ export const useAppStore = create<AppState>((set) => ({
         })),
     setTranscriptParts: (parts) => set({ transcriptParts: parts }),
     clearTranscript: () => set({ transcriptParts: [], seconds: 0, transientSummary: '' }),
-    setTranslationEnabled: (v) => set({ translationEnabled: v }),
-    setTranslationLang: (v) => set({ translationLang: v }),
+    setTranslationEnabled: (v) => {
+        localStorage.setItem('scribble:translationEnabled', String(v));
+        set({ translationEnabled: v });
+    },
+    setTranslationLang: (v) => {
+        localStorage.setItem('scribble:translationLang', v);
+        set({ translationLang: v });
+    },
     setCurrentView: (v) => set({ currentView: v }),
     setActiveTab: (v) => set({ activeTab: v }),
     setSettingsOpen: (v) => set({ settingsOpen: v }),
@@ -178,5 +226,10 @@ export const useAppStore = create<AppState>((set) => ({
     setSummaryLoading: (v) => set({ summaryLoading: v }),
     setIsTranscribing: (v) => set({ isTranscribing: v }),
     setInterimText: (v) => set({ interimText: v }),
+    setInterimTranslation: (v) => set({ interimTranslation: v }),
     setInterimSpeaker: (speaker, speakerId) => set({ interimSpeaker: speaker, interimSpeakerId: speakerId }),
+    setSummaryLang: (v) => {
+        localStorage.setItem('scribble:summaryLang', v);
+        set({ summaryLang: v });
+    },
 }));

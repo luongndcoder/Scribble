@@ -244,3 +244,15 @@ export const saveSettings = (data: any) =>
 // ─── Diagnostics ───
 export const diagnose = (lang: string, signal?: AbortSignal) =>
     request<any>(`/diagnose?lang=${lang}`, { signal });
+
+// ─── LLM Models ───
+export const fetchLLMModels = (
+    provider: string,
+    apiKey: string,
+    baseUrl?: string,
+): Promise<{ models: string[]; error?: string }> => {
+    const params = new URLSearchParams({ provider, api_key: apiKey });
+    if (baseUrl) params.set('base_url', baseUrl);
+    return request<{ models: string[]; error?: string }>(`/models?${params}`);
+};
+

@@ -607,15 +607,17 @@ struct SystemAudioState(system_audio::CaptureState);
 struct SystemAudioState(system_audio_windows::CaptureState);
 
 #[tauri::command]
-async fn start_system_audio(app: tauri::AppHandle, _draft_id: Option<i64>) -> Result<String, String> {
+async fn start_system_audio(app: tauri::AppHandle, _draft_id: Option<i64>, stt_provider: Option<String>, translate_lang: Option<String>) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         let state = app.state::<SystemAudioState>();
         let sample_rate = system_audio::start_capture(&state.0)?;
         let app_handle = app.clone();
         let meeting_id = _draft_id;
+        let provider = stt_provider.unwrap_or_else(|| "nvidia".to_string());
+        let tl = translate_lang.unwrap_or_default();
         tauri::async_runtime::spawn(async move {
-            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, |st| {
+            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, &provider, &tl, |st| {
                 system_audio::drain_buffer(&st.0)
             }).await;
         });
@@ -627,8 +629,10 @@ async fn start_system_audio(app: tauri::AppHandle, _draft_id: Option<i64>) -> Re
         let sample_rate = system_audio_windows::start_capture(&state.0)?;
         let app_handle = app.clone();
         let meeting_id = _draft_id;
+        let provider = stt_provider.unwrap_or_else(|| "nvidia".to_string());
+        let tl = translate_lang.unwrap_or_default();
         tauri::async_runtime::spawn(async move {
-            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, |st| {
+            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, &provider, &tl, |st| {
                 system_audio_windows::drain_buffer(&st.0)
             }).await;
         });
@@ -646,15 +650,23 @@ async fn system_audio_ws_loop<F>(
     app_handle: &tauri::AppHandle,
     capture_rate: u32,
     meeting_id: Option<i64>,
+    stt_provider: &str,
+    translate_lang: &str,
     drain_fn: F,
 ) where F: Fn(&SystemAudioState) -> Vec<f32> {
     use tokio_tungstenite::{connect_async, tungstenite::Message};
     use futures_util::{SinkExt, StreamExt};
 
-    let mut url = "ws://127.0.0.1:8765/ws/nvidia-stream?source=system".to_string();
+    // Build WS URL based on STT provider
+    let ws_path = if stt_provider == "soniox" { "/ws/soniox-stream" } else { "/ws/nvidia-stream" };
+    let mut url = format!("ws://127.0.0.1:8765{}?source=system", ws_path);
     if let Some(mid) = meeting_id {
         url.push_str(&format!("&meeting_id={}", mid));
     }
+    if !translate_lang.is_empty() {
+        url.push_str(&format!("&translate_lang={}", translate_lang));
+    }
+    println!("[system-audio] Connecting to {} (provider={}, translate={})", url, stt_provider, if translate_lang.is_empty() { "off" } else { translate_lang });
     let ws_stream = match connect_async(&url).await {
         Ok((stream, _)) => {
             println!("[system-audio] WebSocket connected to {}", url);
@@ -668,6 +680,19 @@ async fn system_audio_ws_loop<F>(
 
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let app_for_rx = app_handle.clone();
+
+    // Channel for receiving commands from frontend
+    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    use tauri::Listener;
+    let cmd_listener_id = app_handle.listen_any("system-audio-cmd", move |event| {
+        // Tauri v2 string payloads are JSON encoded, e.g. `"TRANSLATE:en"`
+        let payload = event.payload();
+        if let Ok(cmd) = serde_json::from_str::<String>(payload) {
+            let _ = cmd_tx.send(cmd);
+        } else {
+            let _ = cmd_tx.send(payload.to_string());
+        }
+    });
 
     let reader = tauri::async_runtime::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
@@ -690,6 +715,13 @@ async fn system_audio_ws_loop<F>(
         let state_ref = app_handle.state::<SystemAudioState>();
         if !state_ref.0.running.load(std::sync::atomic::Ordering::Relaxed) {
             break;
+        }
+
+        // Process any pending commands from frontend
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            if let Err(e) = ws_tx.send(Message::Text(cmd)).await {
+                eprintln!("[system-audio] Failed to send cmd: {}", e);
+            }
         }
 
         let chunk = drain_fn(&state_ref);
@@ -735,10 +767,10 @@ async fn system_audio_ws_loop<F>(
             break;
         }
     }
-
     let _ = ws_tx.close().await;
     reader.abort();
     println!("[system-audio] Streaming stopped");
+    app_handle.unlisten(cmd_listener_id);
 }
 
 

@@ -2,10 +2,9 @@
 import sys
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('models', 'models')]
+datas = []
 binaries = []
 hiddenimports = [
-    'onnxruntime',
     'uvicorn.logging',
     'uvicorn.protocols.http',
     'uvicorn.protocols.http.auto',
@@ -29,13 +28,17 @@ hiddenimports = [
     'grpcio',
     'grpcio_tools',
     'charset_normalizer',
+    'soniox',
+    'soniox.client',
+    'soniox.types',
+    'websockets',
 ]
 tmp_ret = collect_all('riva')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 # ── Aggressive excludes ──
 # These are transitive deps pulled in by collect_all('riva') and other packages.
-# None of these are needed for the sidecar (FastAPI + STT + Diarization).
+# None of these are needed for the sidecar (FastAPI + STT).
 excludes = [
     # Deep Learning frameworks (NOT needed — we use onnxruntime only)
     'torch', 'torchvision', 'torchaudio', 'torchtext',
@@ -70,7 +73,7 @@ excludes = [
 
     # Other unnecessary
     'tkinter', '_tkinter', 'turtle',
-    'unittest', 'pydoc', 'doctest',
+    'pydoc', 'doctest',
     'xmlrpc', 'ftplib', 'imaplib', 'smtplib', 'poplib', 'nntplib',
     'test', 'tests',
     'setuptools', 'pip', 'wheel', 'pkg_resources',

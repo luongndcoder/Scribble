@@ -1,9 +1,10 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
-import { resetDiarize, createDraft, appendDraft, appendDraftAudio, downloadTextFile } from '../lib/api';
+import { resetDiarize, createDraft, appendDraftAudio, downloadTextFile, getSettings } from '../lib/api';
 import { consumeSseResponse } from '../lib/sse';
 import { fetchSidecar, SIDECAR_WS_BASES, waitForSidecarReady } from '../lib/sidecar';
 import { t } from '../i18n';
+import { CustomSelect } from './CustomSelect';
 
 const isTauri = !!(window as any).__TAURI_INTERNALS__;
 
@@ -60,7 +61,9 @@ function extractMinutesTitle(summary: string): string | null {
     return firstContent ? firstContent.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+/u, '').trim().slice(0, 160) || null : null;
 }
 
-async function openNvidiaWebSocket(preferredHttpBase: string | null): Promise<WebSocket | null> {
+async function openStreamingWebSocket(provider: string, preferredHttpBase: string | null, translateLang?: string): Promise<WebSocket | null> {
+    const wsPath = provider === 'soniox' ? '/ws/soniox-stream' : '/ws/nvidia-stream';
+    const translateQuery = translateLang ? `&translate_lang=${encodeURIComponent(translateLang)}` : '';
     const preferredWs = preferredHttpBase
         ? preferredHttpBase.replace(/^http/, 'ws')
         : null;
@@ -69,7 +72,9 @@ async function openNvidiaWebSocket(preferredHttpBase: string | null): Promise<We
         : [...SIDECAR_WS_BASES];
 
     for (const base of wsBases) {
-        const url = `${base}/ws/nvidia-stream`;
+        const urlSep = wsPath.includes('?') ? '&' : '?';
+        const url = `${base}${wsPath}${urlSep}t=1${translateQuery}`;
+        console.log(`[stt-ws] trying ${provider} at ${url}`);
         try {
             const ws = new WebSocket(url);
             const opened = await new Promise<boolean>((resolve) => {
@@ -99,9 +104,9 @@ async function openNvidiaWebSocket(preferredHttpBase: string | null): Promise<We
 export function RecordingBar() {
     const {
         recording, paused, seconds, transcriptParts, currentMeetingId, meetings,
-        translationEnabled, translationLang,
+        translationEnabled, translationLang, summaryLang, setSummaryLang,
         setRecording, setPaused, setSeconds, clearTranscript,
-        addTranscriptPart, appendToLastPart, replaceLastPartText, updateTranscriptSpeakerByChunk, setTranslationEnabled,
+        addTranscriptPart, appendToLastPart, replaceLastPartText, revertLastPartToBase, updateTranscriptSpeakerByChunk, setTranslationEnabled,
         setTranslationLang, lang, setIsTranscribing, setInterimText, setInterimSpeaker, setTransientSummary,
         summaryLoading, setSummaryLoading,
     } = useAppStore();
@@ -119,6 +124,44 @@ export function RecordingBar() {
     const archiveRecorderRef = useRef<MediaRecorder | null>(null);
     const audioUploadChainRef = useRef<Promise<void>>(Promise.resolve());
     const summarizeLockRef = useRef(false);
+    const sttProviderRef = useRef('nvidia');
+    const inflightChunksRef = useRef<Set<Promise<void>>>(new Set());
+
+    // Mid-session translation toggle
+    const translationToggleRef = useRef({ enabled: translationEnabled, lang: translationLang });
+    useEffect(() => {
+        const prev = translationToggleRef.current;
+        const changed = prev.enabled !== translationEnabled || (translationEnabled && prev.lang !== translationLang);
+        translationToggleRef.current = { enabled: translationEnabled, lang: translationLang };
+        if (!changed || !recording) return;
+
+        if (sttProviderRef.current === 'nvidia') {
+            // Nvidia: send text command (no need to reconnect)
+            const cmd = translationEnabled ? `TRANSLATE:${translationLang}` : 'TRANSLATE:off';
+            const payload = JSON.stringify({ text: cmd });
+            console.log(`[translation] Nvidia mid-session: ${cmd} (audio: ${audioSource})`);
+
+            if (isTauri && audioSource === 'both') {
+                import('@tauri-apps/api/event').then(({ emit }) => {
+                    emit('system-audio-cmd', payload).catch(console.warn);
+                });
+            } else {
+                const ws = wsRef.current;
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(payload);
+                }
+            }
+        } else {
+            // Soniox: must reconnect (translate_lang required at connection time)
+            console.log(`[translation] Soniox mid-session: reconnecting...`);
+            const ws = wsRef.current;
+            if (ws) ws.close();
+            // TODO: In Tauri mode for Soniox, we'd need to stop and start system audio.
+            if (isTauri && audioSource === 'both') {
+                console.log(`[translation] Soniox Tauri mid-session toggle not fully supported yet.`);
+            }
+        }
+    }, [translationEnabled, translationLang, recording, audioSource]);
 
     useEffect(() => {
         if (recording && !paused) {
@@ -231,23 +274,14 @@ export function RecordingBar() {
         setInterimText('');
         setInterimSpeaker('Speaker 1', 0);
         setIsTranscribing(false);
-        // Auto-save to draft
-        const dId = useAppStore.getState().draftId;
-        const lastPart = useAppStore.getState().transcriptParts[useAppStore.getState().transcriptParts.length - 1];
-        if (dId && lastPart) appendDraft(
-            dId,
-            {
-                text: lastPart.text,
-                speaker: lastPart.speaker,
-                speakerId: lastPart.speakerId,
-                chunkId: lastPart.chunkId,
-                chunkIds: lastPart.chunkIds,
-                startTime: lastPart.startTime,
-                endTime: lastPart.endTime,
-                translation: lastPart.translation || '',
-            },
-            useAppStore.getState().seconds
-        ).catch(() => { });
+    };
+
+    // Wrapper that tracks inflight sendChunk calls so stopRecording can await them
+    const sendChunkTracked = (blob: Blob, startSec: number, endSec: number) => {
+        const p = sendChunk(blob, startSec, endSec).finally(() => {
+            inflightChunksRef.current.delete(p as Promise<void>);
+        }) as Promise<void>;
+        inflightChunksRef.current.add(p);
     };
 
     const enqueueDraftAudioUpload = useCallback((blob: Blob) => {
@@ -311,7 +345,7 @@ export function RecordingBar() {
                 const { seconds } = useAppStore.getState();
                 const endSec = seconds;
                 const startSec = endSec - (Date.now() - chunkStart) / 1000;
-                sendChunk(blob, Math.max(0, startSec), endSec);
+                sendChunkTracked(blob, Math.max(0, startSec), endSec);
                 chunkStart = Date.now();
                 if (useAppStore.getState().recording && !useAppStore.getState().paused) startRec();
             };
@@ -379,6 +413,9 @@ export function RecordingBar() {
                 clearTranscript();
                 setRecording(true);
                 setSeconds(0);
+                useAppStore.getState().setRecordingStartedAt(new Date().toISOString());
+                // Reset diarizer profiles so old speakers don't carry over
+                fetchSidecar('/diarize-reset', { method: 'POST' }).catch(() => {});
 
                 // Create a draft in DB
                 try {
@@ -390,14 +427,25 @@ export function RecordingBar() {
 
             let stream: MediaStream;
 
+            // Detect STT provider early (needed by Tauri system audio WS path)
+            let sttProvider = 'nvidia';
+            try {
+                const settingsData = await getSettings();
+                sttProvider = settingsData.stt_provider || 'nvidia';
+                sttProviderRef.current = sttProvider;
+                console.log('[recording] stt_provider from settings:', sttProvider);
+            } catch { }
+
             if (audioSource === 'system') {
                 if (isTauri) {
                     // Tauri native system audio (macOS CoreAudio / Windows WASAPI)
                     const activeDraftId = useAppStore.getState().draftId;
-                    await safeInvoke(
-                        'start_system_audio',
-                        activeDraftId ? { draftId: activeDraftId } : undefined
-                    );
+                    const { translationEnabled: tlEnabled, translationLang: tlLang } = useAppStore.getState();
+                    const sysArgs: Record<string, unknown> = {};
+                    if (activeDraftId) sysArgs.draftId = activeDraftId;
+                    sysArgs.sttProvider = sttProvider;
+                    if (tlEnabled) sysArgs.translateLang = tlLang;
+                    await safeInvoke('start_system_audio', sysArgs);
                     const barInterval = setInterval(() => {
                         setBarHeights([
                             `${Math.random() * 16 + 6}px`,
@@ -420,6 +468,41 @@ export function RecordingBar() {
                                 console.error('[system-audio]', data.error);
                                 setIsTranscribing(false);
                                 useAppStore.getState().setInterimText('');
+                                return;
+                            }
+
+                            // 1. Handle pure translation event (Cabin-style async for Nvidia)
+                            if (data.type === 'translation' && data.translation) {
+                                if (data.chunk_id) {
+                                    const currentParts = useAppStore.getState().transcriptParts;
+                                    const targetIdx = currentParts.findIndex(
+                                        (p) => p.chunkId === data.chunk_id ||
+                                               (p.chunkIds && p.chunkIds.includes(data.chunk_id))
+                                    );
+                                    if (targetIdx >= 0) {
+                                        const existingTrans = currentParts[targetIdx].translation || '';
+                                        // Append mode: concatenate new translation to existing
+                                        if (data.append) {
+                                            const combined = existingTrans ? `${existingTrans} ${data.translation}` : data.translation;
+                                            useAppStore.getState().updateTranscriptTranslation(targetIdx, combined);
+                                            // Clear stale interim preview since final absorbed the content
+                                            useAppStore.getState().setInterimTranslation('');
+                                        } else if (data.translation.length >= existingTrans.length) {
+                                            // Replace mode: only accept if longer (prevents stale short interim from overwriting)
+                                            useAppStore.getState().updateTranscriptTranslation(targetIdx, data.translation);
+                                            const parts2 = useAppStore.getState().transcriptParts;
+                                            if (targetIdx === parts2.length - 1) {
+                                                useAppStore.getState().setInterimTranslation(data.translation);
+                                            }
+                                        }
+                                        return;
+                                    }
+                                }
+                                // Interim translation (no chunk_id match) — only update if longer
+                                const curInterim = useAppStore.getState().interimTranslation || '';
+                                if (data.translation.length >= curInterim.length) {
+                                    useAppStore.getState().setInterimTranslation(data.translation);
+                                }
                                 return;
                             }
 
@@ -460,27 +543,11 @@ export function RecordingBar() {
                                         startTime: String(Math.max(0, state.seconds - 5)),
                                         endTime: String(state.seconds),
                                         timestamp: ts,
-                                        translation: '',
+                                        translation: data.translation || '',
                                     });
                                 }
                                 setIsTranscribing(false);
-                                // Auto-save to draft
-                                const dId = useAppStore.getState().draftId;
-                                const savePart = useAppStore.getState().transcriptParts[useAppStore.getState().transcriptParts.length - 1];
-                                if (dId && savePart) appendDraft(
-                                    dId,
-                                    {
-                                        text: savePart.text,
-                                        speaker,
-                                        speakerId,
-                                        chunkId: savePart.chunkId,
-                                        chunkIds: savePart.chunkIds,
-                                        startTime: savePart.startTime,
-                                        endTime: savePart.endTime,
-                                        translation: savePart.translation || '',
-                                    },
-                                    state.seconds
-                                ).catch(() => { });
+
                             } else {
                                 // Interim (streaming) — show live text
                                 useAppStore.getState().setInterimText(text);
@@ -509,19 +576,40 @@ export function RecordingBar() {
                     stream = micStream;
                     try {
                         const activeDraftId = useAppStore.getState().draftId;
-                        await safeInvoke(
-                            'start_system_audio',
-                            activeDraftId ? { draftId: activeDraftId } : undefined
-                        );
+                        const { translationEnabled: tlEnabled, translationLang: tlLang } = useAppStore.getState();
+                        const sysArgs: Record<string, unknown> = {};
+                        if (activeDraftId) sysArgs.draftId = activeDraftId;
+                        sysArgs.sttProvider = sttProvider;
+                        if (tlEnabled) sysArgs.translateLang = tlLang;
+                        await safeInvoke('start_system_audio', sysArgs);
                         const { listen } = await import('@tauri-apps/api/event');
                         const unlisten = await listen<string>('system-audio-transcript', (event) => {
                             try {
                                 const state = useAppStore.getState();
-                                if (!state.recording || state.paused) return;
+                                if (state.paused) return;
                                 const data = JSON.parse(event.payload);
+
+                                // 1. Handle pure translation event (Cabin-style async)
+                                if (data.type === 'translation' && data.translation) {
+                                    if (data.chunk_id) {
+                                        const currentParts = useAppStore.getState().transcriptParts;
+                                        const targetIdx = currentParts.findIndex(
+                                            (p) => p.chunkId === data.chunk_id ||
+                                                   (p.chunkIds && p.chunkIds.includes(data.chunk_id))
+                                        );
+                                        if (targetIdx >= 0) {
+                                            useAppStore.getState().updateTranscriptTranslation(targetIdx, data.translation);
+                                            return;
+                                        }
+                                    }
+                                    useAppStore.getState().setInterimTranslation(data.translation);
+                                    return;
+                                }
+
                                 const seg = data.segments?.[0] || {};
                                 const text = (seg.text || data.text || '').trim();
                                 if (!text) return;
+
                                 const speakerId = (seg.speaker_id ?? 0) + 100;
                                 const speaker = seg.speaker || 'System';
                                 const chunkId = seg.chunk_id || data.chunk_id || '';
@@ -535,7 +623,7 @@ export function RecordingBar() {
                                     startTime: String(Math.max(0, state.seconds - 5)),
                                     endTime: String(state.seconds),
                                     timestamp: ts,
-                                    translation: '',
+                                    translation: data.translation || '',
                                 });
                             } catch { }
                         });
@@ -579,7 +667,8 @@ export function RecordingBar() {
                 console.warn('[sidecar] not ready within timeout, continuing with fallback endpoints');
             }
 
-            // Nvidia streaming: WebSocket + raw PCM (with retry/fallback)
+            // STT provider already detected above
+
             let chunkFallbackStarted = false;
             const fallbackToChunkMode = () => {
                 if (chunkFallbackStarted) return;
@@ -613,41 +702,52 @@ export function RecordingBar() {
                             return;
                         }
                         // Speaker split: diarizer detected speaker change mid-stream
-                        // Finalize current interim text as old speaker, start new speaker
                         if (data.type === 'speaker_split') {
+                            // Commit pending interimTranslation to the LAST part before split
+                            const preState = useAppStore.getState();
+                            if (preState.interimTranslation && preState.transcriptParts.length > 0) {
+                                const lastIdx = preState.transcriptParts.length - 1;
+                                useAppStore.getState().updateTranscriptTranslation(lastIdx, preState.interimTranslation);
+                                useAppStore.getState().setInterimTranslation('');
+                            }
                             const newSpeakerId = data.speaker_id ?? 0;
                             const newSpeaker = data.speaker || `Speaker ${newSpeakerId + 1}`;
-                            const st = useAppStore.getState();
-                            const pendingInterim = st.interimText?.trim();
-                            if (pendingInterim) {
-                                // Save current interim text under the OLD speaker
-                                const oldSpeaker = st.interimSpeaker || 'Speaker 1';
-                                const oldSpeakerId = st.interimSpeakerId ?? 0;
-                                const parts = st.transcriptParts;
-                                const lastPart = parts[parts.length - 1];
-                                if (lastPart && lastPart.speakerId === oldSpeakerId && lastPart.text) {
-                                    useAppStore.getState().setTranscriptParts(
-                                        parts.map((p, i) =>
-                                            i === parts.length - 1
-                                                ? { ...p, text: p.text + ' ' + pendingInterim }
-                                                : p
-                                        )
-                                    );
-                                } else {
-                                    useAppStore.getState().addTranscriptPart({
-                                        text: pendingInterim,
-                                        speaker: oldSpeaker,
-                                        speakerId: oldSpeakerId,
-                                        startTime: String(st.seconds),
-                                        endTime: String(st.seconds),
-                                        timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-                                        translation: '',
-                                    });
-                                }
-                            }
-                            // Clear interim and set new speaker
                             useAppStore.getState().setInterimText('');
                             useAppStore.getState().setInterimSpeaker(newSpeaker, newSpeakerId);
+                            return;
+                        }
+                        // Cabin-style translation: commit to specific chunk if provided
+                        if (data.type === 'translation' && data.translation) {
+                            if (data.chunk_id) {
+                                const currentParts = useAppStore.getState().transcriptParts;
+                                const targetIdx = currentParts.findIndex(
+                                    (p) => p.chunkId === data.chunk_id || 
+                                           (p.chunkIds && p.chunkIds.includes(data.chunk_id))
+                                );
+                                if (targetIdx >= 0) {
+                                    const existingTrans = currentParts[targetIdx].translation || '';
+                                    // Append mode: concatenate new translation to existing
+                                    if (data.append) {
+                                        const combined = existingTrans ? `${existingTrans} ${data.translation}` : data.translation;
+                                        useAppStore.getState().updateTranscriptTranslation(targetIdx, combined);
+                                        // Clear stale interim preview since final absorbed the content
+                                        useAppStore.getState().setInterimTranslation('');
+                                    } else if (data.translation.length >= existingTrans.length) {
+                                        // Replace mode: only accept if longer (prevents stale short interim from overwriting)
+                                        useAppStore.getState().updateTranscriptTranslation(targetIdx, data.translation);
+                                        const parts2 = useAppStore.getState().transcriptParts;
+                                        if (targetIdx === parts2.length - 1) {
+                                            useAppStore.getState().setInterimTranslation(data.translation);
+                                        }
+                                    }
+                                    return;
+                                }
+                            }
+                            // Fallback to interim (live) translation — only update if longer
+                            const curInterim = useAppStore.getState().interimTranslation || '';
+                            if (data.translation.length >= curInterim.length) {
+                                useAppStore.getState().setInterimTranslation(data.translation);
+                            }
                             return;
                         }
                         const text = (data.text || '').trim();
@@ -677,10 +777,19 @@ export function RecordingBar() {
                             const sameSpeaker = Boolean(lastPart) && Number(lastPart.speakerId) === Number(speakerId);
 
                             if (sameChunk) {
+                                // Same chunk: always replace in-place (never lose text)
                                 replaceLastPartText(text, String(state.seconds), chunkId || undefined);
                             } else if (sameSpeaker) {
+                                // Same speaker, new chunk — clear interimTranslation (Soniox will send new accumulated translation)
+                                useAppStore.getState().setInterimTranslation('');
                                 appendToLastPart(text, String(state.seconds), chunkId || undefined);
                             } else {
+                                // New speaker — commit interimTranslation to previous part first
+                                const prevTranslation = useAppStore.getState().interimTranslation;
+                                if (prevTranslation && state.transcriptParts.length > 0) {
+                                    useAppStore.getState().updateTranscriptTranslation(state.transcriptParts.length - 1, prevTranslation);
+                                    useAppStore.getState().setInterimTranslation('');
+                                }
                                 addTranscriptPart({
                                     text,
                                     speaker,
@@ -693,22 +802,21 @@ export function RecordingBar() {
                                     translation: '',
                                 });
                             }
+                            // Inline translation on final event: write directly to the part
+                            if (data.translation) {
+                                const updatedParts = useAppStore.getState().transcriptParts;
+                                if (updatedParts.length > 0) {
+                                    const li = updatedParts.length - 1;
+                                    const existing = updatedParts[li].translation || '';
+                                    if (data.translation.length > existing.length) {
+                                        useAppStore.getState().updateTranscriptTranslation(li, data.translation);
+                                        // Clear interim so live div doesn't duplicate what's already in part.translation
+                                        useAppStore.getState().setInterimTranslation('');
+                                    }
+                                }
+                            }
                             setIsTranscribing(false);
-                            const dId = useAppStore.getState().draftId;
-                            const savePart = useAppStore.getState().transcriptParts[useAppStore.getState().transcriptParts.length - 1];
-                            if (dId && savePart) appendDraft(
-                                dId,
-                                {
-                                    text: savePart.text,
-                                    speaker,
-                                    speakerId,
-                                    chunkId: savePart.chunkId,
-                                    chunkIds: savePart.chunkIds,
-                                    startTime: savePart.startTime,
-                                    endTime: savePart.endTime,
-                                },
-                                state.seconds
-                            ).catch(() => { });
+
                         } else {
                             useAppStore.getState().setInterimText(text);
                             useAppStore.getState().setInterimSpeaker(data.speaker || 'Speaker 1', data.speaker_id ?? 0);
@@ -720,10 +828,11 @@ export function RecordingBar() {
                 ws.onclose = () => {
                     if (wsRef.current !== ws) return;
                     const state = useAppStore.getState();
-                    if (!state.recording || state.paused) return;
+                    if (state.paused) return;
                     void (async () => {
                         console.warn('[nvidia-stream] socket closed, retrying...');
-                        const reopened = await openNvidiaWebSocket(readyBase);
+                        console.log('[translation] reconnect — enabled:', useAppStore.getState().translationEnabled, 'lang:', useAppStore.getState().translationLang);
+                        const reopened = await openStreamingWebSocket(sttProvider, readyBase, useAppStore.getState().translationEnabled ? useAppStore.getState().translationLang : undefined);
                         if (!reopened) {
                             fallbackToChunkMode();
                             return;
@@ -734,7 +843,9 @@ export function RecordingBar() {
                 };
             };
 
-            const ws = await openNvidiaWebSocket(readyBase);
+            const { translationEnabled: tlEnabled, translationLang: tlLang } = useAppStore.getState();
+            console.log('[translation] start recording — enabled:', tlEnabled, 'lang:', tlLang, '→ translate_lang sent:', tlEnabled ? tlLang : '(none)');
+            const ws = await openStreamingWebSocket(sttProvider, readyBase, tlEnabled ? tlLang : undefined);
             if (!ws) {
                 fallbackToChunkMode();
             } else {
@@ -750,7 +861,7 @@ export function RecordingBar() {
                     const socket = wsRef.current;
                     if (!socket || socket.readyState !== WebSocket.OPEN) return;
                     const state = useAppStore.getState();
-                    if (!state.recording || state.paused) return;
+                    if (state.paused) return;
                     const inputData = e.inputBuffer.getChannelData(0);
                     const ratio = audioCtx.sampleRate / 16000;
                     const outputLen = Math.floor(inputData.length / ratio);
@@ -766,39 +877,55 @@ export function RecordingBar() {
             console.error('Audio access error:', err);
             setRecording(false);
         }
-    }, [audioSource, clearTranscript, setRecording, setSeconds, drawWaveform, startChunkRecording, startDraftAudioArchive, addTranscriptPart, appendToLastPart, replaceLastPartText, updateTranscriptSpeakerByChunk, lang, setInterimText, setInterimSpeaker, setIsTranscribing, ensureSystemCapturePermission]);
+    }, [audioSource, clearTranscript, setRecording, setSeconds, drawWaveform, startChunkRecording, startDraftAudioArchive, addTranscriptPart, appendToLastPart, replaceLastPartText, revertLastPartToBase, updateTranscriptSpeakerByChunk, lang, setInterimText, setInterimSpeaker, setIsTranscribing, ensureSystemCapturePermission]);
 
-    const stopRecording = useCallback(() => {
-        // Promote any pending interim text to final before clearing
+    const stopRecording = useCallback(async () => {
+        // Stop the recorder immediately to flush the last audio buffer
+        mediaRecorderRef.current?.stop();
+
+        // Wait for all in-flight /transcribe-diarize requests to finish
+        const inflight = Array.from(inflightChunksRef.current);
+        if (inflight.length > 0) {
+            await Promise.allSettled(inflight);
+        }
+
+        // Flush any in-progress interim text into transcriptParts before saving
         const state = useAppStore.getState();
-        const pendingText = state.interimText?.trim();
-        if (pendingText) {
-            const speaker = state.interimSpeaker || 'Speaker 1';
-            const speakerId = state.interimSpeakerId ?? 0;
-            const parts = state.transcriptParts;
-            const lastPart = parts[parts.length - 1];
-            if (lastPart && lastPart.speakerId === speakerId && lastPart.text) {
-                useAppStore.getState().setTranscriptParts(
-                    parts.map((p, i) =>
-                        i === parts.length - 1
-                            ? { ...p, text: p.text + ' ' + pendingText }
-                            : p
-                    )
-                );
-            } else {
-                useAppStore.getState().addTranscriptPart({
-                    text: pendingText,
-                    speaker,
-                    speakerId,
-                    startTime: '0',
-                    endTime: '0',
-                    timestamp: new Date().toISOString(),
-                    translation: '',
-                });
+        const dId = state.draftId;
+        const interimText = state.interimText?.trim();
+        if (interimText) {
+            const { interimSpeaker, interimSpeakerId, seconds, addTranscriptPart: addPart } = state;
+            const ts = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+            addPart({
+                text: interimText,
+                speaker: interimSpeaker || 'Speaker 1',
+                speakerId: interimSpeakerId ?? 0,
+                startTime: String(Math.max(0, seconds - 5)),
+                endTime: String(seconds),
+                timestamp: ts,
+                translation: '',
+            });
+        }
+
+        // ★ CRITICAL: Always commit interimTranslation to the last transcript part.
+        // During streaming, translations are stored in the volatile `interimTranslation`
+        // state and displayed via the isLive div. They are NEVER written to
+        // transcriptParts[].translation (only on speaker change). So we must
+        // commit them here before we clear the state and save to DB.
+        const pendingTranslation = useAppStore.getState().interimTranslation;
+        const currentParts = useAppStore.getState().transcriptParts;
+        if (pendingTranslation && currentParts.length > 0) {
+            const lastIdx = currentParts.length - 1;
+            const existingTrans = currentParts[lastIdx].translation || '';
+            // If there's already a translation on this part (e.g. from a chunk_id match),
+            // only overwrite if pending is longer (more complete)
+            if (!existingTrans || pendingTranslation.length > existingTrans.length) {
+                useAppStore.getState().updateTranscriptTranslation(lastIdx, pendingTranslation);
             }
         }
-        // Persist full transcript to DB (catches promoted interim + any silently-failed appendDraft)
-        const dId = useAppStore.getState().draftId;
+        useAppStore.getState().setInterimTranslation('');
+
+        // Persist full transcript to DB (now guaranteed all chunks are done)
         if (dId) {
             const allParts = useAppStore.getState().transcriptParts;
             if (allParts.length > 0) {
@@ -814,7 +941,7 @@ export function RecordingBar() {
                         translation: p.translation || '',
                     }))
                 );
-                fetchSidecar(`/meetings/${dId}`, {
+                await fetchSidecar(`/meetings/${dId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ transcript: transcriptJson, audioDuration: useAppStore.getState().seconds }),
@@ -833,11 +960,14 @@ export function RecordingBar() {
             archiveRecorderRef.current = null;
         }
 
-        // Close Nvidia streaming WebSocket
-        if (wsRef.current) {
-            try { wsRef.current.send('STOP'); } catch { }
-            try { wsRef.current.close(); } catch { }
+        // Close streaming WebSocket (Nvidia or Soniox)
+        const ws = wsRef.current;
+        if (ws) {
             wsRef.current = null;
+            try { ws.send('STOP'); } catch { }
+            setTimeout(() => {
+                try { ws.close(); } catch { }
+            }, 3000);
         }
         if (scriptNodeRef.current) {
             scriptNodeRef.current.disconnect();
@@ -860,9 +990,13 @@ export function RecordingBar() {
         clearInterval((window as any).__systemBarInterval);
         setBarHeights(['4px', '4px', '4px']);
         safeInvoke('stop_system_audio').catch(() => { });
-        if ((window as any).__systemAudioUnlisten) {
-            (window as any).__systemAudioUnlisten();
+        
+        const systemUnlisten = (window as any).__systemAudioUnlisten;
+        if (systemUnlisten) {
             (window as any).__systemAudioUnlisten = null;
+            // Delay detaching the system audio listener so that the frontend can 
+            // still receive strictly pending backend translations!
+            setTimeout(() => systemUnlisten(), 3000);
         }
     }, [setRecording, setPaused, setIsTranscribing, setInterimText, setInterimSpeaker]);
 
@@ -870,48 +1004,7 @@ export function RecordingBar() {
         const nextPaused = !paused;
         setPaused(nextPaused);
         if (nextPaused) {
-            // Promote any pending interim text to a final transcript part before clearing
-            const state = useAppStore.getState();
-            const pendingText = state.interimText?.trim();
-            if (pendingText) {
-                const speaker = state.interimSpeaker || 'Speaker 1';
-                const speakerId = state.interimSpeakerId ?? 0;
-                const parts = state.transcriptParts;
-                const lastPart = parts[parts.length - 1];
-                // Append to last part if same speaker, else create new part
-                if (lastPart && lastPart.speakerId === speakerId && lastPart.text) {
-                    useAppStore.getState().setTranscriptParts(
-                        parts.map((p, i) =>
-                            i === parts.length - 1
-                                ? { ...p, text: p.text + ' ' + pendingText }
-                                : p
-                        )
-                    );
-                } else {
-                    useAppStore.getState().addTranscriptPart({
-                        text: pendingText,
-                        speaker,
-                        speakerId,
-                        startTime: '0',
-                        endTime: '0',
-                        timestamp: new Date().toISOString(),
-                        translation: '',
-                    });
-                }
-                // Auto-save the promoted part to draft
-                const dId = useAppStore.getState().draftId;
-                if (dId) {
-                    const savedPart = useAppStore.getState().transcriptParts[useAppStore.getState().transcriptParts.length - 1];
-                    if (savedPart) appendDraft(dId, {
-                        text: savedPart.text,
-                        speaker: savedPart.speaker,
-                        speakerId: savedPart.speakerId,
-                        startTime: savedPart.startTime,
-                        endTime: savedPart.endTime,
-                        translation: savedPart.translation || '',
-                    }, useAppStore.getState().seconds).catch(() => { });
-                }
-            }
+            // No interim text promotion needed — text goes directly into transcript
             setIsTranscribing(false);
             setInterimText('');
             setInterimSpeaker('Speaker 1', 0);
@@ -926,10 +1019,12 @@ export function RecordingBar() {
         }
         if (isTauri && recording && (audioSource === 'system' || audioSource === 'both')) {
             const activeDraftId = useAppStore.getState().draftId;
-            safeInvoke(
-                'start_system_audio',
-                activeDraftId ? { draftId: activeDraftId } : undefined
-            ).catch(() => { });
+            const { translationEnabled: tlEnabled, translationLang: tlLang } = useAppStore.getState();
+            const sysArgs: Record<string, unknown> = {};
+            if (activeDraftId) sysArgs.draftId = activeDraftId;
+            sysArgs.sttProvider = sttProviderRef.current || 'nvidia';
+            if (tlEnabled) sysArgs.translateLang = tlLang;
+            safeInvoke('start_system_audio', sysArgs).catch(() => { });
         }
         mediaRecorderRef.current?.resume();
         try {
@@ -995,7 +1090,12 @@ export function RecordingBar() {
                 }
             }
 
-            const payload: any = { language: lang };
+            const payload: any = { language: state.summaryLang || lang };
+            // Include recording timestamps
+            if (state.recordingStartedAt) {
+                payload.startTime = state.recordingStartedAt;
+            }
+            payload.endTime = new Date().toISOString();
             if (mid) {
                 payload.meetingId = mid;
                 // Also send transcript as fallback in case DB data is incomplete
@@ -1159,29 +1259,40 @@ export function RecordingBar() {
                 )}
 
                 {!recording && transcriptParts.length > 0 && (
-                    <button
-                        className={`rec-summarize-btn ${summaryLoading ? 'loading' : ''}`}
-                        onClick={summarize}
-                        disabled={summaryLoading}
-                        aria-busy={summaryLoading}
-                    >
-                        {summaryLoading ? (
-                            <>
-                                <svg className="rec-btn-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none">
-                                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-                                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                </svg>
-                                <span>{lang === 'vi' ? 'Đang tạo biên bản...' : 'Creating minutes...'}</span>
-                            </>
-                        ) : (
-                            <>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
-                                </svg>
-                                <span>{lang === 'vi' ? 'Tạo biên bản' : 'Create Minutes'}</span>
-                            </>
-                        )}
-                    </button>
+                    <div className="summarize-group">
+                        <CustomSelect
+                            className="summary-lang-select"
+                            value={summaryLang}
+                            onChange={setSummaryLang}
+                            options={[
+                                { value: 'vi', label: 'Vietnamese' },
+                                { value: 'en', label: 'English' },
+                            ]}
+                        />
+                        <button
+                            className={`rec-summarize-btn ${summaryLoading ? 'loading' : ''}`}
+                            onClick={summarize}
+                            disabled={summaryLoading}
+                            aria-busy={summaryLoading}
+                        >
+                            {summaryLoading ? (
+                                <>
+                                    <svg className="rec-btn-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+                                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                                    </svg>
+                                    <span>{lang === 'vi' ? 'Đang tạo biên bản...' : 'Creating minutes...'}</span>
+                                </>
+                            ) : (
+                                <>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
+                                    </svg>
+                                    <span>{lang === 'vi' ? 'Tạo biên bản' : 'Create Minutes'}</span>
+                                </>
+                            )}
+                        </button>
+                    </div>
                 )}
             </div>
 
@@ -1191,15 +1302,16 @@ export function RecordingBar() {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M2 10v3a7 7 0 0 0 14 0v-3" /><path d="M9 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                     </svg>
-                    <select
+                    <CustomSelect
                         className="audio-source-select"
                         value={audioSource}
-                        onChange={(e) => setAudioSource(e.target.value as 'mic' | 'system' | 'both')}
-                    >
-                        <option value="mic">{t('mic_only', lang)}</option>
-                        <option value="system">{t('system_only', lang)}</option>
-                        <option value="both">{t('both', lang)}</option>
-                    </select>
+                        onChange={(v) => setAudioSource(v as 'mic' | 'system' | 'both')}
+                        options={[
+                            { value: 'mic', label: t('mic_only', lang) },
+                            { value: 'system', label: t('system_only', lang) },
+                            { value: 'both', label: t('both', lang) },
+                        ]}
+                    />
                 </div>
                 <div className="bar-divider" />
                 <div className="translation-toggle-wrap">
@@ -1212,21 +1324,27 @@ export function RecordingBar() {
                         <span className="toggle-slider" />
                     </label>
                 </div>
-                <select className="translation-lang-select" value={translationLang} onChange={(e) => setTranslationLang(e.target.value)} disabled={!translationEnabled}>
-                    <option value="vi">Tiếng Việt</option>
-                    <option value="en">English</option>
-                    <option value="ja">日本語</option>
-                    <option value="ko">한국어</option>
-                    <option value="zh">中文</option>
-                    <option value="fr">Français</option>
-                    <option value="de">Deutsch</option>
-                    <option value="es">Español</option>
-                    <option value="th">ภาษาไทย</option>
-                    <option value="id">Bahasa Indonesia</option>
-                    <option value="ru">Русский</option>
-                    <option value="ar">العربية</option>
-                    <option value="hi">हिन्दी</option>
-                </select>
+                <CustomSelect
+                    className="translation-lang-select"
+                    value={translationLang}
+                    onChange={setTranslationLang}
+                    disabled={!translationEnabled}
+                    options={[
+                        { value: 'vi', label: 'Vietnamese' },
+                        { value: 'en', label: 'English' },
+                        { value: 'ja', label: 'Japanese' },
+                        { value: 'ko', label: 'Korean' },
+                        { value: 'zh', label: 'Chinese' },
+                        { value: 'fr', label: 'French' },
+                        { value: 'de', label: 'German' },
+                        { value: 'es', label: 'Spanish' },
+                        { value: 'th', label: 'Thai' },
+                        { value: 'id', label: 'Indonesian' },
+                        { value: 'ru', label: 'Russian' },
+                        { value: 'ar', label: 'Arabic' },
+                        { value: 'hi', label: 'Hindi' },
+                    ]}
+                />
             </div>
         </>
     );

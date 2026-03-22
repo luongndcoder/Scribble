@@ -10,11 +10,11 @@ import time
 import numpy as np
 
 # ── Tunable parameters (configurable via env vars) ────────────────────────────
-MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.62"))
-STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.75"))
-MAX_SPEAKERS           = int(os.getenv("DIARIZE_MAX_SPEAKERS",             "8"))
+MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.68"))
+STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.78"))
+MAX_SPEAKERS           = int(os.getenv("DIARIZE_MAX_SPEAKERS",             "4"))
 SWITCH_CONFIRM_HITS    = int(os.getenv("DIARIZE_SWITCH_CONFIRM_HITS",      "2"))
-NEW_SPEAKER_CONFIRM_HITS = int(os.getenv("DIARIZE_NEW_SPEAKER_CONFIRM_HITS", "2"))
+NEW_SPEAKER_CONFIRM_HITS = int(os.getenv("DIARIZE_NEW_SPEAKER_CONFIRM_HITS", "3"))
 CROSS_GENDER_PENALTY   = float(os.getenv("DIARIZE_CROSS_GENDER_PENALTY",   "0.06"))
 MERGE_SIM_THRESHOLD    = float(os.getenv("DIARIZE_MERGE_SIM_THRESHOLD",    "0.94"))
 EMA_UPDATE_MIN_SIM     = float(os.getenv("DIARIZE_EMA_UPDATE_MIN_SIM",     "0.50"))
@@ -33,7 +33,7 @@ CROSS_GENDER_EXTRA_THRESHOLD        = 0.07
 CROSS_GENDER_STRONG_MATCH_THRESHOLD = 0.85
 SOFT_CROSS_GENDER_FACTOR            = 0.003
 # Sticky / hysteresis
-WEAK_MATCH_MARGIN                   = 0.04
+WEAK_MATCH_MARGIN                   = 0.06
 STICKY_RECENT_SEC                   = 5.0
 STICKY_SIM_MARGIN                   = 0.04
 LOW_PITCH_STICKY_BONUS              = 0.00
@@ -47,7 +47,7 @@ INSTANT_SWITCH_GAP                  = 0.15
 NEW_SPEAKER_MIN_SECONDS             = 1.5
 SAME_ZONE_WEAK_PITCH_DIFF_FEMALE    = 40.0
 SAME_ZONE_WEAK_PITCH_DIFF_MALE      = 90.0
-NEW_SPEAKER_SELF_SIM                = 0.65
+NEW_SPEAKER_SELF_SIM                = 0.70
 NEW_SPEAKER_CONFIRM_WINDOW_SEC      = 8.0
 # Mouthprint
 MOUTHPRINT_MIN_FRAMES               = 6
@@ -196,10 +196,10 @@ class SpeakerDiarizer:
             frames[i, :end - start] = samples[start:end]
         # Apply window
         frames *= window
-        # FFT → power spectrum
+        # FFT -> power spectrum
         fft_out = np.fft.rfft(frames, n=n_fft)
         power = np.abs(fft_out) ** 2
-        # Mel filterbank → log
+        # Mel filterbank -> log
         mel_spec = np.dot(power, self._mel_basis.T)
         mel_spec = np.maximum(mel_spec, 1e-10)
         log_mel = np.log(mel_spec)
@@ -434,7 +434,7 @@ class SpeakerDiarizer:
                     "mouth_vec": mouth_vec, "mouth_count": mouth_count,
                     "created_at": time.time(),
                 })
-                print(f"[diarize] → Speaker {sid + 1} (first speaker)")
+                print(f"[diarize] -> Speaker {sid + 1} (first speaker)")
                 self._last_speaker_id = sid
                 self._last_speaker_time = time.time()
                 self._clear_pending_switch(); self._clear_pending_new()
@@ -628,7 +628,7 @@ class SpeakerDiarizer:
                     print(f"[diarize] hold Speaker {sid+1} (candidate={best_profile['id']+1}, sim={best_sim:.3f})")
                     return _result(sid)
                 _ema_update(best_profile, 0.10, 0.12, 0.10)
-                print(f"[diarize] → Speaker {best_profile['id']+1} (sim={best_sim:.3f}, gap={similarity_gap:.3f}, f0={pitch_mean or 0:.0f})")
+                print(f"[diarize] -> Speaker {best_profile['id']+1} (sim={best_sim:.3f}, gap={similarity_gap:.3f}, f0={pitch_mean or 0:.0f})")
                 self._last_speaker_id = best_profile["id"]; self._last_speaker_time = now
                 self._clear_pending_switch(); self._clear_pending_new()
                 return _result(best_profile["id"])
@@ -665,7 +665,7 @@ class SpeakerDiarizer:
                         and last_speaker_sim >= sticky_threshold
                         and (best_sim - last_speaker_sim) <= eff_margin):
                     _ema_update(last_profile, 0.08, 0.10, 0.08)
-                    print(f"[diarize] → Speaker {last_profile['id']+1} (sticky sim={last_speaker_sim:.3f}, best={best_sim:.3f})")
+                    print(f"[diarize] -> Speaker {last_profile['id']+1} (sticky sim={last_speaker_sim:.3f}, best={best_sim:.3f})")
                     self._last_speaker_time = now
                     self._clear_pending_switch(); self._clear_pending_new()
                     return _result(last_profile["id"])
@@ -675,7 +675,7 @@ class SpeakerDiarizer:
                     and not best_same_zone_far_pitch and not best_same_zone_far_mouth and not best_split_signal
                     and best_sim >= (adaptive_threshold - WEAK_MATCH_MARGIN)):
                 _ema_update(best_profile, 0.08, 0.10, 0.08)
-                print(f"[diarize] → Speaker {best_profile['id']+1} (weak sim={best_sim:.3f})")
+                print(f"[diarize] -> Speaker {best_profile['id']+1} (weak sim={best_sim:.3f})")
                 self._last_speaker_id = best_profile["id"]; self._last_speaker_time = now
                 self._clear_pending_switch(); self._clear_pending_new()
                 return _result(best_profile["id"])
@@ -683,7 +683,7 @@ class SpeakerDiarizer:
             # ── Max speakers cap ───────────────────────────────────────────────
             if len(self._profiles) >= MAX_SPEAKERS and best_profile is not None:
                 _ema_update(best_profile, 0.08, 0.08, 0.06)
-                print(f"[diarize] → Speaker {best_profile['id']+1} (max-cap, sim={best_sim:.3f})")
+                print(f"[diarize] -> Speaker {best_profile['id']+1} (max-cap, sim={best_sim:.3f})")
                 self._last_speaker_id = best_profile["id"]; self._last_speaker_time = now
                 self._clear_pending_switch(); self._clear_pending_new()
                 return _result(best_profile["id"])
@@ -691,7 +691,7 @@ class SpeakerDiarizer:
             # ── Short chunk guard ──────────────────────────────────────────────
             if (duration_sec < NEW_SPEAKER_MIN_SECONDS and self._last_speaker_id is not None
                     and (now - self._last_speaker_time) <= STICKY_RECENT_SEC):
-                print(f"[diarize] short chunk {duration_sec:.2f}s → keep Speaker {self._last_speaker_id+1}")
+                print(f"[diarize] short chunk {duration_sec:.2f}s -> keep Speaker {self._last_speaker_id+1}")
                 return _result(self._last_speaker_id)
 
             # ── New speaker debounce ───────────────────────────────────────────
@@ -742,7 +742,7 @@ class SpeakerDiarizer:
                 "mouth_vec": mouth_vec, "mouth_count": mouth_count,
                 "created_at": time.time(),
             })
-            print(f"[diarize] → Speaker {sid+1} NEW (best_sim={best_sim:.3f}, gap={similarity_gap:.3f}, f0={pitch_mean or 0:.0f})")
+            print(f"[diarize] -> Speaker {sid+1} NEW (best_sim={best_sim:.3f}, gap={similarity_gap:.3f}, f0={pitch_mean or 0:.0f})")
             self._last_speaker_id = sid; self._last_speaker_time = now
             self._clear_pending_switch(); self._clear_pending_new()
             return _result(sid, is_new=True)
@@ -934,7 +934,7 @@ class BackgroundReconciler:
         self._patch_window    = patch_window_sec
         self._chunks: list[dict] = []
         self._chunks_lock     = threading.Lock()
-        # merge confirmation counter: pair_key → consecutive passes above threshold
+        # merge confirmation counter: pair_key -> consecutive passes above threshold
         self._merge_hits: dict[tuple[int,int], int] = {}
         self._thread: threading.Thread | None = None
         self._stop_event      = threading.Event()
@@ -989,7 +989,7 @@ class BackgroundReconciler:
         ca = int(pa.get("pitch_count") or 0)
         cb = int(pb.get("pitch_count") or 0)
         if fa is None or fb is None or ca < MIN_PITCH_FRAMES or cb < MIN_PITCH_FRAMES:
-            return True   # no pitch data → don't block on pitch
+            return True   # no pitch data -> don't block on pitch
         if SpeakerDiarizer._is_cross_gender(fa, fb):
             return False
         za, zb = SpeakerDiarizer._pitch_zone(fa), SpeakerDiarizer._pitch_zone(fb)
@@ -1049,7 +1049,7 @@ class BackgroundReconciler:
 
                 # All guards passed — commit merge
                 keep, drop = (pa, pb) if pa["count"] >= pb["count"] else (pb, pa)
-                print(f"[reconciler] MERGE S{drop['id']+1} → S{keep['id']+1} "
+                print(f"[reconciler] MERGE S{drop['id']+1} -> S{keep['id']+1} "
                       f"(sim={sim:.3f}, hits={hits}, counts={pa['count']}/{pb['count']})")
 
                 with self._diarizer._lock:
