@@ -153,13 +153,34 @@ export function RecordingBar() {
                 }
             }
         } else {
-            // Soniox: must reconnect (translate_lang required at connection time)
-            console.log(`[translation] Soniox mid-session: reconnecting...`);
+            // Soniox: must reconnect (translate_lang is set at connection time)
+            const newLang = translationEnabled ? translationLang : undefined;
+            console.log(`[translation] Soniox mid-session: reconnecting with translate_lang=${newLang || 'off'}`);
+
+            // Browser mic WS: close → onclose auto-reconnects with current translation state
             const ws = wsRef.current;
             if (ws) ws.close();
-            // TODO: In Tauri mode for Soniox, we'd need to stop and start system audio.
-            if (isTauri && audioSource === 'both') {
-                console.log(`[translation] Soniox Tauri mid-session toggle not fully supported yet.`);
+
+            // Tauri system audio: stop + restart with new translateLang
+            if (isTauri && (audioSource === 'both' || audioSource === 'system')) {
+                (async () => {
+                    try {
+                        const { invoke } = await import('@tauri-apps/api/core');
+                        console.log('[translation] Soniox Tauri: stopping system audio for reconnect...');
+                        await invoke('stop_system_audio');
+                        // Brief pause to let the WS close cleanly
+                        await new Promise(r => setTimeout(r, 300));
+                        const state = useAppStore.getState();
+                        const sysArgs: Record<string, unknown> = {};
+                        if (state.draftId) sysArgs.draftId = state.draftId;
+                        sysArgs.sttProvider = sttProviderRef.current;
+                        if (translationEnabled) sysArgs.translateLang = translationLang;
+                        console.log('[translation] Soniox Tauri: restarting system audio with translateLang:', translationEnabled ? translationLang : '(none)');
+                        await invoke('start_system_audio', sysArgs);
+                    } catch (e) {
+                        console.error('[translation] Soniox Tauri mid-session restart failed:', e);
+                    }
+                })();
             }
         }
     }, [translationEnabled, translationLang, recording, audioSource]);
