@@ -28,12 +28,11 @@ hiddenimports = [
     'grpcio',
     'grpcio_tools',
     'charset_normalizer',
-    'soniox',
-    'soniox.client',
-    'soniox.types',
     'websockets',
 ]
 tmp_ret = collect_all('riva')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('soniox')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 # ── Aggressive excludes ──
