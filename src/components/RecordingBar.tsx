@@ -534,6 +534,12 @@ export function RecordingBar() {
                                 } else if (sameSpeaker) {
                                     appendToLastPart(text, String(state.seconds), chunkId || undefined);
                                 } else {
+                                    // New speaker — commit pending translation to previous part
+                                    const prevTranslation = useAppStore.getState().interimTranslation;
+                                    if (prevTranslation && state.transcriptParts.length > 0) {
+                                        useAppStore.getState().updateTranscriptTranslation(state.transcriptParts.length - 1, prevTranslation);
+                                        useAppStore.getState().setInterimTranslation('');
+                                    }
                                     addTranscriptPart({
                                         text,
                                         speaker,
@@ -545,6 +551,18 @@ export function RecordingBar() {
                                         timestamp: ts,
                                         translation: data.translation || '',
                                     });
+                                }
+                                // Inline translation on final event (Soniox sends translation with each chunk update)
+                                if (data.translation) {
+                                    const updatedParts = useAppStore.getState().transcriptParts;
+                                    if (updatedParts.length > 0) {
+                                        const li = updatedParts.length - 1;
+                                        const existing = updatedParts[li].translation || '';
+                                        if (data.translation.length > existing.length) {
+                                            useAppStore.getState().updateTranscriptTranslation(li, data.translation);
+                                            useAppStore.getState().setInterimTranslation('');
+                                        }
+                                    }
                                 }
                                 setIsTranscribing(false);
 
