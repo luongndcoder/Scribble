@@ -5,14 +5,17 @@ import { fetchSidecar } from '../lib/sidecar';
 export function SummaryView({ meetingId, transcript }: { meetingId: number; transcript: string }) {
     const [summary, setSummary] = useState('');
     const [loading, setLoading] = useState(false);
-    const { lang } = useAppStore();
+    const { lang, summaryTemplate, customPrompt } = useAppStore();
 
     const generateSummary = async () => {
         setLoading(true);
         setSummary('');
 
         try {
-            const payload: any = { language: lang };
+            const payload: any = { language: lang, template: summaryTemplate || 'mom' };
+            if (summaryTemplate === 'custom' && customPrompt) {
+                payload.customPrompt = customPrompt;
+            }
             if (meetingId) {
                 payload.meetingId = meetingId;
             } else {

@@ -120,6 +120,8 @@ async def summarize(request: Request):
     transcript = body.get("transcript")
     start_time = body.get("startTime", "")
     end_time = body.get("endTime", "")
+    template = body.get("template", "mom")
+    custom_prompt = body.get("customPrompt", "")
 
     if not transcript:
         if not meeting_id:
@@ -150,7 +152,7 @@ async def summarize(request: Request):
 
     from summarize import summarize_stream
     return StreamingResponse(
-        summarize_stream(transcript_str, language, db, start_time=start_time, end_time=end_time),
+        summarize_stream(transcript_str, language, db, start_time=start_time, end_time=end_time, template=template, custom_prompt=custom_prompt),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

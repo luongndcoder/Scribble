@@ -17,88 +17,106 @@ SINGLE_PASS_MAX_CHARS = 120_000  # ~30k tokens
 CHUNK_CHARS = 8_000              # ~2k tokens per chunk
 OVERLAP_CHARS = 500              # context overlap between chunks
 
-# ── Prompts ──
-SUMMARY_PROMPT_VI = """Ban la tro ly viet MoM (Minutes of Meeting) cap senior cho doi ngu customer-facing.
+# ── Prompts (all in English — output language controlled via instruction) ──
 
-Muc tieu MoM:
-- Khong chi tuong thuat noi dung, ma phai la cong cu communication, quan tri rui ro va dieu phoi ky vong stakeholders.
-- Nguoi doc gom: nguoi tham gia hop va nguoi khong tham gia hop.
+# ─── Template: MoM (Minutes of Meeting) ───
+MOM_PROMPT = """You are a senior MoM (Minutes of Meeting) assistant for customer-facing teams.
 
-Cac noi dung bat buoc:
-1. Thoi gian & thanh phan tham gia (neu ro vai tro neu co).
-2. Link recording goc.
-3. Muc tieu cuoc hop: van de/nguyen nhan va output can dat.
-4. Noi dung trao doi chinh (key discussion): loc y quan trong, khong tuong thuat lan man.
-5. Cac quyet dinh quan trong da chot.
-6. Action items theo What - Who - When (task gi, PIC la ai/don vi nao, deadline/checkpoint khi nao).
+MoM Goals:
+- Not just a transcript recap, but a communication tool for risk management and stakeholder expectation alignment.
+- Readers include both meeting attendees and non-attendees.
 
-Neu la hop voi khach hang (external), can lam ro:
-- 1-3 diem Mobio nhat dinh can khach hang nho hoac thuc hien.
-- Du bao/canh bao rui ro co the anh huong action items.
-- Van phong: chuyen nghiep, khach quan, sac net, thuyet phuc.
+Required content:
+1. Time & attendees (include roles when possible).
+2. Original recording link.
+3. Meeting objective: problem/root cause and expected output.
+4. Key discussion points: filter important ideas only, no rambling transcript.
+5. Key decisions made.
+6. Action items following What - Who - When (task, PIC/owner, deadline/checkpoint).
 
-Neu la MoM noi bo (internal), can bo sung:
-- Customer Insights & Politics: thai do stakeholders, ai ung ho/ai gay kho khan.
-- Game Plan: ke hoach ung pho va chuan bi cho buoi hop tiep theo.
-- Ghi chu nguoi viet: cam nhan/danh gia ca nhan can luu y noi bo.
-- Implicit info: thong tin ngam quan trong cho nguoi doc MoM.
-- Van phong: chi tiet, thang than, khong noi giam noi tranh.
+For external meetings (with customers), clarify:
+- 1-3 points the customer must remember or act on.
+- Risk forecasts/warnings that may affect action items.
+- Tone: professional, objective, sharp, persuasive.
 
-Luu y chat luong:
-- Khong bia thong tin. Neu thieu du lieu, ghi ro "Chua co du lieu".
-- Khong liet ke toan bo transcript; chi giu noi dung then chot.
-- Nhan manh muc do nong/rui ro dung thuc te.
+For internal meetings, add:
+- Customer Insights & Politics: stakeholder attitudes, who supports/who blocks.
+- Game Plan: strategy and preparation for the next meeting.
+- Writer's notes: personal observations/assessments for internal awareness.
+- Implicit info: important unspoken context for MoM readers.
+- Tone: detailed, candid, no sugarcoating.
 
-Yeu cau dau ra:
-- Tra ve tieng Viet, dang Markdown de doc.
-- Dong dau tien bat buoc: `# <Ten bien ban ngan gon>`.
-- Dung dung cau truc sau:
-## 1. Thoi gian & thanh phan tham gia
-## 2. Link recording goc
-## 3. Muc tieu cuoc hop
-## 4. Key discussion
-## 5. Key decisions
-## 6. Action items (What - Who - When)
-## 7. Rui ro & canh bao
-## 8. External MoM (neu co khach hang, khong thi ghi "Khong ap dung")
-## 9. Internal MoM (insights/politics, game plan, ghi chu, implicit info)
-## 10. 1-3 uu tien follow-up ngay
+Quality rules:
+- Do not invent facts. If data is missing, write "No data available".
+- Do not list the entire transcript; keep only key content.
+- Emphasize urgency/risk levels accurately.
+
+Output requirements:
+- Return readable Markdown.
+- First line must be: `# <Short minutes title>`.
+- Use this exact structure:
+## 1. Time & Attendees
+## 2. Original Recording Link
+## 3. Meeting Objective
+## 4. Key Discussion
+## 5. Key Decisions
+## 6. Action Items (What - Who - When)
+## 7. Risks & Warnings
+## 8. External MoM (if customer-facing; otherwise "N/A")
+## 9. Internal MoM (insights/politics, game plan, notes, implicit info)
+## 10. Top 1-3 Immediate Follow-ups
 """
 
-SUMMARY_PROMPT_EN = """You are a senior MoM (Minutes of Meeting) assistant.
+# ─── Template: General Summary ───
+SUMMARY_PROMPT = """You are a professional content summarizer.
 
-Write strategic meeting minutes (not a raw transcript) for stakeholders who attended and did not attend.
+Write a detailed, comprehensive summary of the recording/conversation below.
+Do NOT use meeting minutes (MoM) format. Instead:
 
-Required sections:
-1) Time & attendees (include role when possible)
-2) Original recording link
-3) Meeting objective
-4) Key discussion points
-5) Key decisions
-6) Action items (What - Who - When)
-7) Risks and warnings
-8) External MoM view (if customer-facing; otherwise mark N/A)
-9) Internal MoM view (politics/insights, game plan, implicit notes)
-10) Top 1-3 immediate follow-ups
+1. Start with a short title reflecting the main topic: `# <Title>`
+2. Write a brief overview (2-3 sentences) describing the overall content.
+3. Present key points in logical order, each as a paragraph or bullet group.
+4. Preserve speaker names and roles when available.
+5. Don't omit important information, but don't transcribe every sentence either.
+6. If there are decisions, action items, or critical info — highlight them clearly.
 
 Rules:
-- Do not invent facts. If missing, write "Missing data".
-- Keep it concise, sharp, and actionable.
-- First line must be: `# <Short minutes title>`.
+- Do not invent facts. If missing, write "No data available".
 - Return Markdown only.
+- Keep it clear, readable, and professional.
 """
 
-CHUNK_SUMMARY_PROMPT_VI = """Tom tat doan hoi thoai sau. Giu lai cac y chinh, quyet dinh, action items, va ten nguoi noi.
-Khong bo sung thong tin. Tra ve tieng Viet, dang bullet points ngan gon (toi da 300 tu)."""
+# ─── Template: Bullet Points ───
+BULLETS_PROMPT = """You are a content summarizer.
 
-CHUNK_SUMMARY_PROMPT_EN = """Summarize the following conversation segment. Keep key points, decisions, action items, and speaker names.
+Summarize the recording/conversation below as a concise list of key points (bullet points).
+
+Requirements:
+1. First line: `# <Short title>`
+2. List key points as bullets (`-`), grouped by topic if needed.
+3. Each bullet should be concise and clear (1-2 sentences max).
+4. Preserve speaker names when relevant.
+5. If there are decisions or action items, separate them into `## Decisions` and `## Action Items`.
+
+Rules:
+- Do not invent facts. If missing, write "No data available".
+- Return Markdown only.
+- Maximum 30 bullet points.
+"""
+
+# ─── Template registry ───
+TEMPLATES = {
+    "mom":     MOM_PROMPT,
+    "summary": SUMMARY_PROMPT,
+    "bullets": BULLETS_PROMPT,
+}
+
+# ─── Chunk/Reduce prompts (shared across templates, for MapReduce) ───
+CHUNK_SUMMARY_PROMPT = """Summarize the following conversation segment. Keep key points, decisions, action items, and speaker names.
 Do not add information. Return concise bullet points (max 300 words)."""
 
-REDUCE_PROMPT_VI = """Duoi day la cac ban tom tat tung phan cua mot cuoc hop dai.
-Hay tong hop thanh MoM hoan chinh theo cau truc yeu cau."""
-
-REDUCE_PROMPT_EN = """Below are partial summaries from different segments of a long meeting.
-Synthesize them into a complete MoM following the required structure."""
+REDUCE_PROMPT = """Below are partial summaries from different segments of a long conversation.
+Synthesize them into a complete summary following the required structure."""
 
 
 def _chunk_transcript(transcript: str) -> list[str]:
@@ -132,9 +150,13 @@ def _chunk_transcript(transcript: str) -> list[str]:
     return segments
 
 
-def summarize_stream(transcript: str, language: str, db, *, start_time: str = "", end_time: str = "") -> Generator[str, None, None]:
+def summarize_stream(transcript: str, language: str, db, *, start_time: str = "", end_time: str = "", template: str = "mom", custom_prompt: str = "") -> Generator[str, None, None]:
     """Stream meeting summary token-by-token via SSE.
     Uses single-pass for short transcripts, MapReduce for long ones.
+
+    Args:
+        template: one of 'mom', 'summary', 'bullets', 'custom'
+        custom_prompt: user-provided prompt (used when template='custom')
     """
     from openai import OpenAI
 
@@ -157,20 +179,23 @@ def summarize_stream(transcript: str, language: str, db, *, start_time: str = ""
 
     client = OpenAI(api_key=api_key, base_url=base_url)
 
-    # Select base prompt based on language
-    if language == "vi":
-        prompt = SUMMARY_PROMPT_VI
-    elif language == "en":
-        prompt = SUMMARY_PROMPT_EN
+    # Select prompt based on template
+    if template == "custom" and custom_prompt.strip():
+        prompt = custom_prompt.strip()
+        log.info("[summarize] Using custom prompt (%d chars)", len(prompt))
     else:
-        # For other languages, use English prompt + language instruction
-        lang_names = {
-            "ja": "Japanese", "ko": "Korean", "zh": "Chinese",
-            "fr": "French", "de": "German", "es": "Spanish",
-            "th": "Thai", "id": "Indonesian", "pt": "Portuguese",
-        }
-        lang_name = lang_names.get(language, language)
-        prompt = SUMMARY_PROMPT_EN + f"\n\nIMPORTANT: You MUST write the entire output in {lang_name}. All section headers and content must be in {lang_name}."
+        prompt = TEMPLATES.get(template, TEMPLATES["mom"])
+        log.info("[summarize] Using template '%s'", template)
+
+    # Append language instruction
+    lang_names = {
+        "vi": "Vietnamese", "en": "English", "ja": "Japanese",
+        "ko": "Korean", "zh": "Chinese", "fr": "French",
+        "de": "German", "es": "Spanish", "th": "Thai",
+        "id": "Indonesian", "pt": "Portuguese",
+    }
+    lang_name = lang_names.get(language, language)
+    prompt += f"\n\nIMPORTANT: You MUST write the entire output in {lang_name}. All section headers and content must be in {lang_name}."
 
     # Build timestamp context
     time_context = ""
@@ -228,8 +253,6 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
 
         yield f"event: progress\ndata: {json.dumps({'step': 'chunking', 'total': total})}\n\n"
 
-        chunk_prompt = CHUNK_SUMMARY_PROMPT_VI if language == "vi" else CHUNK_SUMMARY_PROMPT_EN
-
         # Phase 2: Map — summarize each chunk
         partial_summaries: list[str] = []
         for i, chunk_text in enumerate(chunks):
@@ -238,20 +261,20 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
             response = client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": chunk_prompt},
+                    {"role": "system", "content": CHUNK_SUMMARY_PROMPT},
                     {"role": "user", "content": chunk_text},
                 ],
                 temperature=0.2,
                 max_tokens=1000,
             )
             summary = response.choices[0].message.content or ""
-            partial_summaries.append(f"--- Phan {i + 1}/{total} ---\n{summary}")
+            partial_summaries.append(f"--- Part {i + 1}/{total} ---\n{summary}")
             log.info("[summarize] chunk %d/%d done (%d chars)", i + 1, total, len(summary))
 
-        # Phase 3: Reduce — synthesize into final MoM
+        # Phase 3: Reduce — synthesize into final summary
         yield f"event: progress\ndata: {json.dumps({'step': 'finalizing'})}\n\n"
 
-        reduce_intro = REDUCE_PROMPT_VI if language == "vi" else REDUCE_PROMPT_EN
+        reduce_intro = REDUCE_PROMPT
         combined = "\n\n".join(partial_summaries)
 
         user_content = f"{time_context}{combined}" if time_context else combined

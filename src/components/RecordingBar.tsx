@@ -105,6 +105,7 @@ export function RecordingBar() {
     const {
         recording, paused, seconds, transcriptParts, currentMeetingId, meetings,
         translationEnabled, translationLang, summaryLang, setSummaryLang,
+        summaryTemplate, setSummaryTemplate, customPrompt, setCustomPrompt,
         setRecording, setPaused, setSeconds, clearTranscript,
         addTranscriptPart, appendToLastPart, replaceLastPartText, revertLastPartToBase, updateTranscriptSpeakerByChunk, setTranslationEnabled,
         setTranslationLang, lang, setIsTranscribing, setInterimText, setInterimSpeaker, setTransientSummary,
@@ -1108,7 +1109,10 @@ export function RecordingBar() {
                 }
             }
 
-            const payload: any = { language: state.summaryLang || lang };
+            const payload: any = { language: state.summaryLang || lang, template: state.summaryTemplate || 'mom' };
+            if (state.summaryTemplate === 'custom' && state.customPrompt) {
+                payload.customPrompt = state.customPrompt;
+            }
             // Include recording timestamps
             if (state.recordingStartedAt) {
                 payload.startTime = state.recordingStartedAt;
@@ -1287,6 +1291,26 @@ export function RecordingBar() {
                                 { value: 'en', label: 'English' },
                             ]}
                         />
+                        <CustomSelect
+                            className="summary-template-select"
+                            value={summaryTemplate}
+                            onChange={setSummaryTemplate}
+                            options={[
+                                { value: 'mom', label: lang === 'vi' ? 'Biên bản (MoM)' : 'Minutes (MoM)' },
+                                { value: 'summary', label: lang === 'vi' ? 'Tóm tắt chi tiết' : 'Detailed Summary' },
+                                { value: 'bullets', label: 'Bullet Points' },
+                                { value: 'custom', label: lang === 'vi' ? 'Tùy chỉnh' : 'Custom Prompt' },
+                            ]}
+                        />
+                        {summaryTemplate === 'custom' && (
+                            <textarea
+                                className="custom-prompt-input"
+                                value={customPrompt}
+                                onChange={(e) => setCustomPrompt(e.target.value)}
+                                placeholder={lang === 'vi' ? 'Nhập prompt tùy chỉnh...' : 'Enter your custom prompt...'}
+                                rows={3}
+                            />
+                        )}
                         <button
                             className={`rec-summarize-btn ${summaryLoading ? 'loading' : ''}`}
                             onClick={summarize}

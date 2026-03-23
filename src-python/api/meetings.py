@@ -115,6 +115,7 @@ async def download_meeting_audio(meeting_id: int, format: str = "wav"):
         return JSONResponse({"error": "format must be wav or mp4"}, status_code=400)
 
     export_path = source_path
+    actual_ext = source_path.suffix.lower().lstrip(".")
     cleanup_task = None
 
     if source_path.suffix.lower() != f".{export_format}":
@@ -131,24 +132,30 @@ async def download_meeting_audio(meeting_id: int, format: str = "wav"):
                     wf.setframerate(16000)
                     wf.writeframes(pcm_data)
                 export_path = tmp_path
+                actual_ext = "wav"
                 cleanup_task = BackgroundTask(safe_unlink, str(export_path))
             except Exception as e:
                 safe_unlink(str(tmp_path))
-                return JSONResponse({"error": f"PCM to WAV conversion failed: {e}"}, status_code=500)
+                log.warning("[meetings] PCM to WAV failed, serving original: %s", e)
+                # Fallback: serve original PCM
         else:
             try:
                 import asyncio
                 export_path = await asyncio.to_thread(transcode_audio_for_export, source_path, export_format)
+                actual_ext = export_format
                 cleanup_task = BackgroundTask(safe_unlink, str(export_path))
+            except FileNotFoundError:
+                # ffmpeg not installed — serve original file as-is
+                log.warning("[meetings] ffmpeg not found, serving original %s file", source_path.suffix)
             except Exception as e:
-                log.error("[meetings] Audio transcode failed: %s", e)
-                return JSONResponse({"error": f"Audio convert to {export_format} failed"}, status_code=500)
+                # Other transcode error — still serve original file
+                log.warning("[meetings] Transcode failed (%s), serving original %s", e, source_path.suffix)
 
     media_type = audio_media_type(export_path.suffix)
     return FileResponse(
         str(export_path),
         media_type=media_type,
-        filename=f"meeting_{meeting_id}.{export_format}",
+        filename=f"meeting_{meeting_id}.{actual_ext}",
         background=cleanup_task,
     )
 

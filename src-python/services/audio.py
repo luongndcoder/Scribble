@@ -86,7 +86,7 @@ def transcode_audio_for_export(source: Path, fmt: str) -> Path:
 def audio_media_type(ext: str) -> str:
     """Return MIME type for a given audio file extension."""
     ext_l = ext.lower()
-    mapping = {".wav": "audio/wav", ".mp4": "audio/mp4", ".mp3": "audio/mpeg", ".m4a": "audio/mp4"}
+    mapping = {".wav": "audio/wav", ".mp4": "audio/mp4", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".webm": "audio/webm", ".pcm": "application/octet-stream"}
     return mapping.get(ext_l, "application/octet-stream")
 
 

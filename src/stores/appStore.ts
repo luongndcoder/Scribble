@@ -55,6 +55,8 @@ interface AppState {
     transientSummary: string;
     summaryLoading: boolean;
     summaryLang: string;
+    summaryTemplate: string;
+    customPrompt: string;
 
     // Actions
     setRecording: (v: boolean) => void;
@@ -85,6 +87,8 @@ interface AppState {
     setInterimTranslation: (v: string) => void;
     setInterimSpeaker: (speaker: string, speakerId: number) => void;
     setSummaryLang: (v: string) => void;
+    setSummaryTemplate: (v: string) => void;
+    setCustomPrompt: (v: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -110,6 +114,8 @@ export const useAppStore = create<AppState>((set) => ({
     transientSummary: '',
     summaryLoading: false,
     summaryLang: localStorage.getItem('scribble:summaryLang') || 'vi',
+    summaryTemplate: localStorage.getItem('scribble:summaryTemplate') || 'mom',
+    customPrompt: localStorage.getItem('scribble:customPrompt') || '',
 
     setRecording: (v) => set({ recording: v }),
     setPaused: (v) => set({ paused: v }),
@@ -231,5 +237,13 @@ export const useAppStore = create<AppState>((set) => ({
     setSummaryLang: (v) => {
         localStorage.setItem('scribble:summaryLang', v);
         set({ summaryLang: v });
+    },
+    setSummaryTemplate: (v) => {
+        localStorage.setItem('scribble:summaryTemplate', v);
+        set({ summaryTemplate: v });
+    },
+    setCustomPrompt: (v) => {
+        localStorage.setItem('scribble:customPrompt', v);
+        set({ customPrompt: v });
     },
 }));

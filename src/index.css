@@ -1514,10 +1514,12 @@ body.electron-app .sub-tabs {
 }
 
 .summarize-group {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
   border-radius: var(--radius-full, 20px);
   overflow: visible;
+  gap: 0;
 }
 
 .summarize-group .custom-select {
@@ -1529,7 +1531,8 @@ body.electron-app .sub-tabs {
   z-index: 200;
 }
 
-.summarize-group .custom-select-trigger {
+/* First select: rounded left only */
+.summarize-group .custom-select:first-child .custom-select-trigger {
   background: var(--primary, #6366f1);
   color: var(--white, #fff);
   border: none;
@@ -1540,9 +1543,27 @@ body.electron-app .sub-tabs {
   gap: 6px;
 }
 
+/* Middle select: no rounding */
+.summarize-group .summary-template-select .custom-select-trigger {
+  background: var(--primary, #6366f1);
+  color: var(--white, #fff);
+  border: none;
+  border-radius: 0;
+  border-left: 1px solid rgba(255,255,255,0.2);
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding: 8px 12px;
+  gap: 6px;
+}
+
 .summarize-group .custom-select-trigger:hover {
   background: var(--primary-hover, #5558e6);
   border: none;
+}
+
+.summarize-group .summary-template-select .custom-select-trigger:hover {
+  background: var(--primary-hover, #5558e6);
+  border-left: 1px solid rgba(255,255,255,0.2);
 }
 
 .summarize-group .custom-select.open .custom-select-trigger {
@@ -1557,6 +1578,31 @@ body.electron-app .sub-tabs {
 .summarize-group .rec-summarize-btn {
   border-radius: 0 var(--radius-full, 20px) var(--radius-full, 20px) 0;
   border-left: 1px solid rgba(255,255,255,0.2);
+}
+
+/* Custom prompt textarea */
+.custom-prompt-input {
+  width: 100%;
+  min-width: 280px;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius, 10px);
+  border: 1px solid var(--border, #e2e8f0);
+  background: var(--surface, #fff);
+  color: var(--text, #1e293b);
+  font-family: var(--font);
+  font-size: 0.82rem;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--duration);
+}
+
+.custom-prompt-input:focus {
+  border-color: var(--primary, #6366f1);
+}
+
+.custom-prompt-input::placeholder {
+  color: var(--text-muted, #94a3b8);
 }
 
 .rec-summarize-btn {
