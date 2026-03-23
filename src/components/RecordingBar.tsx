@@ -435,7 +435,7 @@ export function RecordingBar() {
                 clearTranscript();
                 setRecording(true);
                 setSeconds(0);
-                useAppStore.getState().setRecordingStartedAt(new Date().toISOString());
+                useAppStore.getState().setRecordingStartedAt(new Date().toLocaleString('sv-SE') + ' ' + Intl.DateTimeFormat().resolvedOptions().timeZone);
                 // Reset diarizer profiles so old speakers don't carry over
                 fetchSidecar('/diarize-reset', { method: 'POST' }).catch(() => {});
 
@@ -1138,7 +1138,7 @@ export function RecordingBar() {
             if (state.recordingStartedAt) {
                 payload.startTime = state.recordingStartedAt;
             }
-            payload.endTime = new Date().toISOString();
+            payload.endTime = new Date().toLocaleString('sv-SE') + ' ' + Intl.DateTimeFormat().resolvedOptions().timeZone;
             if (mid) {
                 payload.meetingId = mid;
                 // Also send transcript as fallback in case DB data is incomplete
