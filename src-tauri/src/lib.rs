@@ -730,6 +730,8 @@ async fn system_audio_ws_loop<F>(
         // High-quality downsample to 16kHz using Hanning-windowed sinc filter
         let output_len = (chunk.len() as f64 / ratio).floor() as usize;
         if output_len == 0 { continue; }
+        // Cap buffer to prevent unbounded memory allocation (~10s at 16kHz)
+        let output_len = output_len.min(160_000);
 
         let filter_half = (ratio.ceil() as usize) * 2 + 1;
         let cutoff = 1.0 / ratio;
@@ -824,6 +826,18 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
             .args(["/F", "/IM", "scribble-sidecar.exe"])
             .creation_flags(0x08000000)
             .output();
+    }
+
+    // Wait briefly for port to be freed, verify with a quick connect check
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    for _ in 0..5 {
+        if std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:8765".parse().unwrap(),
+            std::time::Duration::from_millis(100),
+        ).is_err() {
+            break; // Port is free
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
     // --- Resolve sidecar binary from onedir resource folder ---

@@ -233,10 +233,13 @@ def _single_pass(client, model: str, prompt: str, transcript: str, time_context:
             stream=True,
         )
 
-        for chunk in stream:
-            token = chunk.choices[0].delta.content if chunk.choices[0].delta.content else None
-            if token:
-                yield f"data: {json.dumps({'token': token})}\n\n"
+        try:
+            for chunk in stream:
+                token = chunk.choices[0].delta.content if chunk.choices[0].delta.content else None
+                if token:
+                    yield f"data: {json.dumps({'token': token})}\n\n"
+        finally:
+            stream.close()
 
         yield f"event: done\ndata: {json.dumps({})}\n\n"
     except Exception as e:
@@ -289,10 +292,13 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
             stream=True,
         )
 
-        for chunk in stream:
-            token = chunk.choices[0].delta.content if chunk.choices[0].delta.content else None
-            if token:
-                yield f"data: {json.dumps({'token': token})}\n\n"
+        try:
+            for chunk in stream:
+                token = chunk.choices[0].delta.content if chunk.choices[0].delta.content else None
+                if token:
+                    yield f"data: {json.dumps({'token': token})}\n\n"
+        finally:
+            stream.close()
 
         yield f"event: done\ndata: {json.dumps({})}\n\n"
     except Exception as e:

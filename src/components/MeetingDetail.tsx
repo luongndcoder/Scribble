@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { TranscriptPart, useAppStore } from '../stores/appStore';
 import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile } from '../lib/api';
 import { showConfirm } from './ConfirmDialog';
@@ -434,6 +435,7 @@ export function MeetingDetail() {
 
     const transcriptRef = useRef<HTMLDivElement>(null);
     const [meetingData, setMeetingData] = useState<any>(null);
+    const [meetingLoading, setMeetingLoading] = useState(false);
     const [editingSpeakerId, setEditingSpeakerId] = useState<number | null>(null);
     const [editingSpeakerAnchorIdx, setEditingSpeakerAnchorIdx] = useState<number | null>(null);
     const [editingSpeakerName, setEditingSpeakerName] = useState('');
@@ -620,6 +622,7 @@ export function MeetingDetail() {
             cancelEditSpeaker();
         }
         prevLoadedMeetingRef.current = requestedMeetingId;
+        setMeetingLoading(true);
 
         (async () => {
             try {
@@ -674,6 +677,8 @@ export function MeetingDetail() {
                 if (!cancelled) {
                     console.error('[detail] Failed to load meeting:', e);
                 }
+            } finally {
+                if (!cancelled) setMeetingLoading(false);
             }
         })();
 
@@ -703,7 +708,7 @@ export function MeetingDetail() {
         [summaryRaw, lang]
     );
     const minutesHtml = useMemo(
-        () => markdownToHtml(minutesMarkdown),
+        () => DOMPurify.sanitize(markdownToHtml(minutesMarkdown)),
         [minutesMarkdown]
     );
     const hasMinutes = minutesMarkdown.trim().length > 0;
@@ -719,6 +724,12 @@ export function MeetingDetail() {
                     <span>{lang === 'vi' ? 'Cuộc họp' : 'Meetings'}</span>
                 </button>
             </div>
+
+            {meetingLoading && !meetingData && (
+                <div style={{ textAlign: 'center', padding: '32px 0', opacity: 0.6 }}>
+                    <div className="summary-loading-spinner" />
+                </div>
+            )}
 
             {/* Sub-tabs */}
             <nav className="sub-tabs">

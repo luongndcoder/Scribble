@@ -123,16 +123,21 @@ def get_language_code(stt_language: str) -> str:
     return SHORT_TO_FULL.get(stt_language, "vi-VN")
 
 
-# ─── Nvidia Riva Client Cache (per function_id) ───
-_riva_asr_cache: dict = {}  # function_id -> ASRService
+# ─── Nvidia Riva Client Cache (per function_id + api_key prefix) ───
+_riva_asr_cache: dict = {}
+
+
+def _make_cache_key(api_key: str, function_id: str) -> str:
+    return f"{function_id}:{api_key[:8]}"
 
 
 def _get_riva_asr(api_key: str, function_id: str):
     """Get or create cached Nvidia Riva ASR service for a specific model."""
     global _riva_asr_cache
-    if function_id in _riva_asr_cache:
-        return _riva_asr_cache[function_id]
-    
+    cache_key = _make_cache_key(api_key, function_id)
+    if cache_key in _riva_asr_cache:
+        return _riva_asr_cache[cache_key]
+
     from riva.client import ASRService, Auth
 
     riva_url = os.getenv("NVIDIA_RIVA_URL", "grpc.nvcf.nvidia.com:443")
@@ -146,15 +151,18 @@ def _get_riva_asr(api_key: str, function_id: str):
         ],
     )
     asr = ASRService(auth)
-    _riva_asr_cache[function_id] = asr
+    _riva_asr_cache[cache_key] = asr
     return asr
 
 
 def _reset_riva_asr(function_id: str = None):
-    """Reset cached ASR service (e.g. after connection error)."""
+    """Reset cached ASR service (e.g. after connection error or API key change)."""
     global _riva_asr_cache
     if function_id:
-        _riva_asr_cache.pop(function_id, None)
+        # Remove all cache entries matching this function_id prefix
+        keys_to_remove = [k for k in _riva_asr_cache if k.startswith(function_id)]
+        for k in keys_to_remove:
+            _riva_asr_cache.pop(k, None)
     else:
         _riva_asr_cache.clear()
 
@@ -652,63 +660,3 @@ def normalize_vietnamese_text(text: str) -> str:
     
     return ' '.join(result)
 
-
-# Common Vietnamese words that Riva often incorrectly capitalizes
-_COMMON_VI_WORDS = {
-    # Pronouns
-    "tôi", "tao", "mình", "ta", "chúng", "bọn", "họ", "nó", "hắn", "cô", "ông", "bà",
-    "anh", "chị", "em", "con", "cháu", "bạn", "các", "những", "mấy", "vài",
-    # Common verbs
-    "là", "có", "được", "làm", "đi", "đến", "nói", "bảo", "biết", "thấy", "muốn",
-    "cần", "phải", "nên", "cho", "lấy", "đem", "mang", "đưa", "gửi", "nhận",
-    "hiểu", "nghĩ", "tưởng", "xem", "nghe", "đọc", "viết", "học", "dạy",
-    "ăn", "uống", "ngủ", "chơi", "hỏi", "trả", "lời", "gọi", "chạy", "bay",
-    "sống", "chết", "yêu", "ghét", "sợ", "tin", "mua", "bán", "giúp", "tìm",
-    # Common adjectives / adverbs
-    "rất", "lắm", "quá", "hơi", "khá", "cực", "siêu", "tốt", "xấu", "đẹp",
-    "lớn", "nhỏ", "cao", "thấp", "dài", "ngắn", "nhanh", "chậm", "mới", "cũ",
-    "nhiều", "ít", "đủ", "thêm", "bớt", "cùng", "khác", "giống", "đúng", "sai",
-    # Conjunctions / Prepositions / Particles
-    "và", "với", "hay", "hoặc", "nhưng", "mà", "vì", "nên", "do", "bởi",
-    "nếu", "thì", "khi", "lúc", "sau", "trước", "trong", "ngoài", "trên", "dưới",
-    "của", "về", "từ", "đã", "đang", "sẽ", "rồi", "xong", "hết", "còn",
-    "ở", "tại", "bên", "cạnh", "giữa", "qua", "lại", "ra", "vào", "lên", "xuống",
-    "theo", "bằng", "như", "để", "mà", "thế", "vậy", "đây", "đó", "kia", "này",
-    "gì", "nào", "sao", "tại", "thôi", "nhé", "ạ", "à", "ơi", "hả",
-    # Time words
-    "hôm", "nay", "ngày", "tháng", "năm", "tuần", "giờ", "phút", "sáng", "chiều",
-    "tối", "đêm", "mai", "qua", "kia",
-    # Misc common words
-    "không", "chưa", "chẳng", "đừng", "hãy", "thì", "cũng", "vẫn", "luôn",
-    "người", "việc", "điều", "cái", "con", "chiếc", "bài", "câu", "phần",
-    "nhà", "đường", "nước", "đất", "trời", "biển", "sông", "núi",
-    "tiền", "công", "việc", "cuộc", "họp", "dự", "án", "kế", "hoạch",
-}
-
-
-def is_likely_proper_noun(words: list, idx: int) -> bool:
-    """Strict heuristic for Vietnamese proper nouns.
-    
-    Only preserves capitalization for:
-    - Acronyms (all-caps, 2-5 chars): AI, CNTT, ASEAN
-    - Words NOT in common Vietnamese word list that are capitalized
-      (likely names of people, places, organizations)
-    """
-    word = words[idx]
-    if not word or not word[0].isupper():
-        return False
-    
-    # Acronyms: all-caps, 2-5 chars
-    if word.isupper() and 2 <= len(word) <= 5:
-        return True
-    
-    # If it's a common Vietnamese word, it's NOT a proper noun
-    if word.lower() in _COMMON_VI_WORDS:
-        return False
-    
-    # Short words (1-2 chars) that are capitalized are usually not proper nouns
-    if len(word) <= 2:
-        return False
-    
-    # Otherwise, keep capitalization (likely a name or foreign word)
-    return True

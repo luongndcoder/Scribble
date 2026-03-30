@@ -18,6 +18,8 @@ import wave
 import collections
 import logging
 import threading
+
+import numpy as np
 import queue as _queue
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -181,7 +183,12 @@ app = FastAPI(title="VoiceScribe Sidecar", lifespan=lifespan)
 app.add_middleware(_LimitUploadSizeMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+        "https://tauri.localhost",
+        "tauri://localhost",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -228,7 +235,16 @@ async def nvidia_stream_ws(websocket: WebSocket):
     """WebSocket for real-time Nvidia Riva streaming STT."""
     await websocket.accept()
 
+    # Reset diarizer for new session
+    diarizer.reset()
     source = websocket.query_params.get("source", "web")
+    diarizer.set_source(source)
+    max_sp = db.get_setting("max_speakers")
+    if max_sp:
+        try:
+            diarizer.set_max_speakers(int(max_sp))
+        except (ValueError, TypeError):
+            pass
 
     meeting_id_raw = websocket.query_params.get("meeting_id")
     archive_fh = None
@@ -250,23 +266,39 @@ async def nvidia_stream_ws(websocket: WebSocket):
     riva_lang = get_language_code(stt_lang)
     translation_tasks = set()
 
+    def _close_archive():
+        nonlocal archive_fh
+        if archive_fh is not None:
+            try:
+                archive_fh.close()
+            except Exception:
+                pass
+            archive_fh = None
+
     if not nvidia_key:
+        _close_archive()
         await websocket.send_json({"error": "NVIDIA_API_KEY not set"})
         await websocket.close()
         return
 
     streamer = NvidiaStreamingSTT(nvidia_key, riva_lang)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     try:
         await loop.run_in_executor(None, streamer.start)
     except Exception as e:
+        _close_archive()
         await websocket.send_json({"error": str(e)})
         await websocket.close()
         return
 
     result_queue = asyncio.Queue()
     last_final_chunk_id = ""
+
+    # Audio buffer for speaker diarization
+    diarize_buf = bytearray()
+    diarize_buf_lock = threading.Lock()
+    DIARIZE_MIN_BYTES = 16000 * 2  # 0.5s at 16kHz 16-bit mono
 
     def _read_results():
         for result in streamer.results():
@@ -290,6 +322,7 @@ async def nvidia_stream_ws(websocket: WebSocket):
         transcript_parts: list[dict] = []
         last_save_at = time.time()
         SAVE_INTERVAL = 10.0
+        MAX_PARTS_IN_MEMORY = 500  # Flush to DB and trim old chunkData to limit memory
 
         def _accumulate_part(text: str, speaker: str, speaker_id: int, chunk_id: str, is_final: bool):
             nonlocal last_save_at
@@ -334,11 +367,19 @@ async def nvidia_stream_ws(websocket: WebSocket):
                 mid = int(meeting_id_raw)
                 db.update_meeting(mid, transcript=json.dumps(transcript_parts, ensure_ascii=False))
                 last_save_at = time.time()
+                # Trim chunkData from older parts to limit memory growth
+                if len(transcript_parts) > MAX_PARTS_IN_MEMORY:
+                    trim_count = len(transcript_parts) - MAX_PARTS_IN_MEMORY
+                    for p in transcript_parts[:trim_count]:
+                        p.pop("chunkData", None)
             except Exception as e:
                 log.warning("[ws:auto-save] error: %s", e)
 
         last_interim_trans_time = 0.0
         last_interim_trans_text = ""
+
+        last_speaker = "Speaker 1"
+        last_speaker_id = 0
 
         while True:
             result = await result_queue.get()
@@ -347,7 +388,7 @@ async def nvidia_stream_ws(websocket: WebSocket):
             try:
                 msg = {
                     "text": result["text"], "is_final": True,
-                    "speaker": "Speaker 1", "speaker_id": 0, "chunk_id": current_chunk_id,
+                    "speaker": last_speaker, "speaker_id": last_speaker_id, "chunk_id": current_chunk_id,
                 }
 
                 if not result["is_final"]:
@@ -370,11 +411,30 @@ async def nvidia_stream_ws(websocket: WebSocket):
                                         })
                                 except Exception as e:
                                     log.error(f"[nmt] Interim preview error: {e}")
-                            asyncio.create_task(_do_interim_translate())
+                            t = asyncio.create_task(_do_interim_translate())
+                            translation_tasks.add(t)
+                            t.add_done_callback(translation_tasks.discard)
 
                     await websocket.send_json(msg)
                     _accumulate_part(msg["text"], msg["speaker"], msg["speaker_id"], current_chunk_id, False)
                 else:
+                    # Diarize on final result: identify speaker from buffered audio
+                    with diarize_buf_lock:
+                        buf_bytes = bytes(diarize_buf)
+                        diarize_buf.clear()
+                    if len(buf_bytes) >= DIARIZE_MIN_BYTES:
+                        try:
+                            samples = np.frombuffer(buf_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                            speaker_info = await loop.run_in_executor(
+                                None, diarizer.identify_speaker_from_samples, samples, 16000
+                            )
+                            msg["speaker"] = speaker_info.get("speaker", last_speaker)
+                            msg["speaker_id"] = speaker_info.get("speaker_id", last_speaker_id)
+                            last_speaker = msg["speaker"]
+                            last_speaker_id = msg["speaker_id"]
+                        except Exception as e:
+                            log.warning("[ws:nvidia] diarize error: %s", e)
+
                     await websocket.send_json(msg)
 
                     target_chunk_id = current_chunk_id
@@ -412,7 +472,9 @@ async def nvidia_stream_ws(websocket: WebSocket):
                             except Exception:
                                 pass
 
-                        asyncio.create_task(_do_translate())
+                        t = asyncio.create_task(_do_translate())
+                        translation_tasks.add(t)
+                        t.add_done_callback(translation_tasks.discard)
 
                 if time.time() - last_save_at >= SAVE_INTERVAL:
                     _flush_to_db()
@@ -432,6 +494,8 @@ async def nvidia_stream_ws(websocket: WebSocket):
             if "bytes" in data:
                 audio_bytes = data["bytes"]
                 streamer.feed_audio(audio_bytes)
+                with diarize_buf_lock:
+                    diarize_buf.extend(audio_bytes)
                 if archive_fh is not None:
                     try:
                         archive_fh.write(audio_bytes)
@@ -466,12 +530,8 @@ async def nvidia_stream_ws(websocket: WebSocket):
         # Give translation_tasks time to finish and send over websocket
         if translation_tasks:
             await asyncio.wait(translation_tasks, timeout=5.0)
-            
-        if archive_fh is not None:
-            try:
-                archive_fh.close()
-            except Exception:
-                pass
+
+        _close_archive()
         try:
             await websocket.close()
         except Exception:
@@ -483,6 +543,15 @@ async def nvidia_stream_ws(websocket: WebSocket):
 async def soniox_stream_ws(websocket: WebSocket):
     """WebSocket for real-time Soniox streaming STT."""
     await websocket.accept()
+
+    # Reset diarizer for new session (Soniox uses SDK diarization but clear stale state)
+    diarizer.reset()
+    max_sp = db.get_setting("max_speakers")
+    if max_sp:
+        try:
+            diarizer.set_max_speakers(int(max_sp))
+        except (ValueError, TypeError):
+            pass
 
     meeting_id_raw = websocket.query_params.get("meeting_id")
     archive_fh = None
@@ -503,7 +572,17 @@ async def soniox_stream_ws(websocket: WebSocket):
     hints_raw = db.get_setting("soniox_language_hints") or "vi"
     language_hints = [h.strip() for h in hints_raw.split(",") if h.strip()] or ["vi"]
 
+    def _close_archive():
+        nonlocal archive_fh
+        if archive_fh is not None:
+            try:
+                archive_fh.close()
+            except Exception:
+                pass
+            archive_fh = None
+
     if not soniox_key:
+        _close_archive()
         await websocket.send_json({"error": "SONIOX_API_KEY not set"})
         await websocket.close()
         return
@@ -512,7 +591,7 @@ async def soniox_stream_ws(websocket: WebSocket):
     log.info("[ws:soniox] translate_lang from query: '%s'", ws_translate_lang or '(none - translation disabled)')
 
     streamer = SonioxStreamingSTT(soniox_key, language_hints=language_hints, translate_lang=ws_translate_lang)
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     try:
         await loop.run_in_executor(None, streamer.start)
@@ -609,11 +688,7 @@ async def soniox_stream_ws(websocket: WebSocket):
         streamer.stop()
         result_thread.join(timeout=5)
         send_task.cancel()
-        if archive_fh is not None:
-            try:
-                archive_fh.close()
-            except Exception:
-                pass
+        _close_archive()
         try:
             await websocket.close()
         except Exception:

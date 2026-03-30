@@ -52,7 +52,7 @@ async def transcribe_diarize(audio: UploadFile = File(...)):
         tmp.flush()
         tmp.close()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         stt_lang = db.get_setting("stt_language") or "vi"
         nvidia_key = db.get_setting("nvidia_api_key") or os.environ.get("NVIDIA_API_KEY", "")
         riva_lang = get_language_code(stt_lang)

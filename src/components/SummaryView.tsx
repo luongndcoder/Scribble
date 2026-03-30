@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { fetchSidecar } from '../lib/sidecar';
 
@@ -6,8 +6,17 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
     const [summary, setSummary] = useState('');
     const [loading, setLoading] = useState(false);
     const { lang, summaryTemplate, customPrompt } = useAppStore();
+    const abortRef = useRef<AbortController | null>(null);
+
+    // Cancel any in-flight request on unmount
+    useEffect(() => {
+        return () => { abortRef.current?.abort(); };
+    }, []);
 
     const generateSummary = async () => {
+        abortRef.current?.abort();
+        const ac = new AbortController();
+        abortRef.current = ac;
         setLoading(true);
         setSummary('');
 
@@ -25,35 +34,44 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
+                signal: ac.signal,
             });
 
             const reader = res.body?.getReader();
-            if (!reader) return;
+            if (!reader) {
+                console.warn('[SummaryView] No response body reader');
+                return;
+            }
             const decoder = new TextDecoder();
             let buffer = '';
             let accumulated = '';
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
 
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            if (data.token) {
-                                accumulated += data.token;
-                                setSummary(accumulated);
-                            }
-                        } catch { }
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.token) {
+                                    accumulated += data.token;
+                                    setSummary(accumulated);
+                                }
+                            } catch {}
+                        }
                     }
                 }
+            } finally {
+                reader.releaseLock();
             }
-        } catch (err) {
+        } catch (err: any) {
+            if (err.name === 'AbortError') return;
             console.error('Summary error:', err);
             setSummary('Error generating summary');
         }

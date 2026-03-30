@@ -1,5 +1,13 @@
 import { create } from 'zustand';
 
+function safeGetItem(key: string, fallback: string = ''): string {
+    try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+}
+
+function safeSetItem(key: string, value: string): void {
+    try { localStorage.setItem(key, value); } catch {}
+}
+
 export interface TranscriptPart {
     text: string;
     speaker: string;
@@ -103,8 +111,8 @@ export const useAppStore = create<AppState>((set) => ({
     interimTranslation: '',
     interimSpeaker: 'Speaker 1',
     interimSpeakerId: 0,
-    translationEnabled: localStorage.getItem('scribble:translationEnabled') === 'true',
-    translationLang: localStorage.getItem('scribble:translationLang') || 'en',
+    translationEnabled: safeGetItem('scribble:translationEnabled') === 'true',
+    translationLang: safeGetItem('scribble:translationLang', 'en'),
     currentView: 'list',
     activeTab: 'recording',
     settingsOpen: false,
@@ -113,9 +121,9 @@ export const useAppStore = create<AppState>((set) => ({
     currentMeetingId: null,
     transientSummary: '',
     summaryLoading: false,
-    summaryLang: localStorage.getItem('scribble:summaryLang') || 'vi',
-    summaryTemplate: localStorage.getItem('scribble:summaryTemplate') || 'mom',
-    customPrompt: localStorage.getItem('scribble:customPrompt') || '',
+    summaryLang: safeGetItem('scribble:summaryLang', 'vi'),
+    summaryTemplate: safeGetItem('scribble:summaryTemplate', 'mom'),
+    customPrompt: safeGetItem('scribble:customPrompt'),
 
     setRecording: (v) => set({ recording: v }),
     setPaused: (v) => set({ paused: v }),
@@ -215,11 +223,11 @@ export const useAppStore = create<AppState>((set) => ({
     setTranscriptParts: (parts) => set({ transcriptParts: parts }),
     clearTranscript: () => set({ transcriptParts: [], seconds: 0, transientSummary: '' }),
     setTranslationEnabled: (v) => {
-        localStorage.setItem('scribble:translationEnabled', String(v));
+        safeSetItem('scribble:translationEnabled', String(v));
         set({ translationEnabled: v });
     },
     setTranslationLang: (v) => {
-        localStorage.setItem('scribble:translationLang', v);
+        safeSetItem('scribble:translationLang', v);
         set({ translationLang: v });
     },
     setCurrentView: (v) => set({ currentView: v }),
@@ -235,15 +243,15 @@ export const useAppStore = create<AppState>((set) => ({
     setInterimTranslation: (v) => set({ interimTranslation: v }),
     setInterimSpeaker: (speaker, speakerId) => set({ interimSpeaker: speaker, interimSpeakerId: speakerId }),
     setSummaryLang: (v) => {
-        localStorage.setItem('scribble:summaryLang', v);
+        safeSetItem('scribble:summaryLang', v);
         set({ summaryLang: v });
     },
     setSummaryTemplate: (v) => {
-        localStorage.setItem('scribble:summaryTemplate', v);
+        safeSetItem('scribble:summaryTemplate', v);
         set({ summaryTemplate: v });
     },
     setCustomPrompt: (v) => {
-        localStorage.setItem('scribble:customPrompt', v);
+        safeSetItem('scribble:customPrompt', v);
         set({ customPrompt: v });
     },
 }));

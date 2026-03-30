@@ -37,7 +37,7 @@ WEAK_MATCH_MARGIN                   = 0.06
 STICKY_RECENT_SEC                   = 5.0
 STICKY_SIM_MARGIN                   = 0.04
 LOW_PITCH_STICKY_BONUS              = 0.00
-STABLE_LAST_SPEAKER_BONUS           = 0.06
+STABLE_LAST_SPEAKER_BONUS           = 0.04
 # Switch confirmation
 SWITCH_STRONG_SIM                   = 0.75
 SWITCH_STRONG_GAP                   = 0.08
@@ -100,6 +100,7 @@ class SpeakerDiarizer:
         self._pending_new_hits = 0
         self._pending_new_time = 0.0
         self._pending_new_pitch_mean = None
+        self.max_speakers = MAX_SPEAKERS
         self._pending_new_pitch_count = 0
         self._lock = threading.RLock()
         self._source = "web"
@@ -250,6 +251,40 @@ class SpeakerDiarizer:
             self._pending_new_pitch_count = 0
             self._source = "web"
 
+    def set_max_speakers(self, n: int):
+        """Set max number of speakers (clamped 2-12)."""
+        self.max_speakers = max(2, min(n, 12))
+
+    def identify_speaker_from_samples(
+        self, samples: np.ndarray, sr: int = 16000, update_profiles: bool = True
+    ) -> dict:
+        """Identify speaker directly from numpy samples — no file I/O.
+
+        Args:
+            samples: Audio samples as float32 [-1,1] or int16.
+            sr: Sample rate.
+            update_profiles: Whether to update speaker profiles.
+        """
+        with self._lock:
+            self._init_model()
+
+        # Ensure float32 in [-1, 1]
+        if samples.dtype == np.int16:
+            samples = samples.astype(np.float32) / 32768.0
+        elif samples.dtype != np.float32:
+            samples = samples.astype(np.float32)
+
+        # Resample to 16kHz if needed
+        if sr != 16000:
+            from scipy.signal import resample as scipy_resample
+            samples = scipy_resample(samples, int(len(samples) * 16000 / sr)).astype(np.float32)
+
+        with self._lock:
+            if self._session:
+                return self._identify_campplus(wav_path=None, samples=samples, update_profiles=update_profiles)
+            else:
+                return self._identify_pitch_from_samples(samples, update_profiles=update_profiles)
+
     def _clear_pending_switch(self):
         self._pending_switch_id = None
         self._pending_switch_hits = 0
@@ -392,11 +427,13 @@ class SpeakerDiarizer:
             except Exception:
                 pass
 
-    def _identify_campplus(self, wav_path: str, samples: np.ndarray = None,
+    def _identify_campplus(self, wav_path: str = None, samples: np.ndarray = None,
                            update_profiles: bool = True) -> dict:
         try:
             # Load samples if not provided
             if samples is None:
+                if wav_path is None:
+                    return {"speaker": "Speaker 1", "speaker_id": 0}
                 samples = self._load_wav_samples(wav_path)
             # Extract fbank features and run ONNX inference
             fbank = self._compute_fbank(samples, sr=16000)
@@ -414,7 +451,6 @@ class SpeakerDiarizer:
                     out["is_new"] = True
                 return out
 
-            samples = self._load_wav_samples(wav_path)
             duration_sec = len(samples) / 16000.0 if len(samples) > 0 else 0.0
             pitch_stats = self._extract_pitch_stats(samples, 16000)
             pitch_mean  = pitch_stats["mean"]  if pitch_stats else None
@@ -516,6 +552,7 @@ class SpeakerDiarizer:
             now          = time.time()
 
             # ── Adaptive threshold ─────────────────────────────────────────────
+            MIN_EFFECTIVE_THRESHOLD = 0.52
             adaptive_threshold = MATCH_THRESHOLD
             if best_count >= 6:
                 adaptive_threshold -= 0.02
@@ -524,12 +561,7 @@ class SpeakerDiarizer:
                 adaptive_threshold -= 0.06
             if (best_profile is not None and self._last_speaker_id == best_profile["id"]
                     and (now - self._last_speaker_time) <= STICKY_RECENT_SEC):
-                bonus = STABLE_LAST_SPEAKER_BONUS
-                # Extra sticky for very new profiles to let them converge
-                if best_count < 4:
-                    bonus += 0.03
-                adaptive_threshold -= bonus
-
+                adaptive_threshold -= STABLE_LAST_SPEAKER_BONUS
 
             best_cross_gender = (
                     best_profile is not None and pitch_mean is not None
@@ -541,13 +573,14 @@ class SpeakerDiarizer:
             if (best_profile is not None and pitch_mean is not None
                     and best_profile.get("pitch_mean") is not None
                     and pitch_mean < FEMALE_F0_HZ and best_profile.get("pitch_mean") < FEMALE_F0_HZ):
-                male_reduction = 0.06  # aggressive — strongly prefer matching existing male profile
-                if pitch_mean <= 130.0 and best_profile.get("pitch_mean", 999) <= 130.0:
-                    male_reduction += 0.02  # extra for bass voices ≤130 Hz
+                male_reduction = 0.04
                 adaptive_threshold -= male_reduction
 
             if best_cross_gender:
                 adaptive_threshold += CROSS_GENDER_EXTRA_THRESHOLD
+
+            # Floor: prevent threshold from dropping too low
+            adaptive_threshold = max(adaptive_threshold, MIN_EFFECTIVE_THRESHOLD)
 
             # ── Split-signal flags ─────────────────────────────────────────────
             best_same_zone_far_pitch = False; best_mouth_dist = None; best_same_zone_far_mouth = False
@@ -681,7 +714,7 @@ class SpeakerDiarizer:
                 return _result(best_profile["id"])
 
             # ── Max speakers cap ───────────────────────────────────────────────
-            if len(self._profiles) >= MAX_SPEAKERS and best_profile is not None:
+            if len(self._profiles) >= self.max_speakers and best_profile is not None:
                 _ema_update(best_profile, 0.08, 0.08, 0.06)
                 print(f"[diarize] -> Speaker {best_profile['id']+1} (max-cap, sim={best_sim:.3f})")
                 self._last_speaker_id = best_profile["id"]; self._last_speaker_time = now
@@ -897,6 +930,53 @@ class SpeakerDiarizer:
             return _r(sid, is_new=True)
         except Exception as e:
             print(f"[diarize:pitch] error: {e}")
+            return {"speaker": "Speaker 1", "speaker_id": 0}
+
+    def _identify_pitch_from_samples(self, samples: np.ndarray, update_profiles: bool = True) -> dict:
+        """Pitch-only fallback that works directly from numpy samples."""
+        try:
+            stats = self._extract_pitch_stats(samples, 16000)
+            if not stats:
+                return {"speaker": "Speaker 1", "speaker_id": 0}
+            features = np.array([stats["mean"] / 100, stats["std"] / 50,
+                                 (stats["energy"] or 0) * 10, stats["zcr"] * 5])
+
+            def _r(sid, is_new=False):
+                out = {"speaker": f"Speaker {sid + 1}", "speaker_id": sid, "embedding": features.copy()}
+                if is_new:
+                    out["is_new"] = True
+                return out
+
+            if len(self._profiles) == 0:
+                if not update_profiles:
+                    return _r(0)
+                sid = self._next_id
+                self._next_id += 1
+                self._profiles.append({"id": sid, "embedding": features, "count": 1})
+                self._last_speaker_id = sid
+                self._last_speaker_time = time.time()
+                return _r(sid, is_new=True)
+
+            dists = [(i, np.linalg.norm(features - p["embedding"][:len(features)])) for i, p in enumerate(self._profiles)]
+            best_idx, best_dist = min(dists, key=lambda x: x[1])
+            if not update_profiles:
+                sid = self._profiles[best_idx]["id"] if best_dist < 1.2 else (self._last_speaker_id or 0)
+                return _r(sid)
+            if best_dist < 1.2:
+                p = self._profiles[best_idx]
+                p["embedding"] = p["embedding"] * 0.85 + features * 0.15
+                p["count"] += 1
+                self._last_speaker_id = p["id"]
+                self._last_speaker_time = time.time()
+                return _r(p["id"])
+            sid = self._next_id
+            self._next_id += 1
+            self._profiles.append({"id": sid, "embedding": features, "count": 1})
+            self._last_speaker_id = sid
+            self._last_speaker_time = time.time()
+            return _r(sid, is_new=True)
+        except Exception as e:
+            print(f"[diarize:pitch-samples] error: {e}")
             return {"speaker": "Speaker 1", "speaker_id": 0}
 
 

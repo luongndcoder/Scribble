@@ -20,6 +20,7 @@ export function SettingsPanel() {
     const [llmModelOptions, setLlmModelOptions] = useState<string[]>([]);
     const [fetchingModels, setFetchingModels] = useState(false);
 
+    const [maxSpeakers, setMaxSpeakers] = useState(4);
     const [saving, setSaving] = useState(false);
     const [testRunning, setTestRunning] = useState(false);
     const [sttResult, setSttResult] = useState<{ok: boolean; msg: string} | null>(null);
@@ -41,6 +42,7 @@ export function SettingsPanel() {
                 if (hints.length > 0) setSonioxLangs(new Set(hints));
             }
             setNvidiaLang(s.stt_language || 'vi');
+            if (s.max_speakers) setMaxSpeakers(parseInt(s.max_speakers) || 4);
             if (s.llm_api_key) setLlmKey('••••••••');
             if (s.llm_base_url) setLlmUrl(s.llm_base_url);
             if (s.llm_model) setLlmModel(s.llm_model);
@@ -63,6 +65,7 @@ export function SettingsPanel() {
         if (sonioxKey && !sonioxKey.includes('••')) body.soniox_api_key = sonioxKey;
         body.stt_language = nvidiaLang;
         body.soniox_language_hints = Array.from(sonioxLangs).join(',');
+        body.max_speakers = maxSpeakers;
         if (llmKey && !llmKey.includes('•')) body.llm_api_key = llmKey;
         if (llmProvider === 'compatible') {
             if (llmUrl) body.llm_base_url = llmUrl;
@@ -324,6 +327,29 @@ export function SettingsPanel() {
                                 {sttProvider === 'nvidia'
                                     ? t('language_hint', lang)
                                     : t('soniox_languages_hint', lang)}
+                            </div>
+                        </div>
+
+                        {/* Max Speakers */}
+                        <div className="setting-group">
+                            <div className="setting-label">
+                                {lang === 'vi' ? 'Số người nói tối đa' : 'Max Speakers'}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <input
+                                    type="range"
+                                    min={2}
+                                    max={12}
+                                    value={maxSpeakers}
+                                    onChange={(e) => setMaxSpeakers(parseInt(e.target.value))}
+                                    style={{ flex: 1 }}
+                                />
+                                <span style={{ minWidth: '24px', textAlign: 'center', fontWeight: 600 }}>{maxSpeakers}</span>
+                            </div>
+                            <div className="setting-hint">
+                                {lang === 'vi'
+                                    ? 'Giới hạn số người nói nhận diện được trong 1 cuộc họp'
+                                    : 'Maximum number of speakers to detect per meeting'}
                             </div>
                         </div>
                     </div>

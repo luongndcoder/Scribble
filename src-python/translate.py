@@ -168,7 +168,6 @@ def translate_instant(text: str, target_lang: str, db, source_lang: str = "") ->
         return ""
 
     api_key = db.get_setting("nvidia_api_key") or os.getenv("NVIDIA_API_KEY", "")
-    stt_lang = db.get_setting("stt_language") or "vi"
 
     if not api_key:
         return ""

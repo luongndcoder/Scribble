@@ -4,28 +4,29 @@ import { fetchSidecar } from '../lib/sidecar';
 import { splitTextIntoSentences, splitTranslationForSentences } from '../lib/transcriptUtils';
 
 const SPEAKER_COLORS = ['#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
-const abortControllers: Record<number, AbortController> = {};
 
 export function TranscriptView() {
     const { transcriptParts, translationEnabled, setTranslationEnabled, translationLang, setTranslationLang } = useAppStore();
     const bottomRef = useRef<HTMLDivElement>(null);
     const scrollRaf = useRef<number>(0);
+    const abortControllersRef = useRef<Record<number, AbortController>>({});
 
-    // Auto-scroll on transcript changes
+    // Auto-scroll only when transcriptParts length changes (not on every state update)
+    const partsLength = transcriptParts.length;
     useEffect(() => {
-        const unsub = useAppStore.subscribe(() => {
-            cancelAnimationFrame(scrollRaf.current);
-            scrollRaf.current = requestAnimationFrame(() => {
-                bottomRef.current?.scrollIntoView({ behavior: 'auto' });
-            });
+        cancelAnimationFrame(scrollRaf.current);
+        scrollRaf.current = requestAnimationFrame(() => {
+            bottomRef.current?.scrollIntoView({ behavior: 'auto' });
         });
-        return () => unsub();
-    }, []);
+    }, [partsLength]);
 
-    // Auto-scroll on new parts
+    // Cleanup abort controllers on unmount
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [transcriptParts]);
+        return () => {
+            Object.values(abortControllersRef.current).forEach(ac => ac.abort());
+            abortControllersRef.current = {};
+        };
+    }, []);
 
     // Trigger translation when parts change
     useEffect(() => {
@@ -38,9 +39,10 @@ export function TranscriptView() {
         if (!part.text) return;
 
         // Abort previous translation for this index
-        if (abortControllers[idx]) abortControllers[idx].abort();
+        const controllers = abortControllersRef.current;
+        if (controllers[idx]) controllers[idx].abort();
         const ac = new AbortController();
-        abortControllers[idx] = ac;
+        controllers[idx] = ac;
 
         try {
             const targetLang = useAppStore.getState().translationLang;
@@ -132,7 +134,7 @@ export function TranscriptView() {
             {/* Transcript items */}
             <div className="max-h-[60vh] overflow-y-auto p-4 space-y-3">
                 {transcriptParts.map((part, idx) => (
-                    <TranscriptItem key={idx} part={part} />
+                    <TranscriptItem key={part.chunkId || `part-${idx}`} part={part} />
                 ))}
 
                 <div ref={bottomRef} />
