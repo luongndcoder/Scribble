@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useAppStore } from '../stores/appStore';
+import { useAppStore, Meeting } from '../stores/appStore';
 import {
     getMeetings,
     deleteMeeting,
@@ -35,7 +35,7 @@ export function MeetingList() {
     }, []);
 
     const loadMeetings = async () => {
-        try { setMeetings(await getMeetings()); } catch { }
+        try { setMeetings(await getMeetings()); } catch (e) { console.warn('[meetings] Load failed:', e); }
     };
 
     const busyKey = (action: string, id: number) => `${action}:${id}`;
@@ -61,7 +61,7 @@ export function MeetingList() {
         });
     };
 
-    const openMeeting = (meeting: any) => {
+    const openMeeting = (meeting: Meeting) => {
         setCurrentMeetingId(meeting.id);
         setDraftId(meeting.status === 'draft' ? meeting.id : null);
         setCurrentView('detail');
@@ -70,7 +70,7 @@ export function MeetingList() {
     const newMeeting = async () => {
         try {
             await resetDiarize();
-        } catch { }
+        } catch (e) { console.warn('[meetings] Diarize reset failed:', e); }
         const store = useAppStore.getState();
         // Reset all state for a fresh meeting
         store.clearTranscript();
@@ -113,7 +113,7 @@ export function MeetingList() {
         return `${m}m ${sec}s`;
     };
 
-    const fmtSec = (v: any) => {
+    const fmtSec = (v: number | string | undefined) => {
         const n = Number.parseFloat(String(v ?? '0'));
         if (!Number.isFinite(n) || n < 0) return '0:00';
         const m = Math.floor(n / 60);
@@ -127,10 +127,10 @@ export function MeetingList() {
             .replace(/\s+/g, ' ')
             .trim() || fallback;
 
-    const hasMinutes = (meeting: any) => String(meeting?.summary || '').trim().length > 0;
-    const hasTranscript = (meeting: any) => String(meeting?.transcript || '').trim().length > 0;
+    const hasMinutes = (meeting: Meeting) => String(meeting?.summary || '').trim().length > 0;
+    const hasTranscript = (meeting: Meeting) => String(meeting?.transcript || '').trim().length > 0;
 
-    const buildTranscriptMarkdown = (meeting: any): string => {
+    const buildTranscriptMarkdown = (meeting: Meeting): string => {
         const title = safeFilenameBase(
             String(meeting?.title || ''),
             `meeting-${meeting?.id ?? 'unknown'}`
@@ -154,9 +154,11 @@ export function MeetingList() {
                     const speakerId = Number(p.speakerId ?? 0);
                     const fallbackSpeaker = `Speaker ${Number.isFinite(speakerId) ? speakerId + 1 : 1}`;
                     const speaker = String(p.speaker || fallbackSpeaker).trim() || fallbackSpeaker;
-                    const hasRange = String(p.startTime || '').trim() || String(p.endTime || '').trim();
+                    const startTime = p.startTime as string | undefined;
+                    const endTime = p.endTime as string | undefined;
+                    const hasRange = String(startTime || '').trim() || String(endTime || '').trim();
                     const range = hasRange
-                        ? ` (${fmtSec(p.startTime)} - ${fmtSec(p.endTime)})`
+                        ? ` (${fmtSec(startTime)} - ${fmtSec(endTime)})`
                         : '';
                     lines.push(`## ${speaker}${range}`);
                     lines.push(text);
@@ -173,7 +175,7 @@ export function MeetingList() {
         return `${lines.join('\n')}\n${rawLines.map((line) => `- ${line}`).join('\n')}`.trim();
     };
 
-    const startRename = (e: React.MouseEvent, meeting: any) => {
+    const startRename = (e: React.MouseEvent, meeting: Meeting) => {
         e.stopPropagation();
         setEditingMeetingId(meeting.id);
         setEditingTitle(String(meeting.title || ''));
@@ -195,7 +197,7 @@ export function MeetingList() {
         cancelRename();
     };
 
-    const exportAudio = async (e: React.MouseEvent, meeting: any) => {
+    const exportAudio = async (e: React.MouseEvent, meeting: Meeting) => {
         e.stopPropagation();
         await runBusy('audio', meeting.id, async () => {
             try {
@@ -208,7 +210,7 @@ export function MeetingList() {
         });
     };
 
-    const exportMinutes = async (e: React.MouseEvent, meeting: any) => {
+    const exportMinutes = async (e: React.MouseEvent, meeting: Meeting) => {
         e.stopPropagation();
         if (!hasMinutes(meeting)) return;
         await runBusy('minutes', meeting.id, async () => {
@@ -226,7 +228,7 @@ export function MeetingList() {
         });
     };
 
-    const exportTranscript = async (e: React.MouseEvent, meeting: any) => {
+    const exportTranscript = async (e: React.MouseEvent, meeting: Meeting) => {
         e.stopPropagation();
         if (!hasTranscript(meeting)) return;
         await runBusy('transcript', meeting.id, async () => {

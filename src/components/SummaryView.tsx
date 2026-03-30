@@ -21,7 +21,7 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
         setSummary('');
 
         try {
-            const payload: any = { language: lang, template: summaryTemplate || 'mom' };
+            const payload: Record<string, unknown> = { language: lang, template: summaryTemplate || 'mom' };
             if (summaryTemplate === 'custom' && customPrompt) {
                 payload.customPrompt = customPrompt;
             }

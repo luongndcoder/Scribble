@@ -24,13 +24,13 @@ export function SettingsDialog() {
             if (s.llm_base_url) setLlmUrl(s.llm_base_url);
             if (s.llm_model) setLlmModel(s.llm_model);
 
-        } catch { }
+        } catch (e) { console.warn('[settings-dialog] Load failed:', e); }
     };
 
     const handleSave = async () => {
         setSaving(true);
         try {
-            const body: any = {};
+            const body: Record<string, unknown> = {};
             if (groqKey && !groqKey.includes('••')) body.groq_api_key = groqKey;
             if (llmKey && !llmKey.includes('••')) body.llm_api_key = llmKey;
             if (llmUrl) body.llm_base_url = llmUrl;
@@ -47,7 +47,8 @@ export function SettingsDialog() {
         try {
             const r = await diagnose('vi');
             setDiagResult(r);
-        } catch {
+        } catch (e) {
+            console.warn('[settings-dialog] Diagnose failed:', e);
             setDiagResult({ stt: { status: 'error', message: 'Cannot connect' }, llm: { status: 'error', message: 'Cannot connect' } });
         }
     };

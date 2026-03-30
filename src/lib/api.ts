@@ -6,6 +6,7 @@
  */
 
 import { fetchSidecar, readResponseError, sidecarUrl, SIDECAR_HTTP_BASES } from './sidecar';
+import type { Meeting } from '../stores/appStore';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const res = await fetchSidecar(path, {
@@ -60,14 +61,14 @@ export const summarize = (meetingId: number, language: string) =>
     });
 
 // ─── Meetings CRUD ───
-export const getMeetings = () => request<any[]>('/meetings');
-export const getMeeting = (id: number) => request<any>(`/meetings/${id}`);
-export const createMeeting = (data: any) =>
+export const getMeetings = () => request<Meeting[]>('/meetings');
+export const getMeeting = (id: number) => request<Meeting>(`/meetings/${id}`);
+export const createMeeting = (data: Partial<Meeting>) =>
     request<{ id: number }>('/meetings', {
         method: 'POST',
         body: JSON.stringify(data),
     });
-export const updateMeeting = (id: number, data: any) =>
+export const updateMeeting = (id: number, data: Record<string, unknown>) =>
     request<{ ok: boolean }>(`/meetings/${id}`, {
         method: 'PUT',
         body: JSON.stringify(data),
@@ -235,7 +236,7 @@ export async function downloadTextFile(filename: string, content: string) {
 }
 // ─── Settings ───
 export const getSettings = () => request<any>('/settings');
-export const saveSettings = (data: any) =>
+export const saveSettings = (data: Record<string, unknown>) =>
     request<{ ok: boolean }>('/settings', {
         method: 'POST',
         body: JSON.stringify(data),

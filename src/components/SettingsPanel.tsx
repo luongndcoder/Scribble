@@ -48,18 +48,20 @@ export function SettingsPanel() {
             if (s.llm_model) setLlmModel(s.llm_model);
             if (s.llm_provider) setLlmProvider(s.llm_provider);
 
-        } catch { }
+        } catch (e) {
+            console.warn('[settings] Failed to load settings:', e);
+        }
     };
 
     const handleSave = async () => {
         setSaving(true);
-        try { await saveSettings(buildSettingsBody()); } catch { }
+        try { await saveSettings(buildSettingsBody()); } catch (e) { console.warn('[settings] Save failed:', e); }
         setSaving(false);
         setSettingsOpen(false);
     };
 
     const buildSettingsBody = () => {
-        const body: any = {};
+        const body: Record<string, unknown> = {};
         body.stt_provider = sttProvider;
         if (nvidiaKey && !nvidiaKey.includes('••')) body.nvidia_api_key = nvidiaKey;
         if (sonioxKey && !sonioxKey.includes('••')) body.soniox_api_key = sonioxKey;
@@ -118,7 +120,8 @@ export function SettingsPanel() {
                 setSttResult({ ok: false, msg });
                 setLlmResult({ ok: false, msg });
             }
-        } catch {
+        } catch (e) {
+            console.warn('[settings] Test failed:', e);
             setSttResult({ ok: false, msg: 'Cannot save' });
             setLlmResult({ ok: false, msg: 'Cannot save' });
         }

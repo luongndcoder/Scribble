@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { TranscriptPart, useAppStore } from '../stores/appStore';
+import { TranscriptPart, Meeting, useAppStore } from '../stores/appStore';
 import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile } from '../lib/api';
 import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
@@ -434,7 +434,7 @@ export function MeetingDetail() {
     const viewingMeetingId = currentMeetingId || draftId;
 
     const transcriptRef = useRef<HTMLDivElement>(null);
-    const [meetingData, setMeetingData] = useState<any>(null);
+    const [meetingData, setMeetingData] = useState<Meeting | null>(null);
     const [meetingLoading, setMeetingLoading] = useState(false);
     const [editingSpeakerId, setEditingSpeakerId] = useState<number | null>(null);
     const [editingSpeakerAnchorIdx, setEditingSpeakerAnchorIdx] = useState<number | null>(null);
@@ -667,7 +667,7 @@ export function MeetingDetail() {
                 const normalized = collapseTranscriptSnapshots(parts);
                 setTranscriptParts(normalized.parts);
                 if (normalized.changed) {
-                    const duration = Number(m.audio_duration ?? m.audioDuration ?? 0);
+                    const duration = Number(m.audio_duration ?? 0);
                     void updateMeeting(requestedMeetingId, {
                         transcript: normalized.parts,
                         audioDuration: Number.isFinite(duration) ? duration : 0,

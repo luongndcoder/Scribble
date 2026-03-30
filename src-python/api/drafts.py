@@ -113,6 +113,11 @@ async def append_draft_audio(draft_id: int, audio: UploadFile = File(...)):
         target = audio_dir / f"meeting_{draft_id}{suffix}"
         db.update_meeting(draft_id, audio_path=str(target))
 
+    # Limit draft audio file to 500MB to prevent disk exhaustion
+    MAX_DRAFT_AUDIO_BYTES = 500 * 1024 * 1024
+    if target.exists() and target.stat().st_size >= MAX_DRAFT_AUDIO_BYTES:
+        return {"ok": True, "bytes": 0, "skipped": "size_limit"}
+
     with target.open("ab") as f:
         f.write(payload)
 

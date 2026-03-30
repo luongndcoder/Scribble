@@ -507,8 +507,8 @@ export function RecordingBar() {
                             <div className="bar" style={{ height: barHeights[1] }} />
                             <div className="bar" style={{ height: barHeights[2] }} />
                         </div>
-                        <div className="rec-status">
-                            <div className="rec-dot" />
+                        <div className="rec-status" role="status" aria-live="polite">
+                            <div className="rec-dot" aria-hidden="true" />
                             <span>{paused ? (lang === 'vi' ? 'Tạm dừng' : 'Paused') : (lang === 'vi' ? 'Đang ghi' : 'Recording')} • {formatTime(seconds)}</span>
                         </div>
                     </>

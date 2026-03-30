@@ -3,7 +3,7 @@ import { readResponseError } from './sidecar';
 export interface SseEventPayload {
   event: string;
   data: string;
-  json?: any;
+  json?: Record<string, unknown>;
 }
 
 interface ConsumeSseOptions {

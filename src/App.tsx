@@ -52,11 +52,12 @@ function AppInner() {
           }
           wasOffline = !isOnline;
         }
-      } catch {
+      } catch (e) {
         if (active) {
           setBackendStatus('offline');
           wasOffline = true;
         }
+        // Health check failure is expected when sidecar is starting up
       }
     };
 
