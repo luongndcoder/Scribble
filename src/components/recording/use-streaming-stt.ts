@@ -173,9 +173,14 @@ function handleTranslationEvent(data: SttWsMessage) {
             return;
         }
     }
-    // Fallback: interim translation
-    const curInterim = useAppStore.getState().interimTranslation || "";
-    if (translation.length >= curInterim.length) {
+    // No chunk_id: accumulated block translation (Nvidia NMT).
+    // Backend sends growing accumulated result — always accept and persist.
+    const parts = useAppStore.getState().transcriptParts;
+    if (parts.length > 0) {
+        const lastIdx = parts.length - 1;
+        useAppStore.getState().updateTranscriptTranslation(lastIdx, translation);
+        useAppStore.getState().setInterimTranslation("");
+    } else {
         useAppStore.getState().setInterimTranslation(translation);
     }
 }
@@ -201,7 +206,7 @@ function handleFinalTranscript(data: SttWsMessage, text: string, ts: string, sta
     if (sameChunk) {
         useAppStore.getState().replaceLastPartText(text, String(state.seconds), chunkId || undefined);
     } else if (sameSpeaker) {
-        useAppStore.getState().setInterimTranslation("");
+        // Don't clear interimTranslation here — accumulated translation will update via handleTranslationEvent
         useAppStore.getState().appendToLastPart(text, String(state.seconds), chunkId || undefined);
     } else {
         // New speaker — commit pending translation
@@ -228,11 +233,8 @@ function handleFinalTranscript(data: SttWsMessage, text: string, ts: string, sta
         const updatedParts = useAppStore.getState().transcriptParts;
         if (updatedParts.length > 0) {
             const li = updatedParts.length - 1;
-            const existing = updatedParts[li].translation || "";
-            if (data.translation.length > existing.length) {
-                useAppStore.getState().updateTranscriptTranslation(li, data.translation);
-                useAppStore.getState().setInterimTranslation("");
-            }
+            useAppStore.getState().updateTranscriptTranslation(li, data.translation);
+            useAppStore.getState().setInterimTranslation("");
         }
     }
 }

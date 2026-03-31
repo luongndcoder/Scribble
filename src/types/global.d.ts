@@ -5,6 +5,7 @@ interface ScribbleWindowExtensions {
     __systemBarInterval?: ReturnType<typeof setInterval>;
     __systemAudioUnlisten?: (() => void) | null;
     __systemUnlistenTimeout?: ReturnType<typeof setTimeout>;
+    __healthSlowInterval?: ReturnType<typeof setInterval>;
 }
 
 interface Window extends ScribbleWindowExtensions {}

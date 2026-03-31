@@ -16,6 +16,8 @@ function AppInner() {
   const { currentView, settingsOpen, setSettingsOpen, lang, setLang } = useAppStore();
   const { showToast } = useToast();
   const [backendStatus, setBackendStatus] = useState<'online' | 'offline'>('offline');
+  // Startup progress: 0=connecting, 1=sidecar online, 2=diarizer loaded, 3=ready
+  const [startupStep, setStartupStep] = useState(0);
   const hasBeenOnline = useRef(false);
 
   const showRecBar = currentView === 'recording' || currentView === 'detail';
@@ -42,9 +44,24 @@ function AppInner() {
         if (active) {
           const isOnline = res.ok;
           setBackendStatus(isOnline ? 'online' : 'offline');
+          if (isOnline) {
+            // Step 1: sidecar is online
+            setStartupStep(prev => Math.max(prev, 1));
+            // Check diarizer status for step 2
+            try {
+              const dRes = await fetch(`${SIDECAR_BASES[0]}/diarizer-status`, { cache: 'no-store' });
+              if (dRes.ok) {
+                const dData = await dRes.json();
+                if (dData.model_loaded) {
+                  setStartupStep(prev => Math.max(prev, 2));
+                }
+              }
+            } catch {} // diarizer check is best-effort
+            // Step 3: fully ready
+            setStartupStep(3);
+          }
           if (isOnline && wasOffline) {
             window.dispatchEvent(new Event('backend-online'));
-            // Show toast only the first time
             if (!hasBeenOnline.current) {
               hasBeenOnline.current = true;
               showToast(lang === 'vi' ? '✓ Hệ thống đã sẵn sàng' : '✓ System ready', 'success');
@@ -61,9 +78,24 @@ function AppInner() {
       }
     };
 
+    // Poll faster during startup, slow down once online
     check();
-    const id = setInterval(check, 10000);
-    return () => { active = false; clearInterval(id); };
+    const fastId = setInterval(check, 2000);
+    const slowDown = setTimeout(() => {
+      clearInterval(fastId);
+      if (active) {
+        const slowId = setInterval(check, 10000);
+        // Store for cleanup
+        (window as Window).__healthSlowInterval = slowId;
+      }
+    }, 30000); // switch to slow after 30s
+    return () => {
+      active = false;
+      clearInterval(fastId);
+      clearTimeout(slowDown);
+      const slow = (window as Window).__healthSlowInterval;
+      if (slow) clearInterval(slow);
+    };
   }, []);
 
   return (
@@ -71,7 +103,7 @@ function AppInner() {
         <div className="app">
           <main
               className="main"
-              style={isOffline ? { pointerEvents: 'none', opacity: 0.5 } : undefined}
+              style={isOffline ? { pointerEvents: 'none' } : undefined}
             >
             {/* Top Navigation */}
             <header className="topnav">
@@ -116,6 +148,34 @@ function AppInner() {
               </div>
               {showRecBar && <RecordingBar />}
             </>
+
+            {/* Connecting overlay */}
+            {isOffline && (
+              <div className="connecting-overlay">
+                <div className="connecting-card">
+                  <div className="connecting-spinner" />
+                  <h2>{lang === 'vi' ? 'Đang khởi động hệ thống' : 'Starting up'}</h2>
+                  <p>{lang === 'vi'
+                    ? 'Scribble đang khởi chạy dịch vụ AI phía sau. Quá trình này có thể mất vài giây...'
+                    : 'Scribble is starting the AI backend service. This may take a few seconds...'
+                  }</p>
+                  <div className="connecting-steps">
+                    <div className={`connecting-step ${startupStep >= 0 ? 'active' : ''} ${startupStep >= 1 ? 'done' : ''}`}>
+                      <span className={`step-dot ${startupStep === 0 ? 'pulse' : startupStep >= 1 ? 'done' : ''}`} />
+                      <span>{lang === 'vi' ? 'Kết nối tới sidecar' : 'Connecting to sidecar'}</span>
+                    </div>
+                    <div className={`connecting-step ${startupStep >= 1 ? 'active' : ''} ${startupStep >= 2 ? 'done' : ''}`}>
+                      <span className={`step-dot ${startupStep === 1 ? 'pulse' : startupStep >= 2 ? 'done' : ''}`} />
+                      <span>{lang === 'vi' ? 'Tải mô hình nhận diện giọng nói' : 'Loading speaker model'}</span>
+                    </div>
+                    <div className={`connecting-step ${startupStep >= 3 ? 'active done' : ''}`}>
+                      <span className={`step-dot ${startupStep >= 3 ? 'done' : ''}`} />
+                      <span>{lang === 'vi' ? 'Sẵn sàng ghi âm' : 'Ready to record'}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
           </main>
 

@@ -58,14 +58,16 @@ export function RecordingBar() {
 
         if (sttProviderRef.current === 'nvidia') {
             const cmd = translationEnabled ? `TRANSLATE:${translationLang}` : 'TRANSLATE:off';
-            const payload = JSON.stringify({ text: cmd });
             if (isTauri && audioSource === 'both') {
+                // Tauri event payload must be JSON-encoded string for serde
+                const payload = JSON.stringify(cmd);
                 import('@tauri-apps/api/event').then(({ emit }) => {
                     emit('system-audio-cmd', payload).catch(console.warn);
                 });
             } else {
+                // Send raw text command to WS (backend expects "TRANSLATE:xx" not JSON)
                 const ws = wsRef.current;
-                if (ws && ws.readyState === WebSocket.OPEN) ws.send(payload);
+                if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
             }
         } else {
             // Soniox: must reconnect (translate_lang set at connection time)
@@ -158,27 +160,109 @@ export function RecordingBar() {
                             return;
                         }
                     }
-                    useAppStore.getState().setInterimTranslation(data.translation);
+                    // No chunk_id: accumulated block translation — always persist to last part
+                    const parts = useAppStore.getState().transcriptParts;
+                    if (parts.length > 0) {
+                        const lastIdx = parts.length - 1;
+                        useAppStore.getState().updateTranscriptTranslation(lastIdx, data.translation);
+                        useAppStore.getState().setInterimTranslation('');
+                    } else {
+                        useAppStore.getState().setInterimTranslation(data.translation);
+                    }
                     return;
                 }
 
+                // Speaker split event
+                if (data.type === 'speaker_split') {
+                    const preState = useAppStore.getState();
+                    if (preState.interimTranslation && preState.transcriptParts.length > 0) {
+                        useAppStore.getState().updateTranscriptTranslation(
+                            preState.transcriptParts.length - 1, preState.interimTranslation
+                        );
+                        useAppStore.getState().setInterimTranslation('');
+                    }
+                    useAppStore.getState().setInterimText('');
+                    useAppStore.getState().setInterimSpeaker(
+                        data.speaker || 'System', (data.speaker_id ?? 0) + SYSTEM_SPEAKER_ID_OFFSET
+                    );
+                    return;
+                }
+
+                // Speaker correction event
+                if (data.type === 'speaker_correction' && data.chunk_id) {
+                    useAppStore.getState().updateTranscriptSpeakerByChunk(
+                        data.chunk_id, (data.speaker_id ?? 0) + SYSTEM_SPEAKER_ID_OFFSET,
+                        data.speaker || `Speaker ${(data.speaker_id ?? 0) + 1}`
+                    );
+                    return;
+                }
+
+                // Streaming mode: speaker info at top level
+                // Chunked mode (/transcribe-diarize): speaker info inside segments[0]
                 const seg = data.segments?.[0] || {};
                 const text = (seg.text || data.text || '').trim();
                 if (!text) return;
 
-                const speakerId = (seg.speaker_id ?? 0) + SYSTEM_SPEAKER_ID_OFFSET;
-                const speaker = seg.speaker || 'System';
+                const rawSpeakerId = seg.speaker_id ?? data.speaker_id ?? 0;
+                const speakerId = rawSpeakerId + SYSTEM_SPEAKER_ID_OFFSET;
+                const speaker = seg.speaker || data.speaker || `Speaker ${rawSpeakerId + 1}`;
                 const chunkId = seg.chunk_id || data.chunk_id || '';
                 const ts = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-                addTranscriptPart({
-                    text, speaker, speakerId,
-                    chunkId: chunkId || undefined,
-                    chunkIds: chunkId ? [chunkId] : undefined,
-                    startTime: String(Math.max(0, state.seconds - 5)),
-                    endTime: String(state.seconds),
-                    timestamp: ts,
-                    translation: data.translation || '',
-                });
+
+                if (data.is_final) {
+                    useAppStore.getState().setInterimText('');
+                    setIsTranscribing(false);
+
+                    // Same-chunk: replace in-place (streaming update for same segment)
+                    const lastPart = state.transcriptParts[state.transcriptParts.length - 1];
+                    const lastChunkIds = new Set<string>();
+                    if (lastPart?.chunkId) lastChunkIds.add(lastPart.chunkId);
+                    if (Array.isArray(lastPart?.chunkIds)) {
+                        lastPart.chunkIds.forEach(id => { if (id) lastChunkIds.add(id); });
+                    }
+                    const sameChunk = Boolean(chunkId) && lastChunkIds.has(chunkId);
+                    const sameSpeaker = Boolean(lastPart) && Number(lastPart.speakerId) === Number(speakerId);
+
+                    if (sameChunk) {
+                        useAppStore.getState().replaceLastPartText(text, String(state.seconds), chunkId || undefined);
+                    } else if (sameSpeaker) {
+                        // Don't clear interimTranslation — accumulated translation updates via translation event
+                        useAppStore.getState().appendToLastPart(text, String(state.seconds), chunkId || undefined);
+                    } else {
+                        // New speaker — commit pending translation first
+                        const prevTrans = useAppStore.getState().interimTranslation;
+                        if (prevTrans && state.transcriptParts.length > 0) {
+                            useAppStore.getState().updateTranscriptTranslation(
+                                state.transcriptParts.length - 1, prevTrans
+                            );
+                            useAppStore.getState().setInterimTranslation('');
+                        }
+                        addTranscriptPart({
+                            text, speaker, speakerId,
+                            chunkId: chunkId || undefined,
+                            chunkIds: chunkId ? [chunkId] : undefined,
+                            startTime: String(Math.max(0, state.seconds - 5)),
+                            endTime: String(state.seconds),
+                            timestamp: ts,
+                            translation: data.translation || '',
+                        });
+                    }
+
+                    // Inline translation on final (Soniox sends translation with each final event)
+                    if (data.translation) {
+                        const updatedParts = useAppStore.getState().transcriptParts;
+                        if (updatedParts.length > 0) {
+                            const li = updatedParts.length - 1;
+                            useAppStore.getState().updateTranscriptTranslation(li, data.translation);
+                            useAppStore.getState().setInterimTranslation('');
+                        }
+                    }
+                } else {
+                    // Interim: show as preview
+                    useAppStore.getState().setInterimText(text);
+                    useAppStore.getState().setInterimSpeaker(speaker, speakerId);
+                    setIsTranscribing(true);
+                }
             } catch {}
         });
         return unlisten;
