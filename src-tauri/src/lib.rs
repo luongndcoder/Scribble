@@ -1108,11 +1108,25 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_app_handle, event| {
-        if let tauri::RunEvent::Exit = event {
-            // Kill ALL sidecar processes on app exit (Cmd+Q, force quit, etc.)
-            kill_sidecar_port();
-            println!("[exit] Sidecar cleaned up");
+    app.run(|app_handle, event| {
+        match event {
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                // Kill sidecar via stored child handle first
+                if let Some(state) = app_handle.try_state::<Mutex<SidecarState>>() {
+                    if let Ok(mut guard) = state.lock() {
+                        if let Some(child) = guard.child.take() {
+                            child.kill();
+                            println!("[exit] Killed sidecar child process");
+                        }
+                    }
+                }
+                // Then kill by port to catch orphaned processes
+                kill_sidecar_port();
+                // Brief wait to ensure process is fully terminated
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                println!("[exit] Sidecar cleanup done");
+            }
+            _ => {}
         }
     });
 }

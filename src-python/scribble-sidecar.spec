@@ -2,7 +2,9 @@
 import sys
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [
+    ('models/voxceleb_CAM++.onnx', 'models'),
+]
 binaries = []
 hiddenimports = [
     'uvicorn.logging',
