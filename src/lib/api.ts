@@ -7,6 +7,7 @@
 
 import { fetchSidecar, readResponseError, sidecarUrl, SIDECAR_HTTP_BASES } from './sidecar';
 import type { Meeting } from '../stores/appStore';
+import type { SettingsData, DiagnoseResult } from '../types/stt';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const res = await fetchSidecar(path, {
@@ -106,7 +107,7 @@ function parseDownloadFilename(contentDisposition: string | null): string | null
     if (!contentDisposition) return null;
     const utf8 = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
     if (utf8?.[1]) {
-        try { return decodeURIComponent(utf8[1]); } catch { }
+        try { return decodeURIComponent(utf8[1]); } catch { } // invalid URI encoding
     }
     const quoted = contentDisposition.match(/filename=\"([^\"]+)\"/i);
     if (quoted?.[1]) return quoted[1];
@@ -123,7 +124,7 @@ export async function downloadMeetingAudio(
     const path = `/meetings/${id}/audio?format=${encodeURIComponent(format)}`;
 
     // In Tauri: use invoke to save via Rust (tries multiple sidecar URLs)
-    if ((window as any).__TAURI_INTERNALS__) {
+    if (window.__TAURI_INTERNALS__) {
         const { invoke } = await import('@tauri-apps/api/core');
 
         // Try each sidecar base URL via Rust download (avoids JS memory issues)
@@ -170,7 +171,7 @@ export async function downloadMeetingMinutes(
 ) {
     const path = `/meetings/${id}/minutes?format=${encodeURIComponent(format)}`;
 
-    if ((window as any).__TAURI_INTERNALS__) {
+    if (window.__TAURI_INTERNALS__) {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const res = await fetchSidecar(path);
@@ -211,7 +212,7 @@ export async function downloadMeetingMinutes(
 export async function downloadTextFile(filename: string, content: string) {
     const bytes = new TextEncoder().encode(content);
 
-    if ((window as any).__TAURI_INTERNALS__) {
+    if (window.__TAURI_INTERNALS__) {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('save_audio_file', {
@@ -235,7 +236,7 @@ export async function downloadTextFile(filename: string, content: string) {
     URL.revokeObjectURL(url);
 }
 // ─── Settings ───
-export const getSettings = () => request<any>('/settings');
+export const getSettings = () => request<SettingsData>('/settings');
 export const saveSettings = (data: Record<string, unknown>) =>
     request<{ ok: boolean }>('/settings', {
         method: 'POST',
@@ -244,7 +245,7 @@ export const saveSettings = (data: Record<string, unknown>) =>
 
 // ─── Diagnostics ───
 export const diagnose = (lang: string, signal?: AbortSignal) =>
-    request<any>(`/diagnose?lang=${lang}`, { signal });
+    request<DiagnoseResult>(`/diagnose?lang=${lang}`, { signal });
 
 // ─── LLM Models ───
 export const fetchLLMModels = (

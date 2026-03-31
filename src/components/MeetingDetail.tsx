@@ -639,16 +639,16 @@ export function MeetingDetail() {
                     try {
                         const parsed = JSON.parse(m.transcript);
                         if (Array.isArray(parsed)) {
-                            parts = parsed.map((p: any) => ({
-                                text: p.text || '',
-                                speaker: p.speaker || 'Speaker 1',
-                                speakerId: toSpeakerId(p.speakerId ?? p.speaker_id ?? 0),
-                                chunkId: p.chunkId || p.chunk_id || undefined,
-                                chunkIds: Array.isArray(p.chunkIds) ? p.chunkIds.filter((id: any) => typeof id === 'string') : undefined,
-                                startTime: toTimeString(p.startTime),
-                                endTime: toTimeString(p.endTime),
-                                timestamp: p.timestamp || '',
-                                translation: p.translation || '',
+                            parts = parsed.map((p: Record<string, unknown>) => ({
+                                text: (p.text as string) || '',
+                                speaker: (p.speaker as string) || 'Speaker 1',
+                                speakerId: toSpeakerId((p.speakerId ?? p.speaker_id ?? 0) as number),
+                                chunkId: (p.chunkId as string) || (p.chunk_id as string) || undefined,
+                                chunkIds: Array.isArray(p.chunkIds) ? (p.chunkIds as unknown[]).filter((id): id is string => typeof id === 'string') : undefined,
+                                startTime: toTimeString(p.startTime as string),
+                                endTime: toTimeString(p.endTime as string),
+                                timestamp: String(p.timestamp || ''),
+                                translation: String(p.translation || ''),
                             }));
                         }
                     } catch {

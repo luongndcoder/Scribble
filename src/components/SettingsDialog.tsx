@@ -10,7 +10,7 @@ export function SettingsDialog() {
     const [llmModel, setLlmModel] = useState('');
 
     const [saving, setSaving] = useState(false);
-    const [diagResult, setDiagResult] = useState<any>(null);
+    const [diagResult, setDiagResult] = useState<{ stt: { status: string; message: string }; llm: { status: string; message: string } } | null>(null);
 
     useEffect(() => {
         loadSettings();

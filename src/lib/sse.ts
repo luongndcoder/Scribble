@@ -27,7 +27,7 @@ function createSseParser(onDispatch: (payload: SseEventPayload) => void) {
     const payload: SseEventPayload = { event: currentEvent || 'message', data };
     try {
       payload.json = JSON.parse(data);
-    } catch { }
+    } catch { } // malformed SSE JSON — skip line
 
     onDispatch(payload);
     currentEvent = 'message';

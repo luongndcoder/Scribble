@@ -70,8 +70,8 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
             } finally {
                 reader.releaseLock();
             }
-        } catch (err: any) {
-            if (err.name === 'AbortError') return;
+        } catch (err: unknown) {
+            if (err instanceof DOMException && err.name === 'AbortError') return;
             console.error('Summary error:', err);
             setSummary('Error generating summary');
         }
@@ -79,7 +79,14 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
     };
 
     // Try to parse as JSON for structured display
-    let structured: any = null;
+    interface SummaryStructured {
+        title?: string;
+        summary?: string;
+        actionItems?: { text: string; task?: string; assignee?: string; deadline?: string }[];
+        keyPoints?: string[];
+        decisions?: string[];
+    }
+    let structured: SummaryStructured | null = null;
     try {
         structured = JSON.parse(summary);
     } catch { }
@@ -102,11 +109,11 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
                     {structured.title && (
                         <h2 className="text-lg font-bold text-text">{structured.title}</h2>
                     )}
-                    {structured.keyPoints?.length > 0 && (
+                    {(structured.keyPoints?.length ?? 0) > 0 && (
                         <div>
                             <h4 className="text-xs font-semibold text-primary mb-2">Key Points</h4>
                             <ul className="space-y-1">
-                                {structured.keyPoints.map((p: string, i: number) => (
+                                {structured.keyPoints!.map((p, i) => (
                                     <li key={i} className="text-sm text-text flex gap-2">
                                         <span className="text-primary">•</span> {p}
                                     </li>
@@ -114,11 +121,11 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
                             </ul>
                         </div>
                     )}
-                    {structured.decisions?.length > 0 && (
+                    {(structured.decisions?.length ?? 0) > 0 && (
                         <div>
                             <h4 className="text-xs font-semibold text-success mb-2">Decisions</h4>
                             <ul className="space-y-1">
-                                {structured.decisions.map((d: string, i: number) => (
+                                {structured.decisions!.map((d, i) => (
                                     <li key={i} className="text-sm text-text flex gap-2">
                                         <span className="text-success">✓</span> {d}
                                     </li>
@@ -126,11 +133,11 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
                             </ul>
                         </div>
                     )}
-                    {structured.actionItems?.length > 0 && (
+                    {(structured.actionItems?.length ?? 0) > 0 && (
                         <div>
                             <h4 className="text-xs font-semibold text-warning mb-2">Action Items</h4>
                             <ul className="space-y-2">
-                                {structured.actionItems.map((a: any, i: number) => (
+                                {structured.actionItems!.map((a, i) => (
                                     <li key={i} className="text-sm text-text bg-bg-elevated rounded-lg p-2">
                                         <span className="font-medium">{a.task}</span>
                                         {a.assignee && <span className="text-text-secondary ml-2">→ {a.assignee}</span>}

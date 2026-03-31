@@ -1,6 +1,7 @@
 import { useRef, useCallback } from "react";
 import { useAppStore } from "../../stores/appStore";
 import { fetchSidecar } from "../../lib/sidecar";
+import type { SttSegment, SttTranscribeResponse } from "../../types/stt";
 import {
     SILENCE_DURATION_MS,
     MIN_CHUNK_SEC,
@@ -26,18 +27,18 @@ export function useChunkRecording() {
         setIsTranscribing(true);
         try {
             const res = await fetchSidecar("/transcribe-diarize", { method: "POST", body: form });
-            const data = await res.json();
+            const data: SttTranscribeResponse = await res.json();
             const ts = new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 
-            const rawSegments = Array.isArray(data.segments) ? data.segments : [];
+            const rawSegments: SttSegment[] = Array.isArray(data.segments) ? data.segments : [];
             const normalizedSegments = rawSegments
-                .map((seg: any) => ({
+                .map((seg) => ({
                     text: String(seg?.text || "").trim(),
                     speakerId: seg?.speaker_id ?? 0,
                     speaker: seg?.speaker || "Speaker 1",
                     chunkId: seg?.chunk_id || "",
                 }))
-                .filter((seg: any) => seg.text.length > 0);
+                .filter((seg) => seg.text.length > 0);
 
             if (normalizedSegments.length === 0) {
                 const fallbackText = String(data.text || "").trim();
@@ -54,7 +55,7 @@ export function useChunkRecording() {
             const safeEnd = Math.max(safeStart, endSec);
             const perSegment = (safeEnd - safeStart) / Math.max(1, normalizedSegments.length);
 
-            normalizedSegments.forEach((seg: any, idx: number) => {
+            normalizedSegments.forEach((seg, idx) => {
                 const segStart = safeStart + perSegment * idx;
                 const segEnd = idx === normalizedSegments.length - 1 ? safeEnd : safeStart + perSegment * (idx + 1);
 
@@ -150,7 +151,7 @@ export function useChunkRecording() {
                     recorder?.stop();
                 }
             }, VAD_INTERVAL_MS);
-            (window as any).__vadInterval = vadInterval;
+            window.__vadInterval = vadInterval;
         },
         [],
     );

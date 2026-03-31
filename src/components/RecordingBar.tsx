@@ -98,12 +98,12 @@ export function RecordingBar() {
     // ── Cleanup on unmount ──
     useEffect(() => {
         return () => {
-            const tid = (window as any).__systemUnlistenTimeout;
+            const tid = window.__systemUnlistenTimeout;
             if (tid) clearTimeout(tid);
-            const unlisten = (window as any).__systemAudioUnlisten;
-            if (unlisten) { unlisten(); (window as any).__systemAudioUnlisten = null; }
-            clearInterval((window as any).__vadInterval);
-            clearInterval((window as any).__systemBarInterval);
+            const unlisten = window.__systemAudioUnlisten;
+            if (unlisten) { unlisten(); window.__systemAudioUnlisten = null; }
+            clearInterval(window.__vadInterval);
+            clearInterval(window.__systemBarInterval);
         };
     }, []);
 
@@ -124,7 +124,7 @@ export function RecordingBar() {
             const has = Boolean(await safeInvoke('check_screen_access'));
             if (has) return true;
             return Boolean(await safeInvoke('request_screen_access'));
-        } catch { return false; }
+        } catch { return false; } // permission check may throw on non-Tauri
     }, [audioSource]);
 
     // ── System audio transcript handler (Tauri events) ──
@@ -201,7 +201,7 @@ export function RecordingBar() {
                 ? currentMeeting.id
                 : (!state.currentMeetingId && state.draftId ? state.draftId : null);
 
-            try { await resetDiarize(); } catch {}
+            try { await resetDiarize(); } catch {} // best-effort, non-critical
 
             if (resumeDraftId) {
                 useAppStore.getState().setDraftId(resumeDraftId);
@@ -251,9 +251,9 @@ export function RecordingBar() {
                             `${Math.random() * 14 + 6}px`,
                         ]);
                     }, 300);
-                    (window as any).__systemBarInterval = barInterval;
+                    window.__systemBarInterval = barInterval;
                     const unlisten = await setupSystemAudioListener(sttProvider);
-                    (window as any).__systemAudioUnlisten = unlisten;
+                    window.__systemAudioUnlisten = unlisten;
                     return;
                 }
                 // Browser system audio
@@ -275,7 +275,7 @@ export function RecordingBar() {
                         if (tlEnabled) sysArgs.translateLang = tlLang;
                         await safeInvoke('start_system_audio', sysArgs);
                         const unlisten = await setupSystemAudioListener(sttProvider);
-                        (window as any).__systemAudioUnlisten = unlisten;
+                        window.__systemAudioUnlisten = unlisten;
                     } catch (e) {
                         console.warn('[both] system audio failed:', e);
                     }
@@ -293,7 +293,7 @@ export function RecordingBar() {
                     const dest = audioCtx.createMediaStreamDestination();
                     merger.connect(dest);
                     stream = dest.stream;
-                    (stream as any)._sources = [micStream, displayStream];
+                    (stream as MediaStream & { _sources?: MediaStream[] })._sources = [micStream, displayStream];
                 }
             } else {
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -403,21 +403,21 @@ export function RecordingBar() {
 
         const stream = streamRef.current;
         if (stream) {
-            const extra = (stream as any)._sources as MediaStream[] | undefined;
+            const extra = (stream as MediaStream & { _sources?: MediaStream[] })._sources as MediaStream[] | undefined;
             if (extra) extra.forEach(s => s.getTracks().forEach(t => t.stop()));
             stream.getTracks().forEach(t => t.stop());
         }
         stopDrawing();
-        clearInterval((window as any).__vadInterval);
-        clearInterval((window as any).__systemBarInterval);
+        clearInterval(window.__vadInterval);
+        clearInterval(window.__systemBarInterval);
         setBarHeights(['4px', '4px', '4px']);
         safeInvoke('stop_system_audio').catch(() => {});
 
-        const systemUnlisten = (window as any).__systemAudioUnlisten;
+        const systemUnlisten = window.__systemAudioUnlisten;
         if (systemUnlisten) {
-            (window as any).__systemAudioUnlisten = null;
+            window.__systemAudioUnlisten = null;
             const tid = setTimeout(() => systemUnlisten(), 3000);
-            (window as any).__systemUnlistenTimeout = tid;
+            window.__systemUnlistenTimeout = tid;
         }
     }, [setRecording, setPaused, setIsTranscribing, setInterimText, setInterimSpeaker,
         stopDraftAudioArchive, closeWebSocket, disconnectPcmStream, stopDrawing,

@@ -79,8 +79,8 @@ export function TranscriptView() {
                     }
                 }
             }
-        } catch (err: any) {
-            if (err.name === 'AbortError') return;
+        } catch (err: unknown) {
+            if (err instanceof DOMException && err.name === 'AbortError') return;
             console.error('Translation error:', err);
         }
     }, []);

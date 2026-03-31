@@ -1,11 +1,11 @@
 import { create } from 'zustand';
 
 function safeGetItem(key: string, fallback: string = ''): string {
-    try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+    try { return localStorage.getItem(key) || fallback; } catch { return fallback; } // private browsing
 }
 
 function safeSetItem(key: string, value: string): void {
-    try { localStorage.setItem(key, value); } catch {}
+    try { localStorage.setItem(key, value); } catch {} // private browsing or quota
 }
 
 export interface TranscriptPart {

@@ -20,9 +20,9 @@ export const SCRIPT_PROCESSOR_BUFFER = 4096;
 // Speaker offset for system audio (to avoid ID collision with mic)
 export const SYSTEM_SPEAKER_ID_OFFSET = 100;
 
-export const isTauri = !!(window as any).__TAURI_INTERNALS__;
+export const isTauri = !!window.__TAURI_INTERNALS__;
 
-export async function safeInvoke(cmd: string, args?: any) {
+export async function safeInvoke(cmd: string, args?: Record<string, unknown>) {
     if (!isTauri) {
         console.warn(`[Tauri] Not in Tauri env, skipping invoke('${cmd}')`);
         return null;

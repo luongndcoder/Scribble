@@ -77,7 +77,7 @@ export function useSummarize() {
                 }
             }
 
-            const payload: any = { language: state.summaryLang || lang, template: state.summaryTemplate || "mom" };
+            const payload: Record<string, unknown> = { language: state.summaryLang || lang, template: state.summaryTemplate || "mom" };
             if (state.summaryTemplate === "custom" && state.customPrompt) {
                 payload.customPrompt = state.customPrompt;
             }
@@ -139,7 +139,7 @@ export function useSummarize() {
             if (mid && accumulated) {
                 try {
                     const extractedTitle = extractMinutesTitle(accumulated);
-                    const putBody: any = { summary: accumulated, status: "saved" };
+                    const putBody: Record<string, unknown> = { summary: accumulated, status: "saved" };
                     if (extractedTitle) putBody.title = extractedTitle;
                     const putRes = await fetchSidecar(`/meetings/${mid}`, {
                         method: "PUT",

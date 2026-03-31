@@ -1,6 +1,7 @@
 import { useRef, useCallback } from "react";
 import { useAppStore } from "../../stores/appStore";
 import { SIDECAR_WS_BASES } from "../../lib/sidecar";
+import type { SttWsMessage } from "../../types/stt";
 import {
     WS_CONNECT_TIMEOUT_MS,
     WS_PATH_NVIDIA,
@@ -148,23 +149,25 @@ export function attachSocketHandlers(
 }
 
 /** Handle a translation WS event (chunk-targeted or interim). */
-function handleTranslationEvent(data: any) {
+function handleTranslationEvent(data: SttWsMessage) {
+    const translation = data.translation || "";
     if (data.chunk_id) {
         const currentParts = useAppStore.getState().transcriptParts;
+        const cid = data.chunk_id;
         const targetIdx = currentParts.findIndex(
-            (p) => p.chunkId === data.chunk_id || (p.chunkIds && p.chunkIds.includes(data.chunk_id)),
+            (p) => p.chunkId === cid || (p.chunkIds && p.chunkIds.includes(cid)),
         );
         if (targetIdx >= 0) {
             const existingTrans = currentParts[targetIdx].translation || "";
             if (data.append) {
-                const combined = existingTrans ? `${existingTrans} ${data.translation}` : data.translation;
+                const combined = existingTrans ? `${existingTrans} ${translation}` : translation;
                 useAppStore.getState().updateTranscriptTranslation(targetIdx, combined);
                 useAppStore.getState().setInterimTranslation("");
-            } else if (data.translation.length >= existingTrans.length) {
-                useAppStore.getState().updateTranscriptTranslation(targetIdx, data.translation);
+            } else if (translation.length >= existingTrans.length) {
+                useAppStore.getState().updateTranscriptTranslation(targetIdx, translation);
                 const parts2 = useAppStore.getState().transcriptParts;
                 if (targetIdx === parts2.length - 1) {
-                    useAppStore.getState().setInterimTranslation(data.translation);
+                    useAppStore.getState().setInterimTranslation(translation);
                 }
             }
             return;
@@ -172,13 +175,13 @@ function handleTranslationEvent(data: any) {
     }
     // Fallback: interim translation
     const curInterim = useAppStore.getState().interimTranslation || "";
-    if (data.translation.length >= curInterim.length) {
-        useAppStore.getState().setInterimTranslation(data.translation);
+    if (translation.length >= curInterim.length) {
+        useAppStore.getState().setInterimTranslation(translation);
     }
 }
 
 /** Handle a final transcript result — determine same-chunk, same-speaker, or new speaker. */
-function handleFinalTranscript(data: any, text: string, ts: string, state: ReturnType<typeof useAppStore.getState>) {
+function handleFinalTranscript(data: SttWsMessage, text: string, ts: string, state: ReturnType<typeof useAppStore.getState>) {
     const speakerId = data.speaker_id ?? 0;
     const speaker = data.speaker || "Speaker 1";
     const chunkId = data.chunk_id || "";
@@ -285,8 +288,8 @@ export function useStreamingStt() {
         const ws = wsRef.current;
         if (ws) {
             wsRef.current = null;
-            try { ws.send("STOP"); } catch {}
-            try { ws.close(); } catch {}
+            try { ws.send("STOP"); } catch {} // may already be closed
+            try { ws.close(); } catch {} // may already be closed
         }
     }, []);
 

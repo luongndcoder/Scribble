@@ -95,8 +95,9 @@ export function SettingsPanel() {
             } else {
                 showToast(lang === 'vi' ? 'Không tìm thấy model nào' : 'No models found', 'warning');
             }
-        } catch (e: any) {
-            showToast(lang === 'vi' ? `Lỗi kết nối: ${e.message || e}` : `Connection error: ${e.message || e}`, 'error');
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            showToast(lang === 'vi' ? `Lỗi kết nối: ${msg}` : `Connection error: ${msg}`, 'error');
         }
         setFetchingModels(false);
     };
@@ -114,9 +115,9 @@ export function SettingsPanel() {
                 clearTimeout(timeout);
                 setSttResult({ ok: r.stt?.status === 'ok', msg: r.stt?.message || 'Error' });
                 setLlmResult({ ok: r.llm?.status === 'ok', msg: r.llm?.message || 'Error' });
-            } catch (e: any) {
+            } catch (e: unknown) {
                 clearTimeout(timeout);
-                const msg = e?.name === 'AbortError' ? 'Timeout (15s)' : 'Cannot connect';
+                const msg = (e instanceof DOMException && e.name === 'AbortError') ? 'Timeout (15s)' : 'Cannot connect';
                 setSttResult({ ok: false, msg });
                 setLlmResult({ ok: false, msg });
             }
