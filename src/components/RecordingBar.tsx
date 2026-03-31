@@ -164,6 +164,8 @@ export function RecordingBar() {
                     const parts = useAppStore.getState().transcriptParts;
                     if (parts.length > 0) {
                         const lastIdx = parts.length - 1;
+                        const prevTrans = parts[lastIdx].translation || '';
+                        console.log(`[sys-audio-trans] idx=${lastIdx} prev=${prevTrans.length}ch new=${data.translation.length}ch`);
                         useAppStore.getState().updateTranscriptTranslation(lastIdx, data.translation);
                         useAppStore.getState().setInterimTranslation('');
                     } else {
