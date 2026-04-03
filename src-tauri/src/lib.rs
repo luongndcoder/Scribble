@@ -864,44 +864,51 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     // ── Extract sidecar tar.gz on first launch ──
     let data_dir = dirs::home_dir().unwrap_or_default().join(".voicescribe");
     let _ = std::fs::create_dir_all(&data_dir);
-    let extracted_dir = data_dir.join("sidecar");
-    let extracted_bin = extracted_dir.join("scribble-sidecar").join(sidecar_name);
+    let cache_dir = data_dir.join("sidecar");
+    // tar extracts to: cache_dir/scribble-sidecar/scribble-sidecar (binary)
+    let cached_bin = cache_dir.join("scribble-sidecar").join(sidecar_name);
 
     // Find tar.gz in app bundle
     let tar_candidates = vec![
+        exe_dir.join("../Resources/binaries/sidecar-dist.tar.gz"),
         exe_dir.join("../Resources/sidecar-dist.tar.gz"),
         exe_dir.join("sidecar-dist.tar.gz"),
     ];
     let tar_path = tar_candidates.iter().find(|p| p.exists()).cloned();
 
-    // Extract if tar exists and binary not already extracted
     if let Some(tar) = &tar_path {
-        if !extracted_bin.exists() {
-            println!("[sidecar] Extracting sidecar from {:?}...", tar);
-            let _ = std::fs::remove_dir_all(&extracted_dir);
-            let _ = std::fs::create_dir_all(&extracted_dir);
+        if !cached_bin.exists() {
+            println!("[sidecar] Extracting sidecar from {:?} to {:?}...", tar, cache_dir);
+            let _ = std::fs::remove_dir_all(&cache_dir);
+            let _ = std::fs::create_dir_all(&cache_dir);
             let status = std::process::Command::new("tar")
-                .args(["-xzf", &tar.to_string_lossy(), "-C", &extracted_dir.to_string_lossy()])
+                .args(["-xzf", &tar.to_string_lossy(), "-C", &cache_dir.to_string_lossy()])
                 .status();
             match status {
-                Ok(s) if s.success() => println!("[sidecar] Extraction complete"),
+                Ok(s) if s.success() => {
+                    // Make binary executable
+                    #[cfg(unix)]
+                    {
+                        let _ = std::process::Command::new("chmod")
+                            .args(["+x", &cached_bin.to_string_lossy()])
+                            .status();
+                    }
+                    println!("[sidecar] Extraction complete: {:?} exists={}", cached_bin, cached_bin.exists());
+                }
                 Ok(s) => println!("[sidecar] tar exited with {}", s),
                 Err(e) => println!("[sidecar] tar failed: {}", e),
             }
         } else {
-            println!("[sidecar] Using cached extraction at {:?}", extracted_dir);
+            println!("[sidecar] Using cached sidecar at {:?}", cached_bin);
         }
     }
 
-    // Search order: extracted cache, then app bundle, then legacy
+    // Search order: extracted cache first (fastest), then bundle, then legacy
     let candidates = vec![
-        // Extracted cache in ~/.voicescribe/sidecar/
-        extracted_bin.clone(),
-        // Direct in bundle (dev/onedir)
+        cached_bin.clone(),
+        // Dev mode: onedir next to exe
         exe_dir.join("sidecar-dist").join(sidecar_name),
         exe_dir.join("../Resources/sidecar-dist").join(sidecar_name),
-        // Legacy: flat binary
-        exe_dir.join(sidecar_name),
     ];
 
     let sidecar_path = candidates.iter()
