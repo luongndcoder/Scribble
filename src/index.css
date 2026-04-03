@@ -3755,3 +3755,44 @@ body.electron-app .draft-recovery-banner {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ─── Update Banner ─── */
+.update-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  animation: slideDown 0.3s ease;
+}
+
+.update-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--bg, #fff);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--gray-200, #e2e8f0);
+  max-width: 520px;
+}
+
+.update-icon { color: var(--indigo-500, #6366f1); flex-shrink: 0; }
+.update-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.update-text strong { font-size: 13px; color: var(--text, #0f172a); }
+.update-notes { font-size: 11px; color: var(--text-secondary, #64748b); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.update-btn { padding: 5px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: background 0.15s; }
+.update-btn.primary { background: var(--indigo-500, #6366f1); color: #fff; }
+.update-btn.primary:hover { background: var(--indigo-600, #4f46e5); }
+.update-btn.dismiss { background: transparent; color: var(--text-secondary, #64748b); }
+.update-btn.dismiss:hover { background: var(--gray-100, #f1f5f9); }
+.update-progress { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+.update-progress-bar { height: 4px; border-radius: 2px; background: var(--indigo-500, #6366f1); flex: 1; transition: width 0.3s; }
+.update-progress span { font-size: 11px; color: var(--text-secondary); min-width: 30px; }
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

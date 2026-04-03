@@ -6,6 +6,7 @@ import { MeetingDetail } from './components/MeetingDetail';
 import { RecordingBar } from './components/RecordingBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ToastProvider, useToast } from './components/Toast';
+import { UpdateChecker } from './components/UpdateChecker';
 import { SIDECAR_HTTP_BASES } from './lib/sidecar';
 import './index.css';
 
@@ -32,70 +33,79 @@ function AppInner() {
     let active = true;
     let wasOffline = true;
 
-    const check = async () => {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3000);
-        const res = await fetch(`${SIDECAR_BASES[0]}/health`, {
-          cache: 'no-store',
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        if (active) {
-          const isOnline = res.ok;
-          setBackendStatus(isOnline ? 'online' : 'offline');
-          if (isOnline) {
-            // Step 1: sidecar is online
-            setStartupStep(prev => Math.max(prev, 1));
-            // Check diarizer status for step 2
-            try {
-              const dRes = await fetch(`${SIDECAR_BASES[0]}/diarizer-status`, { cache: 'no-store' });
-              if (dRes.ok) {
-                const dData = await dRes.json();
-                if (dData.model_loaded) {
-                  setStartupStep(prev => Math.max(prev, 2));
-                  // Step 3: fully ready (only after model loaded)
-                  setStartupStep(3);
-                }
-              }
-            } catch {} // diarizer check is best-effort
+    // Sequential startup: each step must complete before moving to next
+    const runStartup = async () => {
+      // ── Step 0→1: Wait for sidecar to respond to /health ──
+      while (active) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 2000);
+          const res = await fetch(`${SIDECAR_BASES[0]}/health`, {
+            cache: 'no-store', signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          if (res.ok) {
+            setStartupStep(1);
+            break;
           }
-          if (isOnline && wasOffline) {
-            window.dispatchEvent(new Event('backend-online'));
-            if (!hasBeenOnline.current) {
-              hasBeenOnline.current = true;
-              showToast(lang === 'vi' ? '✓ Hệ thống đã sẵn sàng' : '✓ System ready', 'success');
+        } catch {} // expected during startup
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (!active) return;
+
+      // ── Step 1→2: Wait for diarizer model to load ──
+      while (active) {
+        try {
+          const dRes = await fetch(`${SIDECAR_BASES[0]}/diarizer-status`, { cache: 'no-store' });
+          if (dRes.ok) {
+            const dData = await dRes.json();
+            if (dData.model_loaded) {
+              setStartupStep(2);
+              break;
             }
           }
-          wasOffline = !isOnline;
+        } catch {}
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (!active) return;
+
+      // ── Step 2→3: Ready — small delay for visual feedback ──
+      await new Promise(r => setTimeout(r, 500));
+      if (!active) return;
+      setStartupStep(3);
+      setBackendStatus('online');
+      window.dispatchEvent(new Event('backend-online'));
+      if (!hasBeenOnline.current) {
+        hasBeenOnline.current = true;
+        showToast(lang === 'vi' ? '✓ Hệ thống đã sẵn sàng' : '✓ System ready', 'success');
+      }
+
+      // ── Ongoing health check (slow poll) ──
+      while (active) {
+        await new Promise(r => setTimeout(r, 10000));
+        if (!active) break;
+        try {
+          const res = await fetch(`${SIDECAR_BASES[0]}/health`, { cache: 'no-store' });
+          if (active) {
+            const isOnline = res.ok;
+            setBackendStatus(isOnline ? 'online' : 'offline');
+            if (!isOnline && wasOffline) {
+              // Backend went down — reset startup for re-init
+              setStartupStep(0);
+            }
+            wasOffline = !isOnline;
+          }
+        } catch {
+          if (active) {
+            setBackendStatus('offline');
+            wasOffline = true;
+          }
         }
-      } catch (e) {
-        if (active) {
-          setBackendStatus('offline');
-          wasOffline = true;
-        }
-        // Health check failure is expected when sidecar is starting up
       }
     };
 
-    // Poll faster during startup, slow down once online
-    check();
-    const fastId = setInterval(check, 2000);
-    const slowDown = setTimeout(() => {
-      clearInterval(fastId);
-      if (active) {
-        const slowId = setInterval(check, 10000);
-        // Store for cleanup
-        (window as Window).__healthSlowInterval = slowId;
-      }
-    }, 30000); // switch to slow after 30s
-    return () => {
-      active = false;
-      clearInterval(fastId);
-      clearTimeout(slowDown);
-      const slow = (window as Window).__healthSlowInterval;
-      if (slow) clearInterval(slow);
-    };
+    runStartup();
+    return () => { active = false; };
   }, []);
 
   return (
@@ -181,6 +191,7 @@ function AppInner() {
 
           {/* Settings Panel */}
           {settingsOpen && <SettingsPanel />}
+          <UpdateChecker />
         </div>
       </QueryClientProvider>
   );
