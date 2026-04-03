@@ -64,13 +64,7 @@ find "$DIST_INT" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || tr
 find "$DIST_INT" -name "*.pyc" -delete 2>/dev/null || true
 # .dist-info metadata
 find "$DIST_INT" -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
-# scipy: only need signal module — remove unused subpackages (-25MB)
-for subpkg in optimize sparse special linalg spatial stats interpolate fft ndimage integrate io cluster odr _lib/doccer.py; do
-    rm -rf "$DIST_INT/scipy/$subpkg" 2>/dev/null || true
-done
-# Strip debug symbols from .so/.dylib files
-find "$DIST_INT" -name "*.so" -exec strip -x {} + 2>/dev/null || true
-find "$DIST_INT" -name "*.dylib" -exec strip -x {} + 2>/dev/null || true
+# Note: stripping .so/.dylib symbols can break Python C extensions — skip
 STRIPPED_SIZE=$(du -sh "$BINARIES_DIR/sidecar-dist" | cut -f1)
 echo "📦 Sidecar dist size after strip: $STRIPPED_SIZE"
 
