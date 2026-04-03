@@ -63,17 +63,18 @@ export function SettingsPanel() {
     const buildSettingsBody = () => {
         const body: Record<string, unknown> = {};
         body.stt_provider = sttProvider;
-        if (nvidiaKey && !nvidiaKey.includes('••')) body.nvidia_api_key = nvidiaKey;
-        if (sonioxKey && !sonioxKey.includes('••')) body.soniox_api_key = sonioxKey;
+        // Send key if changed (not masked placeholder). Empty string = clear key.
+        if (!nvidiaKey.includes('••')) body.nvidia_api_key = nvidiaKey;
+        if (!sonioxKey.includes('••')) body.soniox_api_key = sonioxKey;
         body.stt_language = nvidiaLang;
         body.soniox_language_hints = Array.from(sonioxLangs).join(',');
         body.max_speakers = maxSpeakers;
-        if (llmKey && !llmKey.includes('•')) body.llm_api_key = llmKey;
+        if (!llmKey.includes('•')) body.llm_api_key = llmKey;
         if (llmProvider === 'compatible') {
-            if (llmUrl) body.llm_base_url = llmUrl;
+            body.llm_base_url = llmUrl;
         }
         body.llm_provider = llmProvider;
-        if (llmModel) body.llm_model = llmModel;
+        body.llm_model = llmModel;
         return body;
     };
 
