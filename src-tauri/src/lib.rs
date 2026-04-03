@@ -1041,18 +1041,27 @@ pub fn run() {
                 app.manage(SystemAudioState(system_audio_windows::CaptureState::new()));
             }
 
-            // Kill ALL stale sidecar processes SYNCHRONOUSLY before frontend loads
-            kill_sidecar_port();
-            // Brief pause for port release
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            // Check if sidecar is already running (skip expensive restart)
+            let sidecar_alive = std::net::TcpStream::connect_timeout(
+                &"127.0.0.1:8765".parse().unwrap(),
+                std::time::Duration::from_millis(500),
+            ).is_ok();
 
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                match start_sidecar(handle).await {
-                    Ok(msg) => println!("[setup] {}", msg),
-                    Err(e) => eprintln!("[setup] Failed to start sidecar: {}", e),
-                }
-            });
+            if sidecar_alive {
+                println!("[setup] Sidecar already running on port 8765 — reusing");
+            } else {
+                println!("[setup] Sidecar not running — starting fresh");
+                kill_sidecar_port();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    match start_sidecar(handle).await {
+                        Ok(msg) => println!("[setup] {}", msg),
+                        Err(e) => eprintln!("[setup] Failed to start sidecar: {}", e),
+                    }
+                });
+            }
 
             // Linux: auto-grant microphone permission (WebKitGTK denies getUserMedia by default)
             #[cfg(target_os = "linux")]

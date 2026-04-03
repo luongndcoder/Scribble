@@ -17,6 +17,7 @@ function AppInner() {
   const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording } = useAppStore();
   const { showToast } = useToast();
   const [backendStatus, setBackendStatus] = useState<'online' | 'offline'>('offline');
+  const [appVersion, setAppVersion] = useState('');
   // Startup progress: 0=connecting, 1=sidecar online, 2=diarizer loaded, 3=ready
   const [startupStep, setStartupStep] = useState(0);
   const hasBeenOnline = useRef(false);
@@ -28,6 +29,14 @@ function AppInner() {
     if (lang === 'vi') return backendStatus === 'online' ? '✓ Sẵn sàng' : 'Đang kết nối...';
     return backendStatus === 'online' ? '✓ Ready' : 'Connecting...';
   }, [backendStatus, lang]);
+
+  useEffect(() => {
+    if (window.__TAURI_INTERNALS__) {
+      import('@tauri-apps/api/app').then(({ getVersion }) =>
+        getVersion().then(v => setAppVersion(v)).catch(() => {})
+      );
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -126,6 +135,7 @@ function AppInner() {
                     <line x1="12" x2="12" y1="19" y2="22" />
                   </svg>
                   Scribble
+                  {appVersion && <span className="app-version">v{appVersion}</span>}
                 </span>
               </div>
               <div className="topnav-right">

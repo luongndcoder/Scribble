@@ -421,6 +421,16 @@ body.electron-app .sub-tabs {
   background-clip: text;
 }
 
+.app-version {
+  font-size: 0.6rem;
+  font-weight: 500;
+  color: var(--gray-400);
+  -webkit-text-fill-color: var(--gray-400);
+  background: none;
+  letter-spacing: 0;
+  margin-left: -2px;
+}
+
 .brand-icon {
   color: var(--red-500);
   -webkit-text-fill-color: initial;
