@@ -1,18 +1,23 @@
 """
-Database module — SQLite via Python stdlib
+Database module — SQLite via Python stdlib.
+Uses thread-local connections for concurrency safety and WAL mode for performance.
 """
 
-import os
 import json
+import os
 import sqlite3
-import time
+import threading
 from pathlib import Path
-from threading import Lock
+
+from logger import get_logger
+
+log = get_logger(__name__)
 
 
 class Database:
     _instance = None
-    _lock = Lock()
+    _lock = threading.Lock()
+    _local = threading.local()  # Thread-local storage for connections
 
     def __new__(cls):
         if cls._instance is None:
@@ -35,12 +40,32 @@ class Database:
         self._db_path = db_path
         self._create_tables()
         self._initialized = True
-        print(f"[db] SQLite: {db_path}")
+        log.info("SQLite: %s", db_path)
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
+        """Return a thread-local SQLite connection (creates one if needed)."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            # WAL mode: allows concurrent readers while writing
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=-8000")  # 8MB cache
+            conn.execute("PRAGMA foreign_keys=ON")
+            self._local.conn = conn
+            log.debug("New SQLite connection for thread %s", threading.current_thread().name)
         return conn
+
+    def close_thread_connection(self):
+        """Close and remove the thread-local connection (call from thread cleanup)."""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
 
     def _create_tables(self):
         conn = self._conn()
@@ -65,7 +90,6 @@ class Database:
             );
         """)
         conn.commit()
-        conn.close()
 
     # ─── Meetings ───
     def create_meeting(self, title: str, transcript: str, summary: str,
@@ -76,31 +100,34 @@ class Database:
             (title, transcript, summary, audio_duration, language, status),
         )
         conn.commit()
-        mid = cur.lastrowid
-        conn.close()
-        return mid
+        return cur.lastrowid
 
     def get_meeting(self, mid: int) -> dict | None:
         conn = self._conn()
         row = conn.execute("SELECT * FROM meetings WHERE id = ?", (mid,)).fetchone()
-        conn.close()
-        if row:
-            return dict(row)
-        return None
+        return dict(row) if row else None
 
     def get_all_meetings(self) -> list[dict]:
         conn = self._conn()
         rows = conn.execute("SELECT * FROM meetings ORDER BY created_at DESC").fetchall()
-        conn.close()
         return [dict(r) for r in rows]
 
+    # Allowed column names for update (whitelist against SQL injection)
+    _ALLOWED_UPDATE_COLS = frozenset({
+        "title", "transcript", "summary", "translations", "audio_path",
+        "audio_duration", "language", "status",
+    })
+
     def update_meeting(self, mid: int, **kwargs):
+        # Validate column names against whitelist
+        invalid = set(kwargs) - self._ALLOWED_UPDATE_COLS
+        if invalid:
+            raise ValueError(f"Invalid column(s) for update: {invalid}")
         conn = self._conn()
         sets = ", ".join(f"{k} = ?" for k in kwargs)
         vals = list(kwargs.values()) + [mid]
         conn.execute(f"UPDATE meetings SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", vals)
         conn.commit()
-        conn.close()
 
     def update_chunk_speaker(self, chunk_id: str, new_speaker_id: int) -> int:
         """Update speakerId by chunkId in transcript JSON arrays.
@@ -160,30 +187,25 @@ class Database:
                 updated += 1
 
         conn.commit()
-        conn.close()
         return updated
 
     def delete_meeting(self, mid: int):
         conn = self._conn()
         conn.execute("DELETE FROM meetings WHERE id = ?", (mid,))
         conn.commit()
-        conn.close()
 
     # ─── Settings ───
     def get_setting(self, key: str) -> str | None:
         conn = self._conn()
         row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        conn.close()
         return row["value"] if row else None
 
     def set_setting(self, key: str, value: str):
         conn = self._conn()
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
-        conn.close()
 
     def get_all_settings(self) -> dict:
         conn = self._conn()
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
-        conn.close()
         return {r["key"]: r["value"] for r in rows}

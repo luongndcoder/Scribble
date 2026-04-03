@@ -607,15 +607,17 @@ struct SystemAudioState(system_audio::CaptureState);
 struct SystemAudioState(system_audio_windows::CaptureState);
 
 #[tauri::command]
-async fn start_system_audio(app: tauri::AppHandle, _draft_id: Option<i64>) -> Result<String, String> {
+async fn start_system_audio(app: tauri::AppHandle, _draft_id: Option<i64>, stt_provider: Option<String>, translate_lang: Option<String>) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         let state = app.state::<SystemAudioState>();
         let sample_rate = system_audio::start_capture(&state.0)?;
         let app_handle = app.clone();
         let meeting_id = _draft_id;
+        let provider = stt_provider.unwrap_or_else(|| "nvidia".to_string());
+        let tl = translate_lang.unwrap_or_default();
         tauri::async_runtime::spawn(async move {
-            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, |st| {
+            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, &provider, &tl, |st| {
                 system_audio::drain_buffer(&st.0)
             }).await;
         });
@@ -627,8 +629,10 @@ async fn start_system_audio(app: tauri::AppHandle, _draft_id: Option<i64>) -> Re
         let sample_rate = system_audio_windows::start_capture(&state.0)?;
         let app_handle = app.clone();
         let meeting_id = _draft_id;
+        let provider = stt_provider.unwrap_or_else(|| "nvidia".to_string());
+        let tl = translate_lang.unwrap_or_default();
         tauri::async_runtime::spawn(async move {
-            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, |st| {
+            system_audio_ws_loop(&app_handle, sample_rate, meeting_id, &provider, &tl, |st| {
                 system_audio_windows::drain_buffer(&st.0)
             }).await;
         });
@@ -646,15 +650,23 @@ async fn system_audio_ws_loop<F>(
     app_handle: &tauri::AppHandle,
     capture_rate: u32,
     meeting_id: Option<i64>,
+    stt_provider: &str,
+    translate_lang: &str,
     drain_fn: F,
 ) where F: Fn(&SystemAudioState) -> Vec<f32> {
     use tokio_tungstenite::{connect_async, tungstenite::Message};
     use futures_util::{SinkExt, StreamExt};
 
-    let mut url = "ws://127.0.0.1:8765/ws/nvidia-stream?source=system".to_string();
+    // Build WS URL based on STT provider
+    let ws_path = if stt_provider == "soniox" { "/ws/soniox-stream" } else { "/ws/nvidia-stream" };
+    let mut url = format!("ws://127.0.0.1:8765{}?source=system", ws_path);
     if let Some(mid) = meeting_id {
         url.push_str(&format!("&meeting_id={}", mid));
     }
+    if !translate_lang.is_empty() {
+        url.push_str(&format!("&translate_lang={}", translate_lang));
+    }
+    println!("[system-audio] Connecting to {} (provider={}, translate={})", url, stt_provider, if translate_lang.is_empty() { "off" } else { translate_lang });
     let ws_stream = match connect_async(&url).await {
         Ok((stream, _)) => {
             println!("[system-audio] WebSocket connected to {}", url);
@@ -668,6 +680,19 @@ async fn system_audio_ws_loop<F>(
 
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let app_for_rx = app_handle.clone();
+
+    // Channel for receiving commands from frontend
+    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    use tauri::Listener;
+    let cmd_listener_id = app_handle.listen_any("system-audio-cmd", move |event| {
+        // Tauri v2 string payloads are JSON encoded, e.g. `"TRANSLATE:en"`
+        let payload = event.payload();
+        if let Ok(cmd) = serde_json::from_str::<String>(payload) {
+            let _ = cmd_tx.send(cmd);
+        } else {
+            let _ = cmd_tx.send(payload.to_string());
+        }
+    });
 
     let reader = tauri::async_runtime::spawn(async move {
         while let Some(msg) = ws_rx.next().await {
@@ -692,12 +717,21 @@ async fn system_audio_ws_loop<F>(
             break;
         }
 
+        // Process any pending commands from frontend
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            if let Err(e) = ws_tx.send(Message::Text(cmd)).await {
+                eprintln!("[system-audio] Failed to send cmd: {}", e);
+            }
+        }
+
         let chunk = drain_fn(&state_ref);
         if chunk.is_empty() { continue; }
 
         // High-quality downsample to 16kHz using Hanning-windowed sinc filter
         let output_len = (chunk.len() as f64 / ratio).floor() as usize;
         if output_len == 0 { continue; }
+        // Cap buffer to prevent unbounded memory allocation (~10s at 16kHz)
+        let output_len = output_len.min(160_000);
 
         let filter_half = (ratio.ceil() as usize) * 2 + 1;
         let cutoff = 1.0 / ratio;
@@ -735,10 +769,10 @@ async fn system_audio_ws_loop<F>(
             break;
         }
     }
-
     let _ = ws_tx.close().await;
     reader.abort();
     println!("[system-audio] Streaming stopped");
+    app_handle.unlisten(cmd_listener_id);
 }
 
 
@@ -794,6 +828,17 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
             .output();
     }
 
+    // Quick port check — don't over-wait
+    for _ in 0..3 {
+        if std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:8765".parse().unwrap(),
+            std::time::Duration::from_millis(50),
+        ).is_err() {
+            break; // Port is free
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
     // --- Resolve sidecar binary from onedir resource folder ---
     let exe_dir = std::env::current_exe()
         .map_err(|e| format!("Cannot find current exe: {}", e))?
@@ -816,13 +861,64 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     let sidecar_folder = "scribble-sidecar-x86_64-unknown-linux-gnu";
 
-    // Search order: onedir folder next to exe, then macOS Resources, then legacy flat binary
+    // ── Extract sidecar tar.gz on first launch ──
+    let data_dir = dirs::home_dir().unwrap_or_default().join(".voicescribe");
+    let _ = std::fs::create_dir_all(&data_dir);
+    let cache_dir = data_dir.join("sidecar");
+    // tar extracts to: cache_dir/scribble-sidecar/scribble-sidecar (binary)
+    let cached_bin = cache_dir.join("scribble-sidecar").join(sidecar_name);
+
+    // Find tar.gz in app bundle
+    let tar_candidates = vec![
+        exe_dir.join("../Resources/binaries/sidecar-dist.tar.gz"),
+        exe_dir.join("../Resources/sidecar-dist.tar.gz"),
+        exe_dir.join("sidecar-dist.tar.gz"),
+    ];
+    let tar_path = tar_candidates.iter().find(|p| p.exists()).cloned();
+
+    // Version check: re-extract if app version changed
+    let app_version = env!("CARGO_PKG_VERSION");
+    let version_file = cache_dir.join(".version");
+    let cached_version = std::fs::read_to_string(&version_file).unwrap_or_default();
+    let needs_extract = !cached_bin.exists() || cached_version.trim() != app_version;
+
+    if let Some(tar) = &tar_path {
+        if needs_extract {
+            println!("[sidecar] Extracting sidecar from {:?} to {:?}...", tar, cache_dir);
+            let _ = std::fs::remove_dir_all(&cache_dir);
+            let _ = std::fs::create_dir_all(&cache_dir);
+            let status = std::process::Command::new("tar")
+                .args(["-xzf", &tar.to_string_lossy(), "-C", &cache_dir.to_string_lossy()])
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    // Make binary executable
+                    #[cfg(unix)]
+                    {
+                        let _ = std::process::Command::new("chmod")
+                            .args(["+x", &cached_bin.to_string_lossy()])
+                            .status();
+                    }
+                    let _ = std::fs::write(&version_file, app_version);
+                    // Kill old sidecar so new version starts fresh
+                    kill_sidecar_port();
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    println!("[sidecar] Extraction complete (v{}): {:?}", app_version, cached_bin);
+                }
+                Ok(s) => println!("[sidecar] tar exited with {}", s),
+                Err(e) => println!("[sidecar] tar failed: {}", e),
+            }
+        } else {
+            println!("[sidecar] Using cached sidecar at {:?}", cached_bin);
+        }
+    }
+
+    // Search order: extracted cache first (fastest), then bundle, then legacy
     let candidates = vec![
-        exe_dir.join(sidecar_folder).join(sidecar_name),
-        // macOS .app bundle: Resources is sibling to MacOS
-        exe_dir.join("../Resources").join(sidecar_folder).join(sidecar_name),
-        // Legacy: flat binary next to exe (backward compat)
-        exe_dir.join(sidecar_name),
+        cached_bin.clone(),
+        // Dev mode: onedir next to exe
+        exe_dir.join("sidecar-dist").join(sidecar_name),
+        exe_dir.join("../Resources/sidecar-dist").join(sidecar_name),
     ];
 
     let sidecar_path = candidates.iter()
@@ -983,6 +1079,8 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(Mutex::new(SidecarState { child: None }))
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -994,18 +1092,27 @@ pub fn run() {
                 app.manage(SystemAudioState(system_audio_windows::CaptureState::new()));
             }
 
-            // Kill ALL stale sidecar processes SYNCHRONOUSLY before frontend loads
-            kill_sidecar_port();
-            // Brief pause for port release
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            // Check if sidecar is already running (skip expensive restart)
+            let sidecar_alive = std::net::TcpStream::connect_timeout(
+                &"127.0.0.1:8765".parse().unwrap(),
+                std::time::Duration::from_millis(500),
+            ).is_ok();
 
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                match start_sidecar(handle).await {
-                    Ok(msg) => println!("[setup] {}", msg),
-                    Err(e) => eprintln!("[setup] Failed to start sidecar: {}", e),
-                }
-            });
+            if sidecar_alive {
+                println!("[setup] Sidecar already running on port 8765 — reusing");
+            } else {
+                println!("[setup] Sidecar not running — starting fresh");
+                kill_sidecar_port();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    match start_sidecar(handle).await {
+                        Ok(msg) => println!("[setup] {}", msg),
+                        Err(e) => eprintln!("[setup] Failed to start sidecar: {}", e),
+                    }
+                });
+            }
 
             // Linux: auto-grant microphone permission (WebKitGTK denies getUserMedia by default)
             #[cfg(target_os = "linux")]
@@ -1062,11 +1169,25 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_app_handle, event| {
-        if let tauri::RunEvent::Exit = event {
-            // Kill ALL sidecar processes on app exit (Cmd+Q, force quit, etc.)
-            kill_sidecar_port();
-            println!("[exit] Sidecar cleaned up");
+    app.run(|app_handle, event| {
+        match event {
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                // Kill sidecar via stored child handle first
+                if let Some(state) = app_handle.try_state::<Mutex<SidecarState>>() {
+                    if let Ok(mut guard) = state.lock() {
+                        if let Some(child) = guard.child.take() {
+                            child.kill();
+                            println!("[exit] Killed sidecar child process");
+                        }
+                    }
+                }
+                // Then kill by port to catch orphaned processes
+                kill_sidecar_port();
+                // Brief wait to ensure process is fully terminated
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                println!("[exit] Sidecar cleanup done");
+            }
+            _ => {}
         }
     });
 }

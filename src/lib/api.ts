@@ -6,6 +6,8 @@
  */
 
 import { fetchSidecar, readResponseError, sidecarUrl, SIDECAR_HTTP_BASES } from './sidecar';
+import type { Meeting } from '../stores/appStore';
+import type { SettingsData, DiagnoseResult } from '../types/stt';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const res = await fetchSidecar(path, {
@@ -60,14 +62,14 @@ export const summarize = (meetingId: number, language: string) =>
     });
 
 // ─── Meetings CRUD ───
-export const getMeetings = () => request<any[]>('/meetings');
-export const getMeeting = (id: number) => request<any>(`/meetings/${id}`);
-export const createMeeting = (data: any) =>
+export const getMeetings = () => request<Meeting[]>('/meetings');
+export const getMeeting = (id: number) => request<Meeting>(`/meetings/${id}`);
+export const createMeeting = (data: Partial<Meeting>) =>
     request<{ id: number }>('/meetings', {
         method: 'POST',
         body: JSON.stringify(data),
     });
-export const updateMeeting = (id: number, data: any) =>
+export const updateMeeting = (id: number, data: Record<string, unknown>) =>
     request<{ ok: boolean }>(`/meetings/${id}`, {
         method: 'PUT',
         body: JSON.stringify(data),
@@ -105,7 +107,7 @@ function parseDownloadFilename(contentDisposition: string | null): string | null
     if (!contentDisposition) return null;
     const utf8 = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
     if (utf8?.[1]) {
-        try { return decodeURIComponent(utf8[1]); } catch { }
+        try { return decodeURIComponent(utf8[1]); } catch { } // invalid URI encoding
     }
     const quoted = contentDisposition.match(/filename=\"([^\"]+)\"/i);
     if (quoted?.[1]) return quoted[1];
@@ -122,7 +124,7 @@ export async function downloadMeetingAudio(
     const path = `/meetings/${id}/audio?format=${encodeURIComponent(format)}`;
 
     // In Tauri: use invoke to save via Rust (tries multiple sidecar URLs)
-    if ((window as any).__TAURI_INTERNALS__) {
+    if (window.__TAURI_INTERNALS__) {
         const { invoke } = await import('@tauri-apps/api/core');
 
         // Try each sidecar base URL via Rust download (avoids JS memory issues)
@@ -169,7 +171,7 @@ export async function downloadMeetingMinutes(
 ) {
     const path = `/meetings/${id}/minutes?format=${encodeURIComponent(format)}`;
 
-    if ((window as any).__TAURI_INTERNALS__) {
+    if (window.__TAURI_INTERNALS__) {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const res = await fetchSidecar(path);
@@ -210,7 +212,7 @@ export async function downloadMeetingMinutes(
 export async function downloadTextFile(filename: string, content: string) {
     const bytes = new TextEncoder().encode(content);
 
-    if ((window as any).__TAURI_INTERNALS__) {
+    if (window.__TAURI_INTERNALS__) {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('save_audio_file', {
@@ -234,8 +236,8 @@ export async function downloadTextFile(filename: string, content: string) {
     URL.revokeObjectURL(url);
 }
 // ─── Settings ───
-export const getSettings = () => request<any>('/settings');
-export const saveSettings = (data: any) =>
+export const getSettings = () => request<SettingsData>('/settings');
+export const saveSettings = (data: Record<string, unknown>) =>
     request<{ ok: boolean }>('/settings', {
         method: 'POST',
         body: JSON.stringify(data),
@@ -243,4 +245,16 @@ export const saveSettings = (data: any) =>
 
 // ─── Diagnostics ───
 export const diagnose = (lang: string, signal?: AbortSignal) =>
-    request<any>(`/diagnose?lang=${lang}`, { signal });
+    request<DiagnoseResult>(`/diagnose?lang=${lang}`, { signal });
+
+// ─── LLM Models ───
+export const fetchLLMModels = (
+    provider: string,
+    apiKey: string,
+    baseUrl?: string,
+): Promise<{ models: string[]; error?: string }> => {
+    const params = new URLSearchParams({ provider, api_key: apiKey });
+    if (baseUrl) params.set('base_url', baseUrl);
+    return request<{ models: string[]; error?: string }>(`/models?${params}`);
+};
+

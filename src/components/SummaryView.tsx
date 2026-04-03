@@ -1,18 +1,30 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { fetchSidecar } from '../lib/sidecar';
 
 export function SummaryView({ meetingId, transcript }: { meetingId: number; transcript: string }) {
     const [summary, setSummary] = useState('');
     const [loading, setLoading] = useState(false);
-    const { lang } = useAppStore();
+    const { lang, summaryTemplate, customPrompt } = useAppStore();
+    const abortRef = useRef<AbortController | null>(null);
+
+    // Cancel any in-flight request on unmount
+    useEffect(() => {
+        return () => { abortRef.current?.abort(); };
+    }, []);
 
     const generateSummary = async () => {
+        abortRef.current?.abort();
+        const ac = new AbortController();
+        abortRef.current = ac;
         setLoading(true);
         setSummary('');
 
         try {
-            const payload: any = { language: lang };
+            const payload: Record<string, unknown> = { language: lang, template: summaryTemplate || 'mom' };
+            if (summaryTemplate === 'custom' && customPrompt) {
+                payload.customPrompt = customPrompt;
+            }
             if (meetingId) {
                 payload.meetingId = meetingId;
             } else {
@@ -22,35 +34,44 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
+                signal: ac.signal,
             });
 
             const reader = res.body?.getReader();
-            if (!reader) return;
+            if (!reader) {
+                console.warn('[SummaryView] No response body reader');
+                return;
+            }
             const decoder = new TextDecoder();
             let buffer = '';
             let accumulated = '';
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
 
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
 
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            if (data.token) {
-                                accumulated += data.token;
-                                setSummary(accumulated);
-                            }
-                        } catch { }
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.token) {
+                                    accumulated += data.token;
+                                    setSummary(accumulated);
+                                }
+                            } catch {}
+                        }
                     }
                 }
+            } finally {
+                reader.releaseLock();
             }
-        } catch (err) {
+        } catch (err: unknown) {
+            if (err instanceof DOMException && err.name === 'AbortError') return;
             console.error('Summary error:', err);
             setSummary('Error generating summary');
         }
@@ -58,7 +79,14 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
     };
 
     // Try to parse as JSON for structured display
-    let structured: any = null;
+    interface SummaryStructured {
+        title?: string;
+        summary?: string;
+        actionItems?: { text: string; task?: string; assignee?: string; deadline?: string }[];
+        keyPoints?: string[];
+        decisions?: string[];
+    }
+    let structured: SummaryStructured | null = null;
     try {
         structured = JSON.parse(summary);
     } catch { }
@@ -81,11 +109,11 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
                     {structured.title && (
                         <h2 className="text-lg font-bold text-text">{structured.title}</h2>
                     )}
-                    {structured.keyPoints?.length > 0 && (
+                    {(structured.keyPoints?.length ?? 0) > 0 && (
                         <div>
                             <h4 className="text-xs font-semibold text-primary mb-2">Key Points</h4>
                             <ul className="space-y-1">
-                                {structured.keyPoints.map((p: string, i: number) => (
+                                {structured.keyPoints!.map((p, i) => (
                                     <li key={i} className="text-sm text-text flex gap-2">
                                         <span className="text-primary">•</span> {p}
                                     </li>
@@ -93,11 +121,11 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
                             </ul>
                         </div>
                     )}
-                    {structured.decisions?.length > 0 && (
+                    {(structured.decisions?.length ?? 0) > 0 && (
                         <div>
                             <h4 className="text-xs font-semibold text-success mb-2">Decisions</h4>
                             <ul className="space-y-1">
-                                {structured.decisions.map((d: string, i: number) => (
+                                {structured.decisions!.map((d, i) => (
                                     <li key={i} className="text-sm text-text flex gap-2">
                                         <span className="text-success">✓</span> {d}
                                     </li>
@@ -105,11 +133,11 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
                             </ul>
                         </div>
                     )}
-                    {structured.actionItems?.length > 0 && (
+                    {(structured.actionItems?.length ?? 0) > 0 && (
                         <div>
                             <h4 className="text-xs font-semibold text-warning mb-2">Action Items</h4>
                             <ul className="space-y-2">
-                                {structured.actionItems.map((a: any, i: number) => (
+                                {structured.actionItems!.map((a, i) => (
                                     <li key={i} className="text-sm text-text bg-bg-elevated rounded-lg p-2">
                                         <span className="font-medium">{a.task}</span>
                                         {a.assignee && <span className="text-text-secondary ml-2">→ {a.assignee}</span>}

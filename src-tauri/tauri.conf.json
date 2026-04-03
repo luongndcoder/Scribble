@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Scribble",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "identifier": "com.scribble.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -25,6 +25,14 @@
       "csp": "default-src 'self'; connect-src 'self' http://localhost:8765 http://127.0.0.1:8765 ws://localhost:8765 ws://127.0.0.1:8765; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' blob:; img-src 'self' data: blob:"
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/luongndcoder/Scribble/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYwNkY1NjE4QTJEQjQ5QgpSV1NidEMyS1lmVUdEek5UK1BVMlBTUmpEM1lYeTZiNTg0aGxwdm5qSkdiR3hoK0ptKzNiUjQ3Two="
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
@@ -37,6 +45,9 @@
     ],
     "externalBin": [
       "binaries/scribble-sidecar"
+    ],
+    "resources": [
+      "binaries/sidecar-dist.tar.gz"
     ],
     "macOS": {
       "entitlements": "entitlements.plist",

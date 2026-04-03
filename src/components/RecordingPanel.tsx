@@ -2,6 +2,7 @@ import { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { resetDiarize, getSettings } from '../lib/api';
 import { fetchSidecar } from '../lib/sidecar';
+import type { SttSegment, SttTranscribeResponse } from '../types/stt';
 
 
 
@@ -198,21 +199,21 @@ export function RecordingPanel() {
         }, 80);
 
         // Store cleanup ref
-        (window as any).__vadInterval = vadInterval;
+        window.__vadInterval = vadInterval;
     };
 
     const queueChunk = async (form: FormData, startSec: number, endSec: number) => {
         try {
             const res = await fetchSidecar('/transcribe-diarize', { method: 'POST', body: form });
-            const data = await res.json();
-            const rawSegments = Array.isArray(data.segments) ? data.segments : [];
+            const data: SttTranscribeResponse = await res.json();
+            const rawSegments: SttSegment[] = Array.isArray(data.segments) ? data.segments : [];
             const normalizedSegments = rawSegments
-                .map((seg: any) => ({
+                .map((seg) => ({
                     text: String(seg?.text || '').trim(),
                     speakerId: seg?.speaker_id ?? 0,
                     speaker: seg?.speaker || 'Speaker 1',
                 }))
-                .filter((seg: any) => seg.text.length > 0);
+                .filter((seg) => seg.text.length > 0);
 
             if (normalizedSegments.length === 0) {
                 const fallbackText = String(data.text || '').trim();
@@ -229,7 +230,7 @@ export function RecordingPanel() {
             const safeEnd = Math.max(safeStart, endSec);
             const perSegment = (safeEnd - safeStart) / Math.max(1, normalizedSegments.length);
 
-            normalizedSegments.forEach((seg: any, idx: number) => {
+            normalizedSegments.forEach((seg, idx) => {
                 const segStart = safeStart + perSegment * idx;
                 const segEnd = idx === normalizedSegments.length - 1
                     ? safeEnd
@@ -261,7 +262,7 @@ export function RecordingPanel() {
         mediaRecorderRef.current?.stop();
         streamRef.current?.getTracks().forEach((t) => t.stop());
         cancelAnimationFrame(animFrameRef.current);
-        clearInterval((window as any).__vadInterval);
+        clearInterval(window.__vadInterval);
     }, [setRecording, setPaused]);
 
     const togglePause = useCallback(() => {

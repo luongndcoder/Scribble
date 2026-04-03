@@ -1,15 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { splitTextIntoSentences, splitTranslationForSentences } from '../lib/transcriptUtils';
-import { TranscriptPart, useAppStore } from '../stores/appStore';
-import { getMeeting, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile } from '../lib/api';
-import { fetchSidecar } from '../lib/sidecar';
-import { consumeSseResponse } from '../lib/sse';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import DOMPurify from 'dompurify';
+import { TranscriptPart, Meeting, useAppStore } from '../stores/appStore';
+import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile } from '../lib/api';
 import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
 
 const SPEAKER_COLORS = ['#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
-const abortControllers: Record<number, AbortController> = {};
-
 type LegacyMinutes = {
     title?: string;
     attendees?: unknown;
@@ -337,86 +333,117 @@ function markdownToHtml(markdown: string): string {
     return html.join('\n');
 }
 
+function htmlToMarkdown(html: string): string {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const lines: string[] = [];
+
+    const inlineText = (el: Element): string => {
+        let result = '';
+        el.childNodes.forEach((node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+                result += node.textContent || '';
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const tag = (node as Element).tagName.toLowerCase();
+                const inner = inlineText(node as Element);
+                if (tag === 'strong' || tag === 'b') result += `**${inner}**`;
+                else if (tag === 'em' || tag === 'i') result += `*${inner}*`;
+                else if (tag === 'code') result += `\`${inner}\``;
+                else if (tag === 'br') result += '\n';
+                else result += inner;
+            }
+        });
+        return result;
+    };
+
+    const processNode = (node: Element) => {
+        const tag = node.tagName.toLowerCase();
+        if (tag === 'h1') { lines.push(`# ${inlineText(node)}`); lines.push(''); }
+        else if (tag === 'h2') { lines.push(`## ${inlineText(node)}`); lines.push(''); }
+        else if (tag === 'h3') { lines.push(`### ${inlineText(node)}`); lines.push(''); }
+        else if (tag === 'p') {
+            const text = inlineText(node);
+            if (text.trim()) { lines.push(text); lines.push(''); }
+        }
+        else if (tag === 'blockquote') { lines.push(`> ${inlineText(node)}`); lines.push(''); }
+        else if (tag === 'ul') {
+            node.querySelectorAll(':scope > li').forEach((li) => {
+                lines.push(`- ${inlineText(li)}`);
+            });
+            lines.push('');
+        }
+        else if (tag === 'ol') {
+            let idx = 1;
+            node.querySelectorAll(':scope > li').forEach((li) => {
+                lines.push(`${idx++}. ${inlineText(li)}`);
+            });
+            lines.push('');
+        }
+        else if (tag === 'table') {
+            const thead = node.querySelector('thead');
+            const tbody = node.querySelector('tbody');
+            if (thead) {
+                const ths = Array.from(thead.querySelectorAll('th')).map((th) => inlineText(th));
+                lines.push(`| ${ths.join(' | ')} |`);
+                lines.push(`| ${ths.map(() => '---').join(' | ')} |`);
+            }
+            if (tbody) {
+                tbody.querySelectorAll('tr').forEach((tr) => {
+                    const tds = Array.from(tr.querySelectorAll('td')).map((td) => inlineText(td));
+                    lines.push(`| ${tds.join(' | ')} |`);
+                });
+            }
+            lines.push('');
+        }
+        else {
+            // Fallback: just get text
+            const text = inlineText(node);
+            if (text.trim()) { lines.push(text); lines.push(''); }
+        }
+    };
+
+    Array.from(doc.body.children).forEach(processNode);
+    // Clean up trailing empty lines
+    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function MeetingDetail() {
     const {
-        recording, paused, transcriptParts, translationEnabled,
+        recording, paused, transcriptParts,
         setCurrentView, lang, activeTab, setActiveTab,
-        currentMeetingId, draftId, setTranscriptParts, isTranscribing, interimText,
-        translationLang, interimSpeaker, interimSpeakerId, meetings, transientSummary,
-        summaryLoading,
+        currentMeetingId, draftId, setTranscriptParts, isTranscribing,
+        meetings, transientSummary,
+        summaryLoading, translationEnabled,
     } = useAppStore();
+
+    // Live translation: read via subscription + DOM ref (avoids re-render of entire list)
+    const liveTranslationRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        // Subscribe to interimTranslation changes and update DOM directly
+        const unsub = useAppStore.subscribe((state, prev) => {
+            if (state.interimTranslation !== prev.interimTranslation && liveTranslationRef.current) {
+                liveTranslationRef.current.textContent = state.interimTranslation ? `↪ ${state.interimTranslation}` : '';
+            }
+        });
+        return unsub;
+    }, []);
+
+    const wordCount = useMemo(() => {
+        return transcriptParts.reduce((acc, p) => acc + (p.text || '').trim().split(/\s+/).filter(Boolean).length, 0);
+    }, [transcriptParts]);
     const { showToast } = useToast();
     const viewingMeetingId = currentMeetingId || draftId;
 
     const transcriptRef = useRef<HTMLDivElement>(null);
-    const [meetingData, setMeetingData] = useState<any>(null);
-    const [interimTranslation, setInterimTranslation] = useState('');
-    const [editingIndex, setEditingIndex] = useState<number | null>(null);
-    const [editingText, setEditingText] = useState('');
+    const [meetingData, setMeetingData] = useState<Meeting | null>(null);
+    const [meetingLoading, setMeetingLoading] = useState(false);
     const [editingSpeakerId, setEditingSpeakerId] = useState<number | null>(null);
     const [editingSpeakerAnchorIdx, setEditingSpeakerAnchorIdx] = useState<number | null>(null);
     const [editingSpeakerName, setEditingSpeakerName] = useState('');
     const [downloadingAudio, setDownloadingAudio] = useState(false);
     const [exportPickerOpen, setExportPickerOpen] = useState(false);
     const [exportingMinutesFormat, setExportingMinutesFormat] = useState<'md' | 'docx' | null>(null);
-    const interimTranslateAbortRef = useRef<AbortController | null>(null);
-    const lastPartTranslateKeyRef = useRef('');
-    const lastInterimSentRef = useRef('');
-    const lastInterimReqAtRef = useRef(0);
-    const interimBusyRef = useRef(false);
-    const interimTranslationRef = useRef('');
-    const interimSourceTranslatedRef = useRef('');
-    const partSourceTranslatedRef = useRef<Record<number, string>>({});
-    const prevTranscriptLenRef = useRef(0);
-
-    const mergeStreamingTranslation = (previous: string, nextFull: string): string => {
-        if (!previous) return nextFull;
-        if (!nextFull) return previous;
-        if (nextFull.startsWith(previous)) return nextFull;
-        if (previous.startsWith(nextFull)) return previous;
-
-        // Best-effort overlap merge: keep read history and append only new tail.
-        const maxOverlap = Math.min(previous.length, nextFull.length);
-        for (let i = maxOverlap; i >= 8; i--) {
-            if (previous.slice(-i) === nextFull.slice(0, i)) {
-                return previous + nextFull.slice(i);
-            }
-        }
-
-        // If model rewrites heavily, avoid shrinking and forcing reread.
-        return nextFull.length >= previous.length ? nextFull : previous;
-    };
-
-    const joinTranslationTail = (base: string, tail: string): string => {
-        if (!base) return tail;
-        if (!tail) return base;
-        if (/^[\s,.;:!?)}\]]/.test(tail) || /[\s\n]$/.test(base)) return base + tail;
-        return `${base} ${tail}`;
-    };
-
-    const computeSourceDelta = (previousSource: string, nextSource: string): { mode: 'noop' | 'append' | 'rewrite'; text: string } => {
-        const prev = previousSource.trim();
-        const next = nextSource.trim();
-        if (!next) return { mode: 'noop', text: '' };
-        if (!prev) return { mode: 'rewrite', text: next };
-        if (prev === next) return { mode: 'noop', text: '' };
-        if (next.startsWith(prev)) {
-            const tail = next.slice(prev.length).trim();
-            return tail ? { mode: 'append', text: tail } : { mode: 'noop', text: '' };
-        }
-        if (prev.startsWith(next)) {
-            // ASR rollback/shrink: avoid jumping translation backwards.
-            return { mode: 'noop', text: '' };
-        }
-        const maxOverlap = Math.min(prev.length, next.length);
-        for (let i = maxOverlap; i >= 12; i--) {
-            if (prev.slice(-i) === next.slice(0, i)) {
-                const tail = next.slice(i).trim();
-                return tail ? { mode: 'append', text: tail } : { mode: 'noop', text: '' };
-            }
-        }
-        return { mode: 'rewrite', text: next };
-    };
+    const [editingMinutes, setEditingMinutes] = useState(false);
+    const minutesEditRef = useRef<HTMLDivElement>(null);
 
     const persistTranscriptParts = async (parts: TranscriptPart[]) => {
         const meetingId = currentMeetingId || draftId;
@@ -506,19 +533,21 @@ export function MeetingDetail() {
             showToast(lang === 'vi' ? 'Xuất transcript thất bại' : 'Export failed', 'error');
         }
     };
+
+    const copyTranscript = async () => {
+        if (transcriptParts.length === 0) return;
+        const lines = transcriptParts.map((p) => `${p.speaker}: ${p.text}`);
+        const text = lines.join('\n\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            showToast(lang === 'vi' ? 'Đã copy transcript' : 'Transcript copied!', 'success');
+        } catch {
+            showToast(lang === 'vi' ? 'Copy thất bại' : 'Copy failed', 'error');
+        }
+    };
     const applyTranscriptUpdate = async (nextParts: TranscriptPart[]) => {
         setTranscriptParts(nextParts);
         await persistTranscriptParts(nextParts);
-    };
-
-    const startEditTranscript = (idx: number) => {
-        setEditingIndex(idx);
-        setEditingText(transcriptParts[idx]?.text || '');
-    };
-
-    const cancelEditTranscript = () => {
-        setEditingIndex(null);
-        setEditingText('');
     };
 
     const startEditSpeaker = (speakerId: number, anchorIdx: number) => {
@@ -533,17 +562,6 @@ export function MeetingDetail() {
         setEditingSpeakerId(null);
         setEditingSpeakerAnchorIdx(null);
         setEditingSpeakerName('');
-    };
-
-    const saveEditTranscript = async (idx: number) => {
-        const text = editingText.trim();
-        if (!text) return;
-        const next = transcriptParts.map((p, i) =>
-            i === idx ? { ...p, text, translation: '' } : p
-        );
-        setEditingIndex(null);
-        setEditingText('');
-        await applyTranscriptUpdate(next);
     };
 
     const saveEditSpeaker = async () => {
@@ -570,7 +588,6 @@ export function MeetingDetail() {
         );
         if (!confirmed) return;
         const next = transcriptParts.filter((_, i) => i !== idx);
-        cancelEditTranscript();
         cancelEditSpeaker();
         await applyTranscriptUpdate(next);
     };
@@ -582,10 +599,7 @@ export function MeetingDetail() {
             lang
         );
         if (!confirmed) return;
-        cancelEditTranscript();
         cancelEditSpeaker();
-        setInterimTranslation('');
-        interimTranslationRef.current = '';
         await applyTranscriptUpdate([]);
         showToast(lang === 'vi' ? 'Đã xoá toàn bộ transcript' : 'Transcript cleared', 'info');
     };
@@ -605,10 +619,10 @@ export function MeetingDetail() {
             setMeetingData(null);
             setTranscriptParts([]);
             useAppStore.getState().setTransientSummary('');
-            cancelEditTranscript();
             cancelEditSpeaker();
         }
         prevLoadedMeetingRef.current = requestedMeetingId;
+        setMeetingLoading(true);
 
         (async () => {
             try {
@@ -625,16 +639,16 @@ export function MeetingDetail() {
                     try {
                         const parsed = JSON.parse(m.transcript);
                         if (Array.isArray(parsed)) {
-                            parts = parsed.map((p: any) => ({
-                                text: p.text || '',
-                                speaker: p.speaker || 'Speaker 1',
-                                speakerId: toSpeakerId(p.speakerId ?? p.speaker_id ?? 0),
-                                chunkId: p.chunkId || p.chunk_id || undefined,
-                                chunkIds: Array.isArray(p.chunkIds) ? p.chunkIds.filter((id: any) => typeof id === 'string') : undefined,
-                                startTime: toTimeString(p.startTime),
-                                endTime: toTimeString(p.endTime),
-                                timestamp: p.timestamp || '',
-                                translation: p.translation || '',
+                            parts = parsed.map((p: Record<string, unknown>) => ({
+                                text: (p.text as string) || '',
+                                speaker: (p.speaker as string) || 'Speaker 1',
+                                speakerId: toSpeakerId((p.speakerId ?? p.speaker_id ?? 0) as number),
+                                chunkId: (p.chunkId as string) || (p.chunk_id as string) || undefined,
+                                chunkIds: Array.isArray(p.chunkIds) ? (p.chunkIds as unknown[]).filter((id): id is string => typeof id === 'string') : undefined,
+                                startTime: toTimeString(p.startTime as string),
+                                endTime: toTimeString(p.endTime as string),
+                                timestamp: String(p.timestamp || ''),
+                                translation: String(p.translation || ''),
                             }));
                         }
                     } catch {
@@ -653,7 +667,7 @@ export function MeetingDetail() {
                 const normalized = collapseTranscriptSnapshots(parts);
                 setTranscriptParts(normalized.parts);
                 if (normalized.changed) {
-                    const duration = Number(m.audio_duration ?? m.audioDuration ?? 0);
+                    const duration = Number(m.audio_duration ?? 0);
                     void updateMeeting(requestedMeetingId, {
                         transcript: normalized.parts,
                         audioDuration: Number.isFinite(duration) ? duration : 0,
@@ -663,6 +677,8 @@ export function MeetingDetail() {
                 if (!cancelled) {
                     console.error('[detail] Failed to load meeting:', e);
                 }
+            } finally {
+                if (!cancelled) setMeetingLoading(false);
             }
         })();
 
@@ -674,174 +690,15 @@ export function MeetingDetail() {
     // Auto-scroll
     useEffect(() => {
         transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
-    }, [transcriptParts, interimText, interimTranslation, isTranscribing]);
+    }, [transcriptParts, isTranscribing]);
 
-    useEffect(() => {
-        if (prevTranscriptLenRef.current !== transcriptParts.length) {
-            partSourceTranslatedRef.current = {};
-            prevTranscriptLenRef.current = transcriptParts.length;
-        }
-        if (transcriptParts.length === 0) {
-            interimSourceTranslatedRef.current = '';
-            lastInterimSentRef.current = '';
-            lastInterimReqAtRef.current = 0;
-        }
-    }, [transcriptParts.length]);
 
-    useEffect(() => {
-        interimTranslateAbortRef.current?.abort();
-        interimTranslateAbortRef.current = null;
-        interimBusyRef.current = false;
-        interimTranslationRef.current = '';
-        interimSourceTranslatedRef.current = '';
-        lastInterimSentRef.current = '';
-        lastInterimReqAtRef.current = 0;
-        setInterimTranslation('');
-        partSourceTranslatedRef.current = {};
-    }, [translationLang, translationEnabled]);
-
-    // Translate latest part
-    const latestPart = transcriptParts[transcriptParts.length - 1];
-    useEffect(() => {
-        if (!translationEnabled || !latestPart?.text) return;
-        const idx = transcriptParts.length - 1;
-        const translateKey = `${idx}:${latestPart.speakerId}:${latestPart.text}:${translationLang}`;
-        if (lastPartTranslateKeyRef.current === translateKey) return;
-        lastPartTranslateKeyRef.current = translateKey;
-        translatePart(idx, latestPart);
-    }, [translationEnabled, translationLang, transcriptParts.length, latestPart?.text, latestPart?.speakerId]);
-
-    // Realtime interim translation (mainly for Nvidia streaming)
-    useEffect(() => {
-        if (!translationEnabled || !isTranscribing || !interimText.trim()) {
-            interimTranslateAbortRef.current?.abort();
-            interimTranslateAbortRef.current = null;
-            interimBusyRef.current = false;
-            setInterimTranslation('');
-            interimTranslationRef.current = '';
-            interimSourceTranslatedRef.current = '';
-            if (!isTranscribing) {
-                lastInterimSentRef.current = '';
-                lastInterimReqAtRef.current = 0;
-            }
-            return;
-        }
-
-        if (interimBusyRef.current) return;
-
-        const fullSource = interimText.trim();
-        const prevSource = interimSourceTranslatedRef.current;
-        const delta = computeSourceDelta(prevSource, fullSource);
-        if (delta.mode === 'noop') return;
-        const requestText = delta.text;
-        const appendMode = delta.mode === 'append';
-        const prevSent = lastInterimSentRef.current;
-        const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
-        const deltaLen = Math.max(0, requestText.length);
-        const deltaWords = Math.max(0, countWords(requestText));
-        const endsSentence = /[.!?…:;。！？]$/.test(fullSource);
-        const now = Date.now();
-        const minIntervalMs = appendMode ? (endsSentence ? 700 : 1200) : (endsSentence ? 1200 : 2800);
-        const minDeltaLen = appendMode ? (endsSentence ? 8 : 14) : (endsSentence ? 20 : 45);
-        const minDeltaWords = appendMode ? (endsSentence ? 2 : 3) : (endsSentence ? 4 : 9);
-        const minStartLen = appendMode ? 0 : (endsSentence ? 24 : 48);
-        const minStartWords = appendMode ? 0 : (endsSentence ? 6 : 10);
-
-        // Aggressive gate to reduce LLM calls while keeping "live enough" updates.
-        const intervalReady = now - lastInterimReqAtRef.current >= minIntervalMs;
-        const enoughDelta = deltaLen >= minDeltaLen || deltaWords >= minDeltaWords;
-        const firstRequestReady = !prevSent && requestText.length >= minStartLen && countWords(requestText) >= minStartWords;
-        const shouldTranslate = intervalReady && (firstRequestReady || enoughDelta || (endsSentence && deltaLen > 0));
-        if (!shouldTranslate) return;
-
-        const timeout = window.setTimeout(async () => {
-            if (interimBusyRef.current) return;
-            interimBusyRef.current = true;
-            const ac = new AbortController();
-            interimTranslateAbortRef.current = ac;
-            lastInterimReqAtRef.current = Date.now();
-            const baseAtRequest = interimTranslationRef.current;
-
-            try {
-                const res = await fetchSidecar('/translate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: requestText, targetLang: translationLang }),
-                    signal: ac.signal,
-                });
-                let translated = '';
-                await consumeSseResponse(res, {
-                    onToken: (token) => {
-                        translated += token;
-                        const merged = appendMode
-                            ? joinTranslationTail(baseAtRequest, translated)
-                            : mergeStreamingTranslation(baseAtRequest, translated);
-                        if (merged !== interimTranslationRef.current) {
-                            interimTranslationRef.current = merged;
-                            setInterimTranslation(merged);
-                        }
-                    },
-                    onErrorEvent: (message) => {
-                        console.warn('[detail] Interim translation SSE error:', message);
-                    },
-                });
-                if (translated.trim()) {
-                    lastInterimSentRef.current = fullSource;
-                    interimSourceTranslatedRef.current = fullSource;
-                }
-            } catch (err: any) {
-                if (err?.name !== 'AbortError') {
-                    console.error('[detail] Interim translation error:', err);
-                }
-            } finally {
-                interimBusyRef.current = false;
-            }
-        }, endsSentence ? 220 : 750);
-
-        return () => window.clearTimeout(timeout);
-    }, [translationEnabled, isTranscribing, interimText, translationLang]);
-
-    const translatePart = async (idx: number, part: any) => {
-        if (!part?.text) return;
-        if (abortControllers[idx]) abortControllers[idx].abort();
-        const ac = new AbortController(); abortControllers[idx] = ac;
-        try {
-            const currentSource = String(part.text || '').trim();
-            if (!currentSource) return;
-            const previousSource = partSourceTranslatedRef.current[idx] || '';
-            const delta = computeSourceDelta(previousSource, currentSource);
-            if (delta.mode === 'noop') return;
-
-            const appendMode = delta.mode === 'append';
-            const requestText = delta.text;
-            const baseTranslation = useAppStore.getState().transcriptParts[idx]?.translation || '';
-            const tl = useAppStore.getState().translationLang;
-            const res = await fetchSidecar('/translate', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: requestText, targetLang: tl }), signal: ac.signal,
-            });
-            const baseAtRequest = baseTranslation;
-            let translated = '';
-            await consumeSseResponse(res, {
-                onToken: (token) => {
-                    translated += token;
-                    const merged = appendMode
-                        ? joinTranslationTail(baseAtRequest, translated)
-                        : mergeStreamingTranslation(baseAtRequest, translated);
-                    useAppStore.getState().updateTranscriptTranslation(idx, merged);
-                },
-                onErrorEvent: (message) => {
-                    console.warn('[detail] Part translation SSE error:', message);
-                },
-            });
-            if (translated.trim()) {
-                partSourceTranslatedRef.current[idx] = currentSource;
-            }
-        } catch { }
-    };
+    // Translation is now handled inline by the backend (cabin-style).
+    // Each WebSocket message includes a 'translation' field when enabled.
+    // RecordingBar.tsx reads data.translation and updates transcriptParts directly.
 
     const fmtSec = (v: string) => { const n = parseFloat(v) || 0; return `${Math.floor(n / 60)}:${Math.floor(n % 60).toString().padStart(2, '0')}`; };
-    const interimSpeakerColor = SPEAKER_COLORS[interimSpeakerId % SPEAKER_COLORS.length];
+
     const liveSummary = viewingMeetingId
         ? meetings.find((m) => m.id === viewingMeetingId)?.summary
         : undefined;
@@ -851,7 +708,7 @@ export function MeetingDetail() {
         [summaryRaw, lang]
     );
     const minutesHtml = useMemo(
-        () => markdownToHtml(minutesMarkdown),
+        () => DOMPurify.sanitize(markdownToHtml(minutesMarkdown)),
         [minutesMarkdown]
     );
     const hasMinutes = minutesMarkdown.trim().length > 0;
@@ -867,6 +724,12 @@ export function MeetingDetail() {
                     <span>{lang === 'vi' ? 'Cuộc họp' : 'Meetings'}</span>
                 </button>
             </div>
+
+            {meetingLoading && !meetingData && (
+                <div style={{ textAlign: 'center', padding: '32px 0', opacity: 0.6 }}>
+                    <div className="summary-loading-spinner" />
+                </div>
+            )}
 
             {/* Sub-tabs */}
             <nav className="sub-tabs">
@@ -888,14 +751,26 @@ export function MeetingDetail() {
             {/* Recording Pane */}
             <div className="detail-pane recording-pane" style={{ display: activeTab === 'recording' ? 'flex' : 'none' }}>
                 <div className="pane-header">
-                    <h2 className="pane-title">{lang === 'vi' ? 'Phiên dịch trực tiếp' : 'Live Transcription'}</h2>
+                    <div className="pane-title-row">
+                        <h2 className="pane-title">{lang === 'vi' ? 'Phiên dịch trực tiếp' : 'Live Transcription'}</h2>
+                        {wordCount > 0 && (
+                            <span className="word-count-badge">{wordCount} {lang === 'vi' ? 'từ' : 'words'}</span>
+                        )}
+                    </div>
                     <div className="pane-actions">
+                        {transcriptParts.length > 0 && (
+                            <button className="action-btn icon-only" onClick={copyTranscript} title={lang === 'vi' ? 'Copy transcript' : 'Copy transcript'}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+                                </svg>
+                            </button>
+                        )}
                         {transcriptParts.length > 0 && (
                             <button className="action-btn" onClick={exportTranscript}>
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
                                 </svg>
-                                <span>{lang === 'vi' ? 'Xuất transcript' : 'Export transcript'}</span>
+                                <span>{lang === 'vi' ? 'Xuất transcript' : 'Export'}</span>
                             </button>
                         )}
                         {(currentMeetingId || draftId) && (
@@ -929,7 +804,7 @@ export function MeetingDetail() {
                         <div className="welcome-sub">{lang === 'vi' ? 'Nhấn nút Record để bắt đầu phiên dịch trực tiếp' : 'Press Record to start live transcription'}</div>
                     </div>
                 ) : transcriptParts.length === 0 && recording ? (
-                    <div className={`listening-state ${isTranscribing && interimText ? 'has-live' : ''}`}>
+                    <div className="listening-state">
                         <div className="listening-icon">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
@@ -938,41 +813,15 @@ export function MeetingDetail() {
                         </div>
                         <div className="listening-title">{paused ? (lang === 'vi' ? 'Tạm dừng ghi âm' : 'Recording paused') : (lang === 'vi' ? 'Đang lắng nghe...' : 'Listening for speech...')}</div>
                         <div className="listening-sub">{paused ? (lang === 'vi' ? 'Nhấn tiếp tục để ghi âm' : 'Click resume to continue') : (lang === 'vi' ? 'Hãy nói để xem phiên dịch trực tiếp' : 'Speak to see live transcription')}</div>
-                        {isTranscribing && interimText && (
-                            <div className="listening-live-preview">
-                                <div className="interim-bubble" style={{ marginTop: 12, maxWidth: 520 }}>
-                                    <span className="speaker-badge" style={{ '--speaker-color': interimSpeakerColor } as React.CSSProperties}>
-                                        {interimSpeaker}
-                                    </span>
-                                    <span className="interim-dot" />
-                                    <span className="interim-text">{interimText}</span>
-                                </div>
-                                {translationEnabled && interimTranslation && (
-                                    <div className="transcript-translation streaming" style={{ maxWidth: 520 }}>
-                                        {interimTranslation}
-                                    </div>
-                                )}
-                            </div>
-                        )}
                     </div>
                 ) : (
-                    <div className="transcript-list" ref={transcriptRef}>
+                    <div className={`transcript-list ${translationEnabled ? 'with-translation' : ''}`} ref={transcriptRef}>
                         {transcriptParts.map((part, i) => {
                             const speakerColor = SPEAKER_COLORS[part.speakerId % SPEAKER_COLORS.length];
+                            const isLive = i === transcriptParts.length - 1 && recording;
                             return (
-                                <div className={`transcript-item ${i === transcriptParts.length - 1 && recording ? 'live' : ''}`} key={i}>
+                                <div className={`transcript-item ${isLive ? 'live' : ''}`} key={i}>
                                     <div className="transcript-actions">
-                                        <button
-                                            className="transcript-action-btn"
-                                            onClick={() => startEditTranscript(i)}
-                                            title={lang === 'vi' ? 'Sửa transcript' : 'Edit transcript'}
-                                            aria-label={lang === 'vi' ? 'Sửa transcript' : 'Edit transcript'}
-                                        >
-                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M12 20h9" />
-                                                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                                            </svg>
-                                        </button>
                                         <button
                                             className="transcript-action-btn"
                                             onClick={() => startEditSpeaker(part.speakerId, i)}
@@ -1004,14 +853,13 @@ export function MeetingDetail() {
                                                     className="speaker-edit-input"
                                                     value={editingSpeakerName}
                                                     onChange={(e) => setEditingSpeakerName(e.target.value)}
+                                                    onBlur={() => void saveEditSpeaker()}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Escape') { e.preventDefault(); cancelEditSpeaker(); }
+                                                        if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+                                                    }}
                                                     autoFocus
                                                 />
-                                                <button className="speaker-edit-btn" onClick={cancelEditSpeaker}>
-                                                    {lang === 'vi' ? 'Hủy' : 'Cancel'}
-                                                </button>
-                                                <button className="speaker-edit-btn primary" onClick={saveEditSpeaker} disabled={!editingSpeakerName.trim()}>
-                                                    {lang === 'vi' ? 'Lưu' : 'Save'}
-                                                </button>
                                             </div>
                                         ) : (
                                             <span className="speaker-badge" style={{ '--speaker-color': speakerColor } as React.CSSProperties}>
@@ -1020,46 +868,22 @@ export function MeetingDetail() {
                                         )}
                                         <span style={{ marginLeft: 8 }}>{fmtSec(part.startTime)} – {fmtSec(part.endTime)}</span>
                                     </div>
-                                    {editingIndex === i ? (
-                                        <div className="transcript-edit-wrap">
-                                            <textarea
-                                                className="transcript-edit-input"
-                                                value={editingText}
-                                                onChange={(e) => setEditingText(e.target.value)}
-                                                autoFocus
-                                                rows={3}
-                                            />
-                                            <div className="transcript-edit-actions">
-                                                <button className="action-btn" onClick={cancelEditTranscript}>
-                                                    {lang === 'vi' ? 'Hủy' : 'Cancel'}
-                                                </button>
-                                                <button className="action-btn primary" onClick={() => saveEditTranscript(i)} disabled={!editingText.trim()}>
-                                                    {lang === 'vi' ? 'Lưu' : 'Save'}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <TranscriptSentences text={part.text} translation={part.translation || ''} />
-                                    )}
+                                    <TranscriptSentences
+                                        text={part.text}
+                                        translation={part.translation}
+                                        translationEnabled={translationEnabled}
+                                        isLive={isLive}
+                                        liveTranslationRef={liveTranslationRef}
+                                        onSave={(newText) => {
+                                            const next = transcriptParts.map((p, j) =>
+                                                j === i ? { ...p, text: newText, translation: '' } : p
+                                            );
+                                            void applyTranscriptUpdate(next);
+                                        }}
+                                    />
                                 </div>
                             );
                         })}
-                        {isTranscribing && interimText && (
-                            <>
-                                <div className="interim-bubble">
-                                    <span className="speaker-badge" style={{ '--speaker-color': interimSpeakerColor } as React.CSSProperties}>
-                                        {interimSpeaker}
-                                    </span>
-                                    <span className="interim-dot" />
-                                    <span className="interim-text">{interimText}</span>
-                                </div>
-                                {translationEnabled && interimTranslation && (
-                                    <div className="transcript-translation streaming">
-                                        {interimTranslation}
-                                    </div>
-                                )}
-                            </>
-                        )}
                     </div>
                 )}
             </div>
@@ -1069,14 +893,52 @@ export function MeetingDetail() {
                 <div className="pane-header">
                     <h2 className="pane-title">{lang === 'vi' ? 'Biên bản cuộc họp' : 'Meeting Minutes'}</h2>
                     <div className="pane-actions">
-                        {hasMinutes && (
+                        {hasMinutes && !editingMinutes && (
+                            <button className="action-btn" onClick={() => {
+                                setEditingMinutes(true);
+                            }}>
+                                {lang === 'vi' ? 'Chỉnh sửa' : 'Edit'}
+                            </button>
+                        )}
+                        {editingMinutes && (
+                            <>
+                                <button className="action-btn" onClick={() => setEditingMinutes(false)}>
+                                    {lang === 'vi' ? 'Huỷ' : 'Cancel'}
+                                </button>
+                                <button className="action-btn primary" onClick={async () => {
+                                    if (!viewingMeetingId || !minutesEditRef.current) return;
+                                    const md = htmlToMarkdown(minutesEditRef.current.innerHTML);
+                                    await updateMeeting(viewingMeetingId as number, { summary: md });
+                                    // Refresh meeting data
+                                    const updated = await getMeeting(viewingMeetingId);
+                                    setMeetingData(updated);
+                                    // Also update meetings list
+                                    const list = await getMeetings();
+                                    if (list) useAppStore.getState().setMeetings(list);
+                                    setEditingMinutes(false);
+                                    showToast(lang === 'vi' ? 'Đã lưu biên bản' : 'Minutes saved', 'success');
+                                }}>
+                                    {lang === 'vi' ? 'Lưu' : 'Save'}
+                                </button>
+                            </>
+                        )}
+                        {hasMinutes && !editingMinutes && (
                             <button className="action-btn" onClick={() => setExportPickerOpen(true)}>
                                 {lang === 'vi' ? 'Xuất biên bản' : 'Export minutes'}
                             </button>
                         )}
                     </div>
                 </div>
-                {hasMinutes ? (
+                {editingMinutes ? (
+                    <div
+                        ref={minutesEditRef}
+                        className="minutes-body minutes-editable"
+                        contentEditable
+                        suppressContentEditableWarning
+                        dangerouslySetInnerHTML={{ __html: minutesHtml }}
+                        style={{ padding: '16px' }}
+                    />
+                ) : hasMinutes ? (
                     <div
                         className="minutes-body"
                         style={{ padding: '16px' }}
@@ -1128,34 +990,110 @@ export function MeetingDetail() {
     );
 }
 
-function TranscriptSentences({ text, translation }: { text: string; translation: string }) {
-    const sentences = useMemo(() => splitTextIntoSentences(text), [text]);
-    const translations = useMemo(
-        () => splitTranslationForSentences(sentences, translation),
-        [sentences, translation]
-    );
+const TranscriptSentences = memo(function TranscriptSentences({
+    text,
+    translation,
+    translationEnabled,
+    isLive,
+    liveTranslationRef,
+    onSave
+}: {
+    text: string;
+    translation?: string;
+    translationEnabled?: boolean;
+    isLive?: boolean;
+    liveTranslationRef?: React.RefObject<HTMLDivElement | null>;
+    onSave?: (newText: string) => void;
+}) {
+    const [editMode, setEditMode] = useState(false);
+    const [editVal, setEditVal] = useState('');
 
-    if (sentences.length <= 1) {
-        return (
-            <>
-                <div className="transcript-text">{text}</div>
-                {translation && (
-                    <div className="transcript-translation">{translation}</div>
-                )}
-            </>
-        );
-    }
+    const handleSave = () => {
+        const trimmed = editVal.trim();
+        if (onSave && trimmed !== text) {
+            onSave(trimmed);
+        }
+        setEditMode(false);
+        setEditVal('');
+    };
+
+    const handleDelete = () => {
+        if (onSave) onSave('');
+    };
+
+    const deleteBtn = onSave ? (
+        <button
+            className="sentence-delete-btn"
+            onClick={(e) => { e.stopPropagation(); handleDelete(); }}
+            title="Xoá đoạn này"
+            aria-label="Delete part"
+        >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+            </svg>
+        </button>
+    ) : null;
 
     return (
         <div className="transcript-sentences">
-            {sentences.map((sentence, si) => (
-                <div key={si} className="sentence-group">
-                    <div className="transcript-text">{sentence}</div>
-                    {translations[si] && (
-                        <div className="sentence-translation">↪ {translations[si]}</div>
+            <div className="sentence-group">
+                <div className={translationEnabled ? "transcript-columns" : ""}>
+                    <div className={translationEnabled ? "transcript-col-text" : ""}>
+                        {editMode ? (
+                            <textarea
+                                className="sentence-edit-input"
+                                value={editVal}
+                                onChange={(e) => setEditVal(e.target.value)}
+                                onBlur={handleSave}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Escape') { e.preventDefault(); setEditMode(false); setEditVal(''); }
+                                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); }
+                                }}
+                                autoFocus
+                                rows={Math.max(1, Math.min(10, Math.ceil(editVal.length / 60)))}
+                                style={{ width: '100%', resize: 'vertical', minHeight: '32px' }}
+                            />
+                        ) : (
+                            <div className="sentence-row">
+                                <div 
+                                    className="transcript-text" 
+                                    onClick={() => {
+                                        if (!onSave) return;
+                                        setEditMode(true);
+                                        setEditVal(text);
+                                    }} 
+                                    style={onSave ? { cursor: 'text', flex: 1 } : undefined}
+                                >
+                                    {text}
+                                </div>
+                                {deleteBtn}
+                            </div>
+                        )}
+                    </div>
+                    {translationEnabled && (
+                        <div className="transcript-col-translation">
+                            {translation && <div className="translation-text">{translation}</div>}
+                            {isLive && (
+                                <div
+                                    ref={(el) => {
+                                        if (liveTranslationRef) liveTranslationRef.current = el;
+                                        if (el) {
+                                            const currentLive = useAppStore.getState().interimTranslation;
+                                            el.textContent = currentLive || '';
+                                        }
+                                    }}
+                                    className="translation-text"
+                                />
+                            )}
+                        </div>
                     )}
                 </div>
-            ))}
+            </div>
         </div>
     );
-}
+}, (prev, next) =>
+    prev.text === next.text &&
+    prev.translation === next.translation &&
+    prev.translationEnabled === next.translationEnabled &&
+    prev.isLive === next.isLive
+);

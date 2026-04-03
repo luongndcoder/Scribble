@@ -8,13 +8,16 @@ import threading
 import time
 
 import numpy as np
+from logger import get_logger
+
+_log = get_logger(__name__)
 
 # ── Tunable parameters (configurable via env vars) ────────────────────────────
-MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.62"))
-STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.75"))
-MAX_SPEAKERS           = int(os.getenv("DIARIZE_MAX_SPEAKERS",             "8"))
+MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.68"))
+STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.78"))
+MAX_SPEAKERS           = int(os.getenv("DIARIZE_MAX_SPEAKERS",             "4"))
 SWITCH_CONFIRM_HITS    = int(os.getenv("DIARIZE_SWITCH_CONFIRM_HITS",      "2"))
-NEW_SPEAKER_CONFIRM_HITS = int(os.getenv("DIARIZE_NEW_SPEAKER_CONFIRM_HITS", "2"))
+NEW_SPEAKER_CONFIRM_HITS = int(os.getenv("DIARIZE_NEW_SPEAKER_CONFIRM_HITS", "3"))
 CROSS_GENDER_PENALTY   = float(os.getenv("DIARIZE_CROSS_GENDER_PENALTY",   "0.06"))
 MERGE_SIM_THRESHOLD    = float(os.getenv("DIARIZE_MERGE_SIM_THRESHOLD",    "0.94"))
 EMA_UPDATE_MIN_SIM     = float(os.getenv("DIARIZE_EMA_UPDATE_MIN_SIM",     "0.50"))
@@ -33,11 +36,11 @@ CROSS_GENDER_EXTRA_THRESHOLD        = 0.07
 CROSS_GENDER_STRONG_MATCH_THRESHOLD = 0.85
 SOFT_CROSS_GENDER_FACTOR            = 0.003
 # Sticky / hysteresis
-WEAK_MATCH_MARGIN                   = 0.04
+WEAK_MATCH_MARGIN                   = 0.06
 STICKY_RECENT_SEC                   = 5.0
 STICKY_SIM_MARGIN                   = 0.04
 LOW_PITCH_STICKY_BONUS              = 0.00
-STABLE_LAST_SPEAKER_BONUS           = 0.06
+STABLE_LAST_SPEAKER_BONUS           = 0.04
 # Switch confirmation
 SWITCH_STRONG_SIM                   = 0.75
 SWITCH_STRONG_GAP                   = 0.08
@@ -47,8 +50,8 @@ INSTANT_SWITCH_GAP                  = 0.15
 NEW_SPEAKER_MIN_SECONDS             = 1.5
 SAME_ZONE_WEAK_PITCH_DIFF_FEMALE    = 40.0
 SAME_ZONE_WEAK_PITCH_DIFF_MALE      = 90.0
-NEW_SPEAKER_SELF_SIM                = 0.65
-NEW_SPEAKER_CONFIRM_WINDOW_SEC      = 8.0
+NEW_SPEAKER_SELF_SIM                = 0.70
+NEW_SPEAKER_CONFIRM_WINDOW_SEC      = 20.0  # streaming chunks can be 10-15s apart
 # Mouthprint
 MOUTHPRINT_MIN_FRAMES               = 6
 MOUTHPRINT_CLOSE_DIST               = 0.30
@@ -100,6 +103,7 @@ class SpeakerDiarizer:
         self._pending_new_hits = 0
         self._pending_new_time = 0.0
         self._pending_new_pitch_mean = None
+        self.max_speakers = MAX_SPEAKERS
         self._pending_new_pitch_count = 0
         self._lock = threading.RLock()
         self._source = "web"
@@ -128,24 +132,35 @@ class SpeakerDiarizer:
     def _init_model(self):
         if self._model_loaded:
             return
-        self._model_loaded = True
         try:
             import onnxruntime as ort
-            # Find ONNX model path
-            model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
-            # Support PyInstaller frozen path
-            if getattr(os.sys, 'frozen', False):
-                # _MEIPASS is the correct path for bundled data in onefile mode
-                meipass = getattr(os.sys, '_MEIPASS', None)
-                if meipass:
-                    model_dir = os.path.join(meipass, "models")
-                if not meipass or not os.path.isdir(model_dir):
-                    model_dir = os.path.join(os.path.dirname(os.sys.executable), "models")
-                if not os.path.isdir(model_dir):
-                    model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
-            onnx_path = os.path.join(model_dir, "voxceleb_CAM++.onnx")
-            if not os.path.exists(onnx_path):
-                print(f"[diarize] ONNX model not found at {onnx_path}")
+            frozen = getattr(os.sys, 'frozen', False)
+            meipass = getattr(os.sys, '_MEIPASS', None)
+            exe_dir = os.path.dirname(os.sys.executable) if frozen else None
+            file_dir = os.path.dirname(os.path.abspath(__file__))
+
+            _log.info("[diarize] frozen=%s, _MEIPASS=%s, exe_dir=%s, file_dir=%s", frozen, meipass, exe_dir, file_dir)
+
+            # Build candidate paths in priority order
+            candidates = []
+            if frozen and meipass:
+                candidates.append(os.path.join(meipass, "models"))
+            if frozen and exe_dir:
+                candidates.append(os.path.join(exe_dir, "models"))
+                # macOS .app: exe is in Contents/MacOS/, Resources might have models
+                candidates.append(os.path.join(exe_dir, "..", "Resources", "models"))
+            candidates.append(os.path.join(file_dir, "models"))
+
+            onnx_path = None
+            for d in candidates:
+                p = os.path.join(d, "voxceleb_CAM++.onnx")
+                exists = os.path.exists(p)
+                _log.info("[diarize] checking: %s -> %s", p, 'FOUND' if exists else 'not found')
+                if exists and onnx_path is None:
+                    onnx_path = p
+
+            if not onnx_path:
+                _log.warning("[diarize] ONNX model not found in any candidate path")
                 self._session = None
                 return
             so = ort.SessionOptions()
@@ -153,14 +168,16 @@ class SpeakerDiarizer:
             so.intra_op_num_threads = 2
             so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             self._session = ort.InferenceSession(onnx_path, sess_options=so)
-            print(f"[diarize] ONNX model loaded: {onnx_path}")
+            self._model_loaded = True
+            _log.info("[diarize] ONNX model loaded: %s", onnx_path)
             # Clear profiles if dimension mismatch
             if self._profiles and len(self._profiles[0]["embedding"]) != 512:
-                print(f"[diarize] Clearing profiles (dim mismatch)")
+                _log.info(f"[diarize] Clearing profiles (dim mismatch)")
                 self._profiles = []
                 self._next_id = 0
         except Exception as e:
-            print(f"[diarize] Model load failed: {e}")
+            self._model_loaded = True  # prevent retry loop, use pitch fallback
+            _log.error("[diarize] Model load failed: %s", e)
             self._session = None
 
 
@@ -196,10 +213,10 @@ class SpeakerDiarizer:
             frames[i, :end - start] = samples[start:end]
         # Apply window
         frames *= window
-        # FFT → power spectrum
+        # FFT -> power spectrum
         fft_out = np.fft.rfft(frames, n=n_fft)
         power = np.abs(fft_out) ** 2
-        # Mel filterbank → log
+        # Mel filterbank -> log
         mel_spec = np.dot(power, self._mel_basis.T)
         mel_spec = np.maximum(mel_spec, 1e-10)
         log_mel = np.log(mel_spec)
@@ -249,6 +266,40 @@ class SpeakerDiarizer:
             self._pending_new_pitch_mean = None
             self._pending_new_pitch_count = 0
             self._source = "web"
+
+    def set_max_speakers(self, n: int):
+        """Set max number of speakers (clamped 2-12)."""
+        self.max_speakers = max(2, min(n, 12))
+
+    def identify_speaker_from_samples(
+        self, samples: np.ndarray, sr: int = 16000, update_profiles: bool = True
+    ) -> dict:
+        """Identify speaker directly from numpy samples — no file I/O.
+
+        Args:
+            samples: Audio samples as float32 [-1,1] or int16.
+            sr: Sample rate.
+            update_profiles: Whether to update speaker profiles.
+        """
+        with self._lock:
+            self._init_model()
+
+        # Ensure float32 in [-1, 1]
+        if samples.dtype == np.int16:
+            samples = samples.astype(np.float32) / 32768.0
+        elif samples.dtype != np.float32:
+            samples = samples.astype(np.float32)
+
+        # Resample to 16kHz if needed
+        if sr != 16000:
+            from scipy.signal import resample as scipy_resample
+            samples = scipy_resample(samples, int(len(samples) * 16000 / sr)).astype(np.float32)
+
+        with self._lock:
+            if self._session:
+                return self._identify_campplus(wav_path=None, samples=samples, update_profiles=update_profiles)
+            else:
+                return self._identify_pitch_from_samples(samples, update_profiles=update_profiles)
 
     def _clear_pending_switch(self):
         self._pending_switch_id = None
@@ -378,7 +429,7 @@ class SpeakerDiarizer:
                 wf.setframerate(16000)
                 wf.writeframes(pcm.tobytes())
         except Exception as e:
-            print(f"[diarize] audio convert exception: {e}")
+            _log.error("[diarize] audio convert exception: %s", e)
             return {"speaker": "Speaker 1", "speaker_id": 0}
         try:
             with self._lock:
@@ -392,11 +443,13 @@ class SpeakerDiarizer:
             except Exception:
                 pass
 
-    def _identify_campplus(self, wav_path: str, samples: np.ndarray = None,
+    def _identify_campplus(self, wav_path: str = None, samples: np.ndarray = None,
                            update_profiles: bool = True) -> dict:
         try:
             # Load samples if not provided
             if samples is None:
+                if wav_path is None:
+                    return {"speaker": "Speaker 1", "speaker_id": 0}
                 samples = self._load_wav_samples(wav_path)
             # Extract fbank features and run ONNX inference
             fbank = self._compute_fbank(samples, sr=16000)
@@ -414,7 +467,6 @@ class SpeakerDiarizer:
                     out["is_new"] = True
                 return out
 
-            samples = self._load_wav_samples(wav_path)
             duration_sec = len(samples) / 16000.0 if len(samples) > 0 else 0.0
             pitch_stats = self._extract_pitch_stats(samples, 16000)
             pitch_mean  = pitch_stats["mean"]  if pitch_stats else None
@@ -434,7 +486,7 @@ class SpeakerDiarizer:
                     "mouth_vec": mouth_vec, "mouth_count": mouth_count,
                     "created_at": time.time(),
                 })
-                print(f"[diarize] → Speaker {sid + 1} (first speaker)")
+                _log.info(f"[diarize] -> Speaker {sid + 1} (first speaker)")
                 self._last_speaker_id = sid
                 self._last_speaker_time = time.time()
                 self._clear_pending_switch(); self._clear_pending_new()
@@ -516,6 +568,7 @@ class SpeakerDiarizer:
             now          = time.time()
 
             # ── Adaptive threshold ─────────────────────────────────────────────
+            MIN_EFFECTIVE_THRESHOLD = 0.52
             adaptive_threshold = MATCH_THRESHOLD
             if best_count >= 6:
                 adaptive_threshold -= 0.02
@@ -524,12 +577,7 @@ class SpeakerDiarizer:
                 adaptive_threshold -= 0.06
             if (best_profile is not None and self._last_speaker_id == best_profile["id"]
                     and (now - self._last_speaker_time) <= STICKY_RECENT_SEC):
-                bonus = STABLE_LAST_SPEAKER_BONUS
-                # Extra sticky for very new profiles to let them converge
-                if best_count < 4:
-                    bonus += 0.03
-                adaptive_threshold -= bonus
-
+                adaptive_threshold -= STABLE_LAST_SPEAKER_BONUS
 
             best_cross_gender = (
                     best_profile is not None and pitch_mean is not None
@@ -541,13 +589,14 @@ class SpeakerDiarizer:
             if (best_profile is not None and pitch_mean is not None
                     and best_profile.get("pitch_mean") is not None
                     and pitch_mean < FEMALE_F0_HZ and best_profile.get("pitch_mean") < FEMALE_F0_HZ):
-                male_reduction = 0.06  # aggressive — strongly prefer matching existing male profile
-                if pitch_mean <= 130.0 and best_profile.get("pitch_mean", 999) <= 130.0:
-                    male_reduction += 0.02  # extra for bass voices ≤130 Hz
+                male_reduction = 0.04
                 adaptive_threshold -= male_reduction
 
             if best_cross_gender:
                 adaptive_threshold += CROSS_GENDER_EXTRA_THRESHOLD
+
+            # Floor: prevent threshold from dropping too low
+            adaptive_threshold = max(adaptive_threshold, MIN_EFFECTIVE_THRESHOLD)
 
             # ── Split-signal flags ─────────────────────────────────────────────
             best_same_zone_far_pitch = False; best_mouth_dist = None; best_same_zone_far_mouth = False
@@ -574,11 +623,12 @@ class SpeakerDiarizer:
             similarity_gap = best_sim - second_best_sim if second_best_sim >= 0 else 1.0
             hard_cross_gender_block = best_cross_gender and best_sim < CROSS_GENDER_STRONG_MATCH_THRESHOLD
 
-            print(
-                f"[diarize] sims=[{', '.join(sim_debug)}] best={best_sim:.3f} second={second_best_sim:.3f} "
-                f"gap={similarity_gap:.3f} threshold={adaptive_threshold:.3f}"
-                f"{f' md={best_mouth_dist:.2f}' if best_mouth_dist is not None else ''}"
-                f"{' [split]' if best_split_signal else ''}{' [cg-block]' if hard_cross_gender_block else ''}"
+            _log.info(
+                "[diarize] sims=[%s] best=%.3f second=%.3f gap=%.3f threshold=%.3f%s%s%s",
+                ', '.join(sim_debug), best_sim, second_best_sim, similarity_gap, adaptive_threshold,
+                f' md={best_mouth_dist:.2f}' if best_mouth_dist is not None else '',
+                ' [split]' if best_split_signal else '',
+                ' [cg-block]' if hard_cross_gender_block else '',
             )
 
             # Count how many split sub-signals fired for proportional blocking
@@ -625,10 +675,10 @@ class SpeakerDiarizer:
             if is_confident_match and best_profile is not None:
                 if (not best_split_signal) and not self._allow_switch(best_profile["id"], best_sim, similarity_gap, now):
                     sid = self._last_speaker_id if self._last_speaker_id is not None else best_profile["id"]
-                    print(f"[diarize] hold Speaker {sid+1} (candidate={best_profile['id']+1}, sim={best_sim:.3f})")
+                    _log.info(f"[diarize] hold Speaker {sid+1} (candidate={best_profile['id']+1}, sim={best_sim:.3f})")
                     return _result(sid)
                 _ema_update(best_profile, 0.10, 0.12, 0.10)
-                print(f"[diarize] → Speaker {best_profile['id']+1} (sim={best_sim:.3f}, gap={similarity_gap:.3f}, f0={pitch_mean or 0:.0f})")
+                _log.info(f"[diarize] -> Speaker {best_profile['id']+1} (sim={best_sim:.3f}, gap={similarity_gap:.3f}, f0={pitch_mean or 0:.0f})")
                 self._last_speaker_id = best_profile["id"]; self._last_speaker_time = now
                 self._clear_pending_switch(); self._clear_pending_new()
                 return _result(best_profile["id"])
@@ -665,7 +715,7 @@ class SpeakerDiarizer:
                         and last_speaker_sim >= sticky_threshold
                         and (best_sim - last_speaker_sim) <= eff_margin):
                     _ema_update(last_profile, 0.08, 0.10, 0.08)
-                    print(f"[diarize] → Speaker {last_profile['id']+1} (sticky sim={last_speaker_sim:.3f}, best={best_sim:.3f})")
+                    _log.info(f"[diarize] -> Speaker {last_profile['id']+1} (sticky sim={last_speaker_sim:.3f}, best={best_sim:.3f})")
                     self._last_speaker_time = now
                     self._clear_pending_switch(); self._clear_pending_new()
                     return _result(last_profile["id"])
@@ -675,15 +725,15 @@ class SpeakerDiarizer:
                     and not best_same_zone_far_pitch and not best_same_zone_far_mouth and not best_split_signal
                     and best_sim >= (adaptive_threshold - WEAK_MATCH_MARGIN)):
                 _ema_update(best_profile, 0.08, 0.10, 0.08)
-                print(f"[diarize] → Speaker {best_profile['id']+1} (weak sim={best_sim:.3f})")
+                _log.info(f"[diarize] -> Speaker {best_profile['id']+1} (weak sim={best_sim:.3f})")
                 self._last_speaker_id = best_profile["id"]; self._last_speaker_time = now
                 self._clear_pending_switch(); self._clear_pending_new()
                 return _result(best_profile["id"])
 
             # ── Max speakers cap ───────────────────────────────────────────────
-            if len(self._profiles) >= MAX_SPEAKERS and best_profile is not None:
+            if len(self._profiles) >= self.max_speakers and best_profile is not None:
                 _ema_update(best_profile, 0.08, 0.08, 0.06)
-                print(f"[diarize] → Speaker {best_profile['id']+1} (max-cap, sim={best_sim:.3f})")
+                _log.info(f"[diarize] -> Speaker {best_profile['id']+1} (max-cap, sim={best_sim:.3f})")
                 self._last_speaker_id = best_profile["id"]; self._last_speaker_time = now
                 self._clear_pending_switch(); self._clear_pending_new()
                 return _result(best_profile["id"])
@@ -691,7 +741,7 @@ class SpeakerDiarizer:
             # ── Short chunk guard ──────────────────────────────────────────────
             if (duration_sec < NEW_SPEAKER_MIN_SECONDS and self._last_speaker_id is not None
                     and (now - self._last_speaker_time) <= STICKY_RECENT_SEC):
-                print(f"[diarize] short chunk {duration_sec:.2f}s → keep Speaker {self._last_speaker_id+1}")
+                _log.info(f"[diarize] short chunk {duration_sec:.2f}s -> keep Speaker {self._last_speaker_id+1}")
                 return _result(self._last_speaker_id)
 
             # ── New speaker debounce ───────────────────────────────────────────
@@ -707,31 +757,40 @@ class SpeakerDiarizer:
                 if best_sim < (adaptive_threshold - 0.12) and similarity_gap >= max(AMBIGUOUS_GAP, 0.09):
                     required_new_hits = 1
 
-                if (self._pending_new_emb is None
-                        or (now - self._pending_new_time) > NEW_SPEAKER_CONFIRM_WINDOW_SEC):
-                    self._pending_new_emb = emb_np.copy()
-                    self._pending_new_hits = 1; self._pending_new_time = now
-                    self._pending_new_pitch_mean = pitch_mean; self._pending_new_pitch_count = pitch_count
-                    print(f"[diarize] pending NEW speaker 1/{required_new_hits}")
-                    return _result(self._last_speaker_id)
+                # Instant new speaker: cross-gender block with very low similarity → no debounce
+                instant_new = hard_cross_gender_block and best_sim < (adaptive_threshold - 0.08)
 
-                pending_sim = self._cosine_sim(emb_np, self._pending_new_emb)
-                pending_thr = NEW_SPEAKER_SELF_SIM - (0.04 if best_same_zone_far_mouth else 0.0)
-                if pending_sim >= pending_thr:
-                    self._pending_new_hits += 1; self._pending_new_time = now
-                    self._pending_new_emb = self._pending_new_emb * 0.85 + emb_np * 0.15
-                    if pitch_mean is not None and pitch_count >= MIN_PITCH_FRAMES:
-                        pf0 = self._pending_new_pitch_mean if self._pending_new_pitch_mean is not None else pitch_mean
-                        self._pending_new_pitch_mean = pf0 * 0.85 + pitch_mean * 0.15
-                        self._pending_new_pitch_count = int(min(1000, max(self._pending_new_pitch_count, 0) + pitch_count))
+                if not instant_new:
+                    # Normal debounce flow
+                    if (self._pending_new_emb is None
+                            or (now - self._pending_new_time) > NEW_SPEAKER_CONFIRM_WINDOW_SEC):
+                        self._pending_new_emb = emb_np.copy()
+                        self._pending_new_hits = 1; self._pending_new_time = now
+                        self._pending_new_pitch_mean = pitch_mean; self._pending_new_pitch_count = pitch_count
+                        if required_new_hits > 1:
+                            _log.info(f"[diarize] pending NEW speaker 1/{required_new_hits}")
+                            return _result(self._last_speaker_id)
+                        # required_new_hits <= 1: 1 hit is enough, fall through to register
+                    else:
+                        pending_sim = self._cosine_sim(emb_np, self._pending_new_emb)
+                        pending_thr = NEW_SPEAKER_SELF_SIM - (0.04 if best_same_zone_far_mouth else 0.0)
+                        if pending_sim >= pending_thr:
+                            self._pending_new_hits += 1; self._pending_new_time = now
+                            self._pending_new_emb = self._pending_new_emb * 0.85 + emb_np * 0.15
+                            if pitch_mean is not None and pitch_count >= MIN_PITCH_FRAMES:
+                                pf0 = self._pending_new_pitch_mean if self._pending_new_pitch_mean is not None else pitch_mean
+                                self._pending_new_pitch_mean = pf0 * 0.85 + pitch_mean * 0.15
+                                self._pending_new_pitch_count = int(min(1000, max(self._pending_new_pitch_count, 0) + pitch_count))
+                        else:
+                            self._pending_new_hits = 1; self._pending_new_time = now
+                            self._pending_new_emb = emb_np.copy()
+                            self._pending_new_pitch_mean = pitch_mean; self._pending_new_pitch_count = pitch_count
+
+                        if self._pending_new_hits < required_new_hits:
+                            _log.info(f"[diarize] pending NEW {self._pending_new_hits}/{required_new_hits} (psim={pending_sim:.3f})")
+                            return _result(self._last_speaker_id)
                 else:
-                    self._pending_new_hits = 1; self._pending_new_time = now
-                    self._pending_new_emb = emb_np.copy()
-                    self._pending_new_pitch_mean = pitch_mean; self._pending_new_pitch_count = pitch_count
-
-                if self._pending_new_hits < required_new_hits:
-                    print(f"[diarize] pending NEW {self._pending_new_hits}/{required_new_hits} (psim={pending_sim:.3f})")
-                    return _result(self._last_speaker_id)
+                    _log.info(f"[diarize] instant NEW speaker (cg-block, sim={best_sim:.3f})")
 
             # ── Register new speaker ───────────────────────────────────────────
             sid = self._next_id; self._next_id += 1
@@ -742,14 +801,17 @@ class SpeakerDiarizer:
                 "mouth_vec": mouth_vec, "mouth_count": mouth_count,
                 "created_at": time.time(),
             })
-            print(f"[diarize] → Speaker {sid+1} NEW (best_sim={best_sim:.3f}, gap={similarity_gap:.3f}, f0={pitch_mean or 0:.0f})")
+            _log.info(f"[diarize] -> Speaker {sid+1} NEW (best_sim={best_sim:.3f}, gap={similarity_gap:.3f}, f0={pitch_mean or 0:.0f})")
             self._last_speaker_id = sid; self._last_speaker_time = now
             self._clear_pending_switch(); self._clear_pending_new()
             return _result(sid, is_new=True)
 
         except Exception as e:
-            print(f"[diarize] CAM++ error: {e}, falling back to pitch")
-            return self._identify_pitch(wav_path, update_profiles=update_profiles)
+            _log.error("[diarize] CAM++ error: %s — keeping current speaker", e, exc_info=True)
+            # Don't fall back to pitch — pitch creates 4-dim profiles that corrupt
+            # the 512-dim CAM++ profile list, causing all future calls to crash.
+            sid = self._last_speaker_id if self._last_speaker_id is not None else 0
+            return {"speaker": f"Speaker {sid + 1}", "speaker_id": sid}
 
     # ── Static helpers ─────────────────────────────────────────────────────────
 
@@ -899,6 +961,53 @@ class SpeakerDiarizer:
             print(f"[diarize:pitch] error: {e}")
             return {"speaker": "Speaker 1", "speaker_id": 0}
 
+    def _identify_pitch_from_samples(self, samples: np.ndarray, update_profiles: bool = True) -> dict:
+        """Pitch-only fallback that works directly from numpy samples."""
+        try:
+            stats = self._extract_pitch_stats(samples, 16000)
+            if not stats:
+                return {"speaker": "Speaker 1", "speaker_id": 0}
+            features = np.array([stats["mean"] / 100, stats["std"] / 50,
+                                 (stats["energy"] or 0) * 10, stats["zcr"] * 5])
+
+            def _r(sid, is_new=False):
+                out = {"speaker": f"Speaker {sid + 1}", "speaker_id": sid, "embedding": features.copy()}
+                if is_new:
+                    out["is_new"] = True
+                return out
+
+            if len(self._profiles) == 0:
+                if not update_profiles:
+                    return _r(0)
+                sid = self._next_id
+                self._next_id += 1
+                self._profiles.append({"id": sid, "embedding": features, "count": 1})
+                self._last_speaker_id = sid
+                self._last_speaker_time = time.time()
+                return _r(sid, is_new=True)
+
+            dists = [(i, np.linalg.norm(features - p["embedding"][:len(features)])) for i, p in enumerate(self._profiles)]
+            best_idx, best_dist = min(dists, key=lambda x: x[1])
+            if not update_profiles:
+                sid = self._profiles[best_idx]["id"] if best_dist < 1.2 else (self._last_speaker_id or 0)
+                return _r(sid)
+            if best_dist < 1.2:
+                p = self._profiles[best_idx]
+                p["embedding"] = p["embedding"] * 0.85 + features * 0.15
+                p["count"] += 1
+                self._last_speaker_id = p["id"]
+                self._last_speaker_time = time.time()
+                return _r(p["id"])
+            sid = self._next_id
+            self._next_id += 1
+            self._profiles.append({"id": sid, "embedding": features, "count": 1})
+            self._last_speaker_id = sid
+            self._last_speaker_time = time.time()
+            return _r(sid, is_new=True)
+        except Exception as e:
+            print(f"[diarize:pitch-samples] error: {e}")
+            return {"speaker": "Speaker 1", "speaker_id": 0}
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Background Reconciler
@@ -934,7 +1043,7 @@ class BackgroundReconciler:
         self._patch_window    = patch_window_sec
         self._chunks: list[dict] = []
         self._chunks_lock     = threading.Lock()
-        # merge confirmation counter: pair_key → consecutive passes above threshold
+        # merge confirmation counter: pair_key -> consecutive passes above threshold
         self._merge_hits: dict[tuple[int,int], int] = {}
         self._thread: threading.Thread | None = None
         self._stop_event      = threading.Event()
@@ -989,7 +1098,7 @@ class BackgroundReconciler:
         ca = int(pa.get("pitch_count") or 0)
         cb = int(pb.get("pitch_count") or 0)
         if fa is None or fb is None or ca < MIN_PITCH_FRAMES or cb < MIN_PITCH_FRAMES:
-            return True   # no pitch data → don't block on pitch
+            return True   # no pitch data -> don't block on pitch
         if SpeakerDiarizer._is_cross_gender(fa, fb):
             return False
         za, zb = SpeakerDiarizer._pitch_zone(fa), SpeakerDiarizer._pitch_zone(fb)
@@ -1049,7 +1158,7 @@ class BackgroundReconciler:
 
                 # All guards passed — commit merge
                 keep, drop = (pa, pb) if pa["count"] >= pb["count"] else (pb, pa)
-                print(f"[reconciler] MERGE S{drop['id']+1} → S{keep['id']+1} "
+                print(f"[reconciler] MERGE S{drop['id']+1} -> S{keep['id']+1} "
                       f"(sim={sim:.3f}, hits={hits}, counts={pa['count']}/{pb['count']})")
 
                 with self._diarizer._lock:

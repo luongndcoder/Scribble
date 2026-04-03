@@ -2,10 +2,11 @@
 import sys
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('models', 'models')]
+datas = [
+    ('models/voxceleb_CAM++.onnx', 'models'),
+]
 binaries = []
 hiddenimports = [
-    'onnxruntime',
     'uvicorn.logging',
     'uvicorn.protocols.http',
     'uvicorn.protocols.http.auto',
@@ -27,15 +28,17 @@ hiddenimports = [
     'riva',
     'riva.client',
     'grpcio',
-    'grpcio_tools',
     'charset_normalizer',
+    'websockets',
 ]
 tmp_ret = collect_all('riva')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('soniox')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 # ── Aggressive excludes ──
 # These are transitive deps pulled in by collect_all('riva') and other packages.
-# None of these are needed for the sidecar (FastAPI + STT + Diarization).
+# None of these are needed for the sidecar (FastAPI + STT).
 excludes = [
     # Deep Learning frameworks (NOT needed — we use onnxruntime only)
     'torch', 'torchvision', 'torchaudio', 'torchtext',
@@ -68,9 +71,12 @@ excludes = [
     # Database / ORM (NOT needed)
     'sqlalchemy', 'alembic',
 
+    # gRPC tools (build-time only)
+    'grpcio_tools', 'grpc_tools',
+
     # Other unnecessary
     'tkinter', '_tkinter', 'turtle',
-    'unittest', 'pydoc', 'doctest',
+    'doctest',
     'xmlrpc', 'ftplib', 'imaplib', 'smtplib', 'poplib', 'nntplib',
     'test', 'tests',
     'setuptools', 'pip', 'wheel', 'pkg_resources',
@@ -95,19 +101,17 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# ── onedir mode: no temp extraction on launch = instant startup ──
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
-    [],
+    [],               # binaries/datas go into COLLECT, not EXE
+    exclude_binaries=True,
     name='scribble-sidecar',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,  # UPX compression triggers AV heuristics — disabled
-    upx_exclude=[],
-    runtime_tmpdir=None,
+    upx=False,
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -115,4 +119,12 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version='version_info.txt' if sys.platform == 'win32' else None,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name='scribble-sidecar',
 )
