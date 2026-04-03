@@ -33,10 +33,30 @@ if [ -f "$SIDECAR_DIR/.venv/bin/activate" ]; then
 fi
 PYTHON_CMD="${PYTHON_CMD:-python3}"
 
+$PYTHON_CMD -m PyInstaller scribble-sidecar.spec --noconfirm --clean
+
+# ── onedir: copy entire directory to binaries + create launcher shim ──
+SIDECAR_DIST="$SIDECAR_DIR/dist/scribble-sidecar"
+if [ ! -d "$SIDECAR_DIST" ]; then
+    echo "❌ onedir output not found at $SIDECAR_DIST"
+    exit 1
+fi
+
+# Clean old sidecar files
+rm -rf "$BINARIES_DIR"/scribble-sidecar-*
+rm -rf "$BINARIES_DIR"/sidecar-dist
+
+# Copy onedir distribution
+cp -R "$SIDECAR_DIST" "$BINARIES_DIR/sidecar-dist"
+
+# Create thin launcher script that Tauri can execute as externalBin
 if [ "$PLATFORM" = "windows" ]; then
     SIDECAR_NAME="scribble-sidecar-x86_64-pc-windows-msvc.exe"
-    $PYTHON_CMD -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-    cp dist/scribble-sidecar.exe "$BINARIES_DIR/$SIDECAR_NAME"
+    # Windows: create batch launcher
+    cat > "$BINARIES_DIR/$SIDECAR_NAME" << 'WINEOF'
+@echo off
+"%~dp0sidecar-dist\scribble-sidecar.exe" %*
+WINEOF
 elif [ "$PLATFORM" = "macos" ]; then
     ARCH="$(uname -m)"
     if [ "$ARCH" = "arm64" ]; then
@@ -44,14 +64,23 @@ elif [ "$PLATFORM" = "macos" ]; then
     else
         SIDECAR_NAME="scribble-sidecar-x86_64-apple-darwin"
     fi
-    $PYTHON_CMD -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-    cp dist/scribble-sidecar "$BINARIES_DIR/$SIDECAR_NAME"
+    # macOS/Linux: create shell launcher
+    cat > "$BINARIES_DIR/$SIDECAR_NAME" << 'SHEOF'
+#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$DIR/sidecar-dist/scribble-sidecar" "$@"
+SHEOF
+    chmod +x "$BINARIES_DIR/$SIDECAR_NAME"
 elif [ "$PLATFORM" = "linux" ]; then
     SIDECAR_NAME="scribble-sidecar-x86_64-unknown-linux-gnu"
-    $PYTHON_CMD -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-    cp dist/scribble-sidecar "$BINARIES_DIR/$SIDECAR_NAME"
+    cat > "$BINARIES_DIR/$SIDECAR_NAME" << 'SHEOF'
+#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$DIR/sidecar-dist/scribble-sidecar" "$@"
+SHEOF
+    chmod +x "$BINARIES_DIR/$SIDECAR_NAME"
 fi
-echo "✅ Sidecar built: $SIDECAR_NAME"
+echo "✅ Sidecar built (onedir): $SIDECAR_NAME + sidecar-dist/"
 
 # ── Step 2: Build Tauri app ──
 echo ""

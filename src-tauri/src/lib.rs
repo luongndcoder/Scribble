@@ -861,12 +861,16 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     let sidecar_folder = "scribble-sidecar-x86_64-unknown-linux-gnu";
 
-    // Search order: onedir folder next to exe, then macOS Resources, then legacy flat binary
+    // Search order: onedir dist, launcher shim, legacy flat binary
     let candidates = vec![
+        // onedir: real binary inside sidecar-dist/
+        exe_dir.join("sidecar-dist").join(sidecar_name),
+        // macOS .app bundle: Resources contains sidecar-dist/
+        exe_dir.join("../Resources/sidecar-dist").join(sidecar_name),
+        // Legacy onedir folder (platform-named)
         exe_dir.join(sidecar_folder).join(sidecar_name),
-        // macOS .app bundle: Resources is sibling to MacOS
         exe_dir.join("../Resources").join(sidecar_folder).join(sidecar_name),
-        // Legacy: flat binary next to exe (backward compat)
+        // Legacy: flat binary next to exe
         exe_dir.join(sidecar_name),
     ];
 
