@@ -46,27 +46,25 @@ fi
 rm -rf "$BINARIES_DIR"/scribble-sidecar-*
 rm -rf "$BINARIES_DIR"/sidecar-dist
 
-# Copy onedir distribution
-cp -R "$SIDECAR_DIST" "$BINARIES_DIR/sidecar-dist"
-
-# ── Strip unnecessary files to reduce size (~239MB → ~160MB) ──
-echo "🗑️  Stripping unnecessary files from sidecar-dist..."
-DIST_INT="$BINARIES_DIR/sidecar-dist/_internal"
-# grpc_tools: build-time only, not needed at runtime (-12MB)
-rm -rf "$DIST_INT/grpc_tools"
-# test directories in scipy/numpy/onnxruntime (-15MB)
-find "$DIST_INT/scipy" -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
-find "$DIST_INT/scipy" -name "test" -type d -exec rm -rf {} + 2>/dev/null || true
-find "$DIST_INT/numpy" -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
-find "$DIST_INT/onnxruntime" -name "test*" -type d -exec rm -rf {} + 2>/dev/null || true
-# __pycache__ and .pyc files
+# ── Strip unnecessary files before compression ──
+echo "🗑️  Stripping sidecar-dist..."
+DIST_INT="$SIDECAR_DIST/_internal"
+rm -rf "$DIST_INT/grpc_tools" 2>/dev/null || true
+find "$DIST_INT" -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
 find "$DIST_INT" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 find "$DIST_INT" -name "*.pyc" -delete 2>/dev/null || true
-# .dist-info metadata
 find "$DIST_INT" -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
-# Note: stripping .so/.dylib symbols can break Python C extensions — skip
-STRIPPED_SIZE=$(du -sh "$BINARIES_DIR/sidecar-dist" | cut -f1)
-echo "📦 Sidecar dist size after strip: $STRIPPED_SIZE"
+
+# ── Compress into tar.gz for small app bundle ──
+echo "📦 Compressing sidecar-dist..."
+STRIPPED_SIZE=$(du -sh "$SIDECAR_DIST" | cut -f1)
+echo "   Uncompressed: $STRIPPED_SIZE"
+tar -czf "$BINARIES_DIR/sidecar-dist.tar.gz" -C "$SIDECAR_DIR/dist" scribble-sidecar
+COMPRESSED_SIZE=$(du -sh "$BINARIES_DIR/sidecar-dist.tar.gz" | cut -f1)
+echo "   Compressed:   $COMPRESSED_SIZE"
+
+# Clean raw directory — only ship compressed
+rm -rf "$BINARIES_DIR/sidecar-dist"
 
 # Create thin launcher script that Tauri can execute as externalBin
 if [ "$PLATFORM" = "windows" ]; then

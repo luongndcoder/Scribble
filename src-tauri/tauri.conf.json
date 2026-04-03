@@ -46,9 +46,9 @@
     "externalBin": [
       "binaries/scribble-sidecar"
     ],
-    "resources": {
-      "binaries/sidecar-dist": "sidecar-dist"
-    },
+    "resources": [
+      "binaries/sidecar-dist.tar.gz"
+    ],
     "macOS": {
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "10.15",

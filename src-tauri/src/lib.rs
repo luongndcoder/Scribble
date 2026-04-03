@@ -861,16 +861,46 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     let sidecar_folder = "scribble-sidecar-x86_64-unknown-linux-gnu";
 
-    // Search order: onedir dist, launcher shim, legacy flat binary
+    // ── Extract sidecar tar.gz on first launch ──
+    let data_dir = dirs::home_dir().unwrap_or_default().join(".voicescribe");
+    let _ = std::fs::create_dir_all(&data_dir);
+    let extracted_dir = data_dir.join("sidecar");
+    let extracted_bin = extracted_dir.join("scribble-sidecar").join(sidecar_name);
+
+    // Find tar.gz in app bundle
+    let tar_candidates = vec![
+        exe_dir.join("../Resources/sidecar-dist.tar.gz"),
+        exe_dir.join("sidecar-dist.tar.gz"),
+    ];
+    let tar_path = tar_candidates.iter().find(|p| p.exists()).cloned();
+
+    // Extract if tar exists and binary not already extracted
+    if let Some(tar) = &tar_path {
+        if !extracted_bin.exists() {
+            println!("[sidecar] Extracting sidecar from {:?}...", tar);
+            let _ = std::fs::remove_dir_all(&extracted_dir);
+            let _ = std::fs::create_dir_all(&extracted_dir);
+            let status = std::process::Command::new("tar")
+                .args(["-xzf", &tar.to_string_lossy(), "-C", &extracted_dir.to_string_lossy()])
+                .status();
+            match status {
+                Ok(s) if s.success() => println!("[sidecar] Extraction complete"),
+                Ok(s) => println!("[sidecar] tar exited with {}", s),
+                Err(e) => println!("[sidecar] tar failed: {}", e),
+            }
+        } else {
+            println!("[sidecar] Using cached extraction at {:?}", extracted_dir);
+        }
+    }
+
+    // Search order: extracted cache, then app bundle, then legacy
     let candidates = vec![
-        // onedir: real binary inside sidecar-dist/
+        // Extracted cache in ~/.voicescribe/sidecar/
+        extracted_bin.clone(),
+        // Direct in bundle (dev/onedir)
         exe_dir.join("sidecar-dist").join(sidecar_name),
-        // macOS .app bundle: Resources contains sidecar-dist/
         exe_dir.join("../Resources/sidecar-dist").join(sidecar_name),
-        // Legacy onedir folder (platform-named)
-        exe_dir.join(sidecar_folder).join(sidecar_name),
-        exe_dir.join("../Resources").join(sidecar_folder).join(sidecar_name),
-        // Legacy: flat binary next to exe
+        // Legacy: flat binary
         exe_dir.join(sidecar_name),
     ];
 
