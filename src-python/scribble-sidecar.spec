@@ -28,7 +28,6 @@ hiddenimports = [
     'riva',
     'riva.client',
     'grpcio',
-    'grpcio_tools',
     'charset_normalizer',
     'websockets',
 ]
@@ -71,6 +70,9 @@ excludes = [
 
     # Database / ORM (NOT needed)
     'sqlalchemy', 'alembic',
+
+    # gRPC tools (build-time only)
+    'grpcio_tools', 'grpc_tools',
 
     # Other unnecessary
     'tkinter', '_tkinter', 'turtle',
