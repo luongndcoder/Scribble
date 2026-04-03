@@ -335,8 +335,8 @@ export function SettingsPanel() {
                             </div>
                         </div>
 
-                        {/* Max Speakers */}
-                        <div className="setting-group">
+                        {/* Max Speakers — only for Nvidia (Soniox has built-in diarization) */}
+                        {sttProvider === 'nvidia' && <div className="setting-group">
                             <div className="setting-label">
                                 {lang === 'vi' ? 'Số người nói tối đa' : 'Max Speakers'}
                             </div>
@@ -356,7 +356,7 @@ export function SettingsPanel() {
                                     ? 'Giới hạn số người nói nhận diện được trong 1 cuộc họp'
                                     : 'Maximum number of speakers to detect per meeting'}
                             </div>
-                        </div>
+                        </div>}
                     </div>
 
                     {/* ── LLM Section ── */}
