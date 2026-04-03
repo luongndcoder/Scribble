@@ -89,11 +89,20 @@ elif [ "$PLATFORM" = "macos" ]; then
     else
         SIDECAR_NAME="scribble-sidecar-x86_64-apple-darwin"
     fi
-    # macOS/Linux: create shell launcher
+    # macOS/Linux: create shell launcher that checks multiple locations
     cat > "$BINARIES_DIR/$SIDECAR_NAME" << 'SHEOF'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-exec "$DIR/sidecar-dist/scribble-sidecar" "$@"
+# Check: same dir (dev), then Resources (macOS .app bundle)
+for candidate in \
+    "$DIR/sidecar-dist/scribble-sidecar" \
+    "$DIR/../Resources/sidecar-dist/scribble-sidecar"; do
+    if [ -x "$candidate" ]; then
+        exec "$candidate" "$@"
+    fi
+done
+echo "[sidecar-launcher] ERROR: scribble-sidecar not found" >&2
+exit 1
 SHEOF
     chmod +x "$BINARIES_DIR/$SIDECAR_NAME"
 elif [ "$PLATFORM" = "linux" ]; then
@@ -101,7 +110,15 @@ elif [ "$PLATFORM" = "linux" ]; then
     cat > "$BINARIES_DIR/$SIDECAR_NAME" << 'SHEOF'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
-exec "$DIR/sidecar-dist/scribble-sidecar" "$@"
+for candidate in \
+    "$DIR/sidecar-dist/scribble-sidecar" \
+    "$DIR/../Resources/sidecar-dist/scribble-sidecar"; do
+    if [ -x "$candidate" ]; then
+        exec "$candidate" "$@"
+    fi
+done
+echo "[sidecar-launcher] ERROR: scribble-sidecar not found" >&2
+exit 1
 SHEOF
     chmod +x "$BINARIES_DIR/$SIDECAR_NAME"
 fi
