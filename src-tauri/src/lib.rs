@@ -876,8 +876,14 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     ];
     let tar_path = tar_candidates.iter().find(|p| p.exists()).cloned();
 
+    // Version check: re-extract if app version changed
+    let app_version = env!("CARGO_PKG_VERSION");
+    let version_file = cache_dir.join(".version");
+    let cached_version = std::fs::read_to_string(&version_file).unwrap_or_default();
+    let needs_extract = !cached_bin.exists() || cached_version.trim() != app_version;
+
     if let Some(tar) = &tar_path {
-        if !cached_bin.exists() {
+        if needs_extract {
             println!("[sidecar] Extracting sidecar from {:?} to {:?}...", tar, cache_dir);
             let _ = std::fs::remove_dir_all(&cache_dir);
             let _ = std::fs::create_dir_all(&cache_dir);
@@ -893,7 +899,11 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
                             .args(["+x", &cached_bin.to_string_lossy()])
                             .status();
                     }
-                    println!("[sidecar] Extraction complete: {:?} exists={}", cached_bin, cached_bin.exists());
+                    let _ = std::fs::write(&version_file, app_version);
+                    // Kill old sidecar so new version starts fresh
+                    kill_sidecar_port();
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    println!("[sidecar] Extraction complete (v{}): {:?}", app_version, cached_bin);
                 }
                 Ok(s) => println!("[sidecar] tar exited with {}", s),
                 Err(e) => println!("[sidecar] tar failed: {}", e),
