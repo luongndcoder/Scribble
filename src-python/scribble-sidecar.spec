@@ -74,7 +74,7 @@ excludes = [
 
     # Other unnecessary
     'tkinter', '_tkinter', 'turtle',
-    'pydoc', 'doctest',
+    'doctest',
     'xmlrpc', 'ftplib', 'imaplib', 'smtplib', 'poplib', 'nntplib',
     'test', 'tests',
     'setuptools', 'pip', 'wheel', 'pkg_resources',

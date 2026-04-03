@@ -13,7 +13,7 @@ const queryClient = new QueryClient();
 const SIDECAR_BASES = SIDECAR_HTTP_BASES;
 
 function AppInner() {
-  const { currentView, settingsOpen, setSettingsOpen, lang, setLang } = useAppStore();
+  const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording } = useAppStore();
   const { showToast } = useToast();
   const [backendStatus, setBackendStatus] = useState<'online' | 'offline'>('offline');
   // Startup progress: 0=connecting, 1=sidecar online, 2=diarizer loaded, 3=ready
@@ -54,11 +54,11 @@ function AppInner() {
                 const dData = await dRes.json();
                 if (dData.model_loaded) {
                   setStartupStep(prev => Math.max(prev, 2));
+                  // Step 3: fully ready (only after model loaded)
+                  setStartupStep(3);
                 }
               }
             } catch {} // diarizer check is best-effort
-            // Step 3: fully ready
-            setStartupStep(3);
           }
           if (isOnline && wasOffline) {
             window.dispatchEvent(new Event('backend-online'));
@@ -150,7 +150,7 @@ function AppInner() {
             </>
 
             {/* Connecting overlay */}
-            {isOffline && (
+            {isOffline && !recording && (
               <div className="connecting-overlay">
                 <div className="connecting-card">
                   <div className="connecting-spinner" />

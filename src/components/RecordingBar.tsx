@@ -4,6 +4,7 @@ import { resetDiarize, createDraft, downloadTextFile, getSettings } from '../lib
 import { fetchSidecar, waitForSidecarReady } from '../lib/sidecar';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
+import { useToast } from './Toast';
 import {
     isTauri, safeInvoke,
     SYSTEM_SPEAKER_ID_OFFSET,
@@ -32,6 +33,7 @@ export function RecordingBar() {
     const [audioSource, setAudioSource] = useState<'mic' | 'system' | 'both'>('mic');
     const [barHeights, setBarHeights] = useState(['4px', '4px', '4px']);
     const sttProviderRef = useRef('nvidia');
+    const { showToast } = useToast();
 
     // Hooks from recording modules
     const { analyserRef, startDrawing, stopDrawing, setBarHeightsFn } = useWaveform();
@@ -276,6 +278,47 @@ export function RecordingBar() {
             setInterimText('');
             setInterimSpeaker('Speaker 1', 0);
             setIsTranscribing(false);
+
+            // ── Validate STT configuration before recording ──
+            try {
+                const settings = await getSettings();
+                const provider = settings.stt_provider || 'nvidia';
+                const hasNvidiaKey = !!(settings.nvidia_api_key && settings.nvidia_api_key !== '' && !settings.nvidia_api_key.startsWith('***'));
+                const hasSonioxKey = !!(settings.soniox_api_key && settings.soniox_api_key !== '' && !settings.soniox_api_key.startsWith('***'));
+                // Masked keys show as "xxxx***xxxx" — check if real key was saved (masked = has value)
+                const nvidiaConfigured = hasNvidiaKey || (settings.nvidia_api_key || '').includes('***');
+                const sonioxConfigured = hasSonioxKey || (settings.soniox_api_key || '').includes('***');
+
+                if (provider === 'nvidia' && !nvidiaConfigured) {
+                    showToast(
+                        lang === 'vi'
+                            ? 'Vui lòng cấu hình Nvidia API Key trong Cài đặt trước khi ghi âm'
+                            : 'Please configure Nvidia API Key in Settings before recording',
+                        'error'
+                    );
+                    useAppStore.getState().setSettingsOpen(true);
+                    return;
+                }
+                if (provider === 'soniox' && !sonioxConfigured) {
+                    showToast(
+                        lang === 'vi'
+                            ? 'Vui lòng cấu hình Soniox API Key trong Cài đặt trước khi ghi âm'
+                            : 'Please configure Soniox API Key in Settings before recording',
+                        'error'
+                    );
+                    useAppStore.getState().setSettingsOpen(true);
+                    return;
+                }
+            } catch (e) {
+                // Backend not ready — overlay should be showing, but guard anyway
+                showToast(
+                    lang === 'vi'
+                        ? 'Hệ thống chưa sẵn sàng. Vui lòng đợi...'
+                        : 'System not ready. Please wait...',
+                    'error'
+                );
+                return;
+            }
 
             if (!(await ensureSystemCapturePermission())) return;
 

@@ -140,12 +140,21 @@ async def lifespan(app: FastAPI):
     lang = db.get_setting("app_language") or "vi"
     log.info(t("starting", lang))
 
-    # ── Diarizer model init (best-effort — fallback to pitch if model unavailable) ──
-    log.info("[main] Initializing diarizer model...")
+    # ── Diarizer model init (BLOCKING — must complete before accepting requests) ──
+    log.info("[main] Initializing diarizer model (blocking)...")
     try:
-        diarizer._init_model()
+        with diarizer._lock:
+            diarizer._init_model()
         if diarizer._session:
-            log.info("[main] [OK] Diarizer model ready (model_loaded=%s)", diarizer._model_loaded)
+            log.info("[main] [OK] Diarizer CAM++ model loaded, running warm-up inference...")
+            # Warm-up: first ONNX inference triggers JIT compilation (~1-2s).
+            # Do it now so recording doesn't hang on first diarize call.
+            warmup_samples = np.zeros(16000, dtype=np.float32)  # 1s silence
+            try:
+                diarizer.identify_speaker_from_samples(warmup_samples, 16000, update_profiles=False)
+                log.info("[main] [OK] Diarizer warm-up complete — ready for recording")
+            except Exception as we:
+                log.warning("[main] Diarizer warm-up failed (non-critical): %s", we)
         else:
             log.warning("[main] Diarizer ONNX model not loaded — pitch-only fallback active")
     except Exception as e:
@@ -378,16 +387,6 @@ async def nvidia_stream_ws(websocket: WebSocket):
         last_speaker = "Speaker 1"
         last_speaker_id = 0
 
-        # Translation accumulator: translate each chunk individually, accumulate translations
-        # Use mutable dict to avoid nonlocal issues with nested async closures
-        trans_state = {
-            "accumulated": "",      # accumulated translated text
-            "pending": "",          # untranslated text waiting for debounce
-            "last_time": 0.0,
-        }
-        TRANSLATE_DEBOUNCE_SEC = 1.2
-        translate_lock = asyncio.Lock()  # ensure sequential translation to preserve order
-
         while True:
             result = await result_queue.get()
             if result is None:
@@ -399,17 +398,13 @@ async def nvidia_stream_ws(websocket: WebSocket):
                 }
 
                 if not result["is_final"]:
-                    # Interim: send text only, no translation (accumulated translation
-                    # handles it on final results — interim translation was overwriting
-                    # the accumulated result because both used the same message type)
                     await websocket.send_json(msg)
                     _accumulate_part(msg["text"], msg["speaker"], msg["speaker_id"], current_chunk_id, False)
                 else:
-                    # Diarize on final result: identify speaker from buffered audio
+                    # Diarize on final result
                     with diarize_buf_lock:
                         buf_bytes = bytes(diarize_buf)
                         diarize_buf.clear()
-                    prev_speaker_id = last_speaker_id
                     if len(buf_bytes) >= DIARIZE_MIN_BYTES:
                         try:
                             samples = np.frombuffer(buf_bytes, dtype=np.int16).astype(np.float32) / 32768.0
@@ -420,67 +415,50 @@ async def nvidia_stream_ws(websocket: WebSocket):
                             msg["speaker_id"] = speaker_info.get("speaker_id", last_speaker_id)
                             last_speaker = msg["speaker"]
                             last_speaker_id = msg["speaker_id"]
-                            log.info("[ws:nvidia] diarize: %s (id=%d, buf=%d bytes)", msg["speaker"], msg["speaker_id"], len(buf_bytes))
                         except Exception as e:
                             log.warning("[ws:nvidia] diarize error: %s", e)
-                    else:
-                        if buf_bytes:
-                            log.debug("[ws:nvidia] diarize skipped: buf=%d < min=%d", len(buf_bytes), DIARIZE_MIN_BYTES)
 
+                    # Send transcript immediately (don't wait for translation)
                     await websocket.send_json(msg)
 
-                    target_chunk_id = current_chunk_id
+                    final_chunk_id = current_chunk_id
                     if result["text"]:
                         last_final_chunk_id = current_chunk_id
-
                     current_chunk_id = f"chunk-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
-                    _accumulate_part(msg["text"], msg["speaker"], msg["speaker_id"], last_final_chunk_id or target_chunk_id, True)
+                    _accumulate_part(msg["text"], msg["speaker"], msg["speaker_id"], last_final_chunk_id or final_chunk_id, True)
 
-                    # Reset translation accumulator on speaker change
-                    if msg["speaker_id"] != prev_speaker_id:
-                        trans_state["accumulated"] = ""
-                        trans_state["pending"] = ""
-
+                    # ── Per-chunk translation with chunk_id (like Soniox) ──
+                    # Each final result gets its own translation task.
+                    # chunk_id ensures translation targets the CORRECT part.
                     if msg["text"].strip() and translate_state["lang"]:
-                        # Accumulate pending text, translate when debounce passes
-                        trans_state["pending"] = (trans_state["pending"] + " " + msg["text"]).strip()
-                        now_t = time.time()
-                        time_ok = (now_t - trans_state["last_time"]) >= TRANSLATE_DEBOUNCE_SEC
+                        _text = msg["text"]
+                        _cid = msg["chunk_id"]
+                        _lang = translate_state["lang"]
+                        _src = stt_lang
 
-                        if time_ok and len(trans_state["pending"]) >= 8:
-                            _chunk_text = trans_state["pending"]
-                            _lang = translate_state["lang"]
-                            _src_lang = stt_lang
-                            trans_state["pending"] = ""
-                            trans_state["last_time"] = now_t
+                        async def _do_translate(text=_text, cid=_cid, lang=_lang, src=_src):
+                            import re
+                            if not text or not lang:
+                                return
+                            if not re.sub(r'[^\w\s]', '', text).strip():
+                                return
+                            try:
+                                translated = await loop.run_in_executor(
+                                    None, translate_instant, text, lang, db, src
+                                )
+                                if translated:
+                                    await websocket.send_json({
+                                        "type": "translation",
+                                        "translation": translated,
+                                        "chunk_id": cid,
+                                        "append": True,
+                                    })
+                            except Exception as e:
+                                log.warning("[ws:nvidia-trans] error: %s", e)
 
-                            async def _do_translate(chunk=_chunk_text, lang=_lang, src=_src_lang):
-                                import re
-                                if not chunk or not lang:
-                                    return
-                                if not re.sub(r'[^\w\s]', '', chunk).strip():
-                                    return
-                                async with translate_lock:
-                                    try:
-                                        chunk_translated = await loop.run_in_executor(
-                                            None, translate_instant, chunk, lang, db, src
-                                        )
-                                        if chunk_translated:
-                                            cur = trans_state["accumulated"]
-                                            full = f"{cur} {chunk_translated}".strip() if cur else chunk_translated
-                                            trans_state["accumulated"] = full
-                                            log.info("[ws:nvidia-trans] +%d chars → total %d chars",
-                                                     len(chunk_translated), len(full))
-                                            await websocket.send_json({
-                                                "type": "translation",
-                                                "translation": full,
-                                            })
-                                    except Exception as e:
-                                        log.warning("[ws:nvidia-trans] error: %s", e)
-
-                            t = asyncio.create_task(_do_translate())
-                            translation_tasks.add(t)
-                            t.add_done_callback(translation_tasks.discard)
+                        t = asyncio.create_task(_do_translate())
+                        translation_tasks.add(t)
+                        t.add_done_callback(translation_tasks.discard)
 
                 if time.time() - last_save_at >= SAVE_INTERVAL:
                     _flush_to_db()
@@ -489,19 +467,6 @@ async def nvidia_stream_ws(websocket: WebSocket):
                 break
 
         _flush_to_db()
-
-        # Final translation flush — translate any remaining pending text
-        if trans_state["pending"].strip() and translate_state["lang"]:
-            try:
-                chunk_trans = await loop.run_in_executor(
-                    None, translate_instant, trans_state["pending"].strip(), translate_state["lang"], db, stt_lang
-                )
-                if chunk_trans:
-                    cur = trans_state["accumulated"]
-                    full = f"{cur} {chunk_trans}".strip() if cur else chunk_trans
-                    await websocket.send_json({"type": "translation", "translation": full})
-            except Exception:
-                pass
 
     send_task = asyncio.create_task(_send_results())
 

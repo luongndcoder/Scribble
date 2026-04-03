@@ -158,17 +158,17 @@ function handleTranslationEvent(data: SttWsMessage) {
             (p) => p.chunkId === cid || (p.chunkIds && p.chunkIds.includes(cid)),
         );
         if (targetIdx >= 0) {
-            const existingTrans = currentParts[targetIdx].translation || "";
             if (data.append) {
+                const existingTrans = currentParts[targetIdx].translation || "";
                 const combined = existingTrans ? `${existingTrans} ${translation}` : translation;
                 useAppStore.getState().updateTranscriptTranslation(targetIdx, combined);
-                useAppStore.getState().setInterimTranslation("");
-            } else if (translation.length >= existingTrans.length) {
+            } else {
+                // Replace mode: accumulated translation from Nvidia NMT
                 useAppStore.getState().updateTranscriptTranslation(targetIdx, translation);
-                const parts2 = useAppStore.getState().transcriptParts;
-                if (targetIdx === parts2.length - 1) {
-                    useAppStore.getState().setInterimTranslation(translation);
-                }
+            }
+            // Clear interim if this is the live (last) part
+            if (targetIdx === currentParts.length - 1) {
+                useAppStore.getState().setInterimTranslation("");
             }
             return;
         }
