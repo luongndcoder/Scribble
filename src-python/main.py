@@ -140,21 +140,13 @@ async def lifespan(app: FastAPI):
     lang = db.get_setting("app_language") or "vi"
     log.info(t("starting", lang))
 
-    # ── Diarizer model init (BLOCKING — must complete before accepting requests) ──
-    log.info("[main] Initializing diarizer model (blocking)...")
+    # ── Diarizer model init (load model only — warm-up in background) ──
+    log.info("[main] Loading diarizer model...")
     try:
         with diarizer._lock:
             diarizer._init_model()
         if diarizer._session:
-            log.info("[main] [OK] Diarizer CAM++ model loaded, running warm-up inference...")
-            # Warm-up: first ONNX inference triggers JIT compilation (~1-2s).
-            # Do it now so recording doesn't hang on first diarize call.
-            warmup_samples = np.zeros(16000, dtype=np.float32)  # 1s silence
-            try:
-                diarizer.identify_speaker_from_samples(warmup_samples, 16000, update_profiles=False)
-                log.info("[main] [OK] Diarizer warm-up complete — ready for recording")
-            except Exception as we:
-                log.warning("[main] Diarizer warm-up failed (non-critical): %s", we)
+            log.info("[main] [OK] Diarizer CAM++ model loaded")
         else:
             log.warning("[main] Diarizer ONNX model not loaded — pitch-only fallback active")
     except Exception as e:
@@ -166,7 +158,19 @@ async def lifespan(app: FastAPI):
     _transcription_router.set_diarizer(diarizer)
     _diagnose_router.set_diarizer(diarizer)
 
-    # ── Riva warmup (background — not critical for app start) ──
+    # ── Background warm-ups (don't block startup) ──
+    def _warmup_diarizer():
+        """First ONNX inference triggers JIT compilation. Run in background."""
+        try:
+            warmup_samples = np.zeros(16000, dtype=np.float32)
+            diarizer.identify_speaker_from_samples(warmup_samples, 16000, update_profiles=False)
+            log.info("[main] [OK] Diarizer warm-up complete")
+        except Exception as e:
+            log.warning("[main] Diarizer warm-up failed (non-critical): %s", e)
+
+    if diarizer._session:
+        threading.Thread(target=_warmup_diarizer, daemon=True).start()
+
     def _warmup_riva():
         try:
             nvidia_key = db.get_setting("nvidia_api_key") or os.environ.get("NVIDIA_API_KEY", "")

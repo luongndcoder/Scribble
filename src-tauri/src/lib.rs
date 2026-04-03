@@ -828,16 +828,15 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
             .output();
     }
 
-    // Wait briefly for port to be freed, verify with a quick connect check
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    for _ in 0..5 {
+    // Quick port check — don't over-wait
+    for _ in 0..3 {
         if std::net::TcpStream::connect_timeout(
             &"127.0.0.1:8765".parse().unwrap(),
-            std::time::Duration::from_millis(100),
+            std::time::Duration::from_millis(50),
         ).is_err() {
             break; // Port is free
         }
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
     // --- Resolve sidecar binary from onedir resource folder ---
@@ -1045,7 +1044,7 @@ pub fn run() {
             // Kill ALL stale sidecar processes SYNCHRONOUSLY before frontend loads
             kill_sidecar_port();
             // Brief pause for port release
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(200));
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
