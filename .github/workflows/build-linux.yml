@@ -1,6 +1,8 @@
 name: Build Linux
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -49,14 +51,37 @@ jobs:
         working-directory: src-python
         run: uv pip install --system -r requirements.txt
 
+      - name: Download ONNX model
+        working-directory: src-python/models
+        run: |
+          if [ ! -f voxceleb_CAM++.onnx ]; then
+            curl -L -o voxceleb_CAM++.onnx "https://wespeaker-1256283475.cos.ap-shanghai.myqcloud.com/models/voxceleb/voxceleb_CAM++.onnx"
+          fi
+
       - name: Build sidecar
         working-directory: src-python
         run: python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
 
-      - name: Copy sidecar binary
+      - name: Copy sidecar + compress
         run: |
           mkdir -p src-tauri/binaries
-          cp src-python/dist/scribble-sidecar src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu
+          # Strip unnecessary files
+          rm -rf src-python/dist/scribble-sidecar/_internal/grpc_tools 2>/dev/null || true
+          find src-python/dist/scribble-sidecar/_internal -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
+          find src-python/dist/scribble-sidecar/_internal -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          find src-python/dist/scribble-sidecar/_internal -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
+          # Compress
+          tar -czf src-tauri/binaries/sidecar-dist.tar.gz -C src-python/dist scribble-sidecar
+          # Create launcher shim
+          cat > src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu << 'SHEOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          for candidate in "$DIR/sidecar-dist/scribble-sidecar" "$DIR/../Resources/sidecar-dist/scribble-sidecar"; do
+              if [ -x "$candidate" ]; then exec "$candidate" "$@"; fi
+          done
+          exit 1
+          SHEOF
+          chmod +x src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -64,22 +89,32 @@ jobs:
       - name: Build Tauri
         run: npx tauri build
 
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Upload to Release
         run: |
-          # Upload AppImage
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
           APPIMAGE=$(find src-tauri/target -name "*.AppImage" | head -1)
           if [ -n "$APPIMAGE" ]; then
-            cp "$APPIMAGE" "Scribble_1.0.0_amd64.AppImage"
-            gh release upload v1.0.0-beta.4 "Scribble_1.0.0_amd64.AppImage" --clobber
-            echo "✅ Uploaded: Scribble_1.0.0_amd64.AppImage"
+            FILENAME="Scribble_${VERSION}_amd64.AppImage"
+            cp "$APPIMAGE" "$FILENAME"
+            gh release upload "$TAG" "$FILENAME" --clobber
+            echo "✅ Uploaded: $FILENAME"
           fi
 
-          # Upload deb
           DEB=$(find src-tauri/target -name "*.deb" | head -1)
           if [ -n "$DEB" ]; then
-            cp "$DEB" "scribble_1.0.0_amd64.deb"
-            gh release upload v1.0.0-beta.4 "scribble_1.0.0_amd64.deb" --clobber
-            echo "✅ Uploaded: scribble_1.0.0_amd64.deb"
+            FILENAME="scribble_${VERSION}_amd64.deb"
+            cp "$DEB" "$FILENAME"
+            gh release upload "$TAG" "$FILENAME" --clobber
+            echo "✅ Uploaded: $FILENAME"
           fi
 
           if [ -z "$APPIMAGE" ] && [ -z "$DEB" ]; then

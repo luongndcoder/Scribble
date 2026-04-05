@@ -1,6 +1,8 @@
 name: Build Windows
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -42,15 +44,34 @@ jobs:
         working-directory: src-python
         run: uv pip install --system -r requirements.txt
 
+      - name: Download ONNX model
+        working-directory: src-python/models
+        shell: bash
+        run: |
+          if [ ! -f voxceleb_CAM++.onnx ]; then
+            curl -L -o voxceleb_CAM++.onnx "https://wespeaker-1256283475.cos.ap-shanghai.myqcloud.com/models/voxceleb/voxceleb_CAM++.onnx"
+          fi
+
       - name: Build sidecar
         working-directory: src-python
         run: python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
 
-      - name: Copy sidecar binary
+      - name: Copy sidecar + compress
         shell: bash
         run: |
           mkdir -p src-tauri/binaries
-          cp src-python/dist/scribble-sidecar.exe src-tauri/binaries/scribble-sidecar-x86_64-pc-windows-msvc.exe
+          # Strip unnecessary files
+          rm -rf src-python/dist/scribble-sidecar/_internal/grpc_tools 2>/dev/null || true
+          find src-python/dist/scribble-sidecar/_internal -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
+          find src-python/dist/scribble-sidecar/_internal -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          find src-python/dist/scribble-sidecar/_internal -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
+          # Compress
+          tar -czf src-tauri/binaries/sidecar-dist.tar.gz -C src-python/dist scribble-sidecar
+          # Create launcher shim
+          cat > src-tauri/binaries/scribble-sidecar-x86_64-pc-windows-msvc.exe << 'WINEOF'
+          @echo off
+          "%~dp0sidecar-dist\scribble-sidecar.exe" %*
+          WINEOF
 
       - name: Bundle ffmpeg for Windows
         shell: bash
@@ -58,9 +79,6 @@ jobs:
           FFMPEG_PATH=$(which ffmpeg || echo "")
           if [ -n "$FFMPEG_PATH" ]; then
             cp "$FFMPEG_PATH" src-tauri/binaries/ffmpeg.exe
-            echo "✅ Bundled ffmpeg from $FFMPEG_PATH"
-          else
-            echo "⚠️ ffmpeg not found, audio conversion may not work"
           fi
 
       - name: Install frontend dependencies
@@ -70,14 +88,25 @@ jobs:
         shell: bash
         run: npx tauri build -b nsis --target x86_64-pc-windows-msvc
 
+      - name: Get version from tag
+        id: version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Upload to Release
         shell: bash
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
           INSTALLER=$(find src-tauri/target -name "*.exe" -path "*/nsis/*" | head -1)
           if [ -n "$INSTALLER" ]; then
-            cp "$INSTALLER" "Scribble_1.0.0_x64-setup.exe"
-            gh release upload v1.0.0-beta.4 "Scribble_1.0.0_x64-setup.exe" --clobber
-            echo "✅ Uploaded: Scribble_1.0.0_x64-setup.exe"
+            FILENAME="Scribble_${VERSION}_x64-setup.exe"
+            cp "$INSTALLER" "$FILENAME"
+            gh release upload "$TAG" "$FILENAME" --clobber
+            echo "✅ Uploaded: $FILENAME"
           else
             echo "❌ No NSIS installer found"
             exit 1
