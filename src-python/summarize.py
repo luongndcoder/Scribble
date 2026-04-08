@@ -14,8 +14,9 @@ log = get_logger(__name__)
 
 # ── Thresholds ──
 SINGLE_PASS_MAX_CHARS = 120_000  # ~30k tokens
-CHUNK_CHARS = 8_000              # ~2k tokens per chunk
-OVERLAP_CHARS = 500              # context overlap between chunks
+CHUNK_CHARS = 15_000             # ~3.5k tokens per chunk (larger = better context)
+OVERLAP_CHARS = 1_000            # context overlap between chunks
+SECTION_GROUP_SIZE = 4           # group N chunk summaries into 1 section (hierarchical reduce)
 
 # ── Prompts (all in English — output language controlled via instruction) ──
 
@@ -112,11 +113,35 @@ TEMPLATES = {
 }
 
 # ─── Chunk/Reduce prompts (shared across templates, for MapReduce) ───
-CHUNK_SUMMARY_PROMPT = """Summarize the following conversation segment. Keep key points, decisions, action items, and speaker names.
-Do not add information. Return concise bullet points (max 300 words)."""
+CHUNK_SUMMARY_PROMPT = """Summarize the following conversation segment in detail. You MUST preserve:
+- ALL key points, arguments, and reasoning (not just conclusions)
+- ALL decisions made with context on why
+- ALL action items with assignee and deadline if mentioned
+- Speaker names and their positions/opinions
+- Numbers, dates, metrics mentioned
+- Disagreements, concerns, or risks raised
 
-REDUCE_PROMPT = """Below are partial summaries from different segments of a long conversation.
-Synthesize them into a complete summary following the required structure."""
+Do not add information not present. Write in structured bullet points.
+Be thorough — this summary will be used to produce the final meeting minutes.
+Aim for 400-600 words."""
+
+SECTION_REDUCE_PROMPT = """Below are detailed summaries from consecutive segments of a meeting.
+Merge them into a coherent section summary that:
+- Preserves ALL key details, decisions, and action items
+- Removes only exact duplicates from overlapping segments
+- Maintains chronological flow
+- Keeps speaker attributions
+
+Be comprehensive. This intermediate summary feeds into the final minutes."""
+
+FINAL_REDUCE_PROMPT = """Below are section summaries from a long meeting.
+Synthesize them into complete, comprehensive meeting minutes following the required structure.
+
+IMPORTANT:
+- Do NOT over-compress. A 4-hour meeting should produce detailed minutes.
+- Every decision, action item, and key discussion point must appear.
+- If sections contain different topics, cover ALL of them.
+- Use the full output length available."""
 
 
 def _chunk_transcript(transcript: str) -> list[str]:
@@ -229,7 +254,7 @@ def _single_pass(client, model: str, prompt: str, transcript: str, time_context:
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,
-            max_tokens=4000,
+            max_tokens=8000,
             stream=True,
         )
 
@@ -247,7 +272,14 @@ def _single_pass(client, model: str, prompt: str, transcript: str, time_context:
 
 
 def _map_reduce(client, model: str, final_prompt: str, transcript: str, language: str, time_context: str = "") -> Generator[str, None, None]:
-    """MapReduce: chunk -> summarize each -> synthesize final summary."""
+    """Hierarchical MapReduce: chunk → map → section reduce → final reduce.
+
+    For a 4-hour meeting (~200k chars):
+      Phase 1: Split into ~14 chunks (15k each)
+      Phase 2: Map — detailed summary per chunk (400-600 words each)
+      Phase 3: Section reduce — group 4 chunks → 1 section summary
+      Phase 4: Final reduce — combine sections → comprehensive minutes
+    """
     try:
         # Phase 1: Split
         chunks = _chunk_transcript(transcript)
@@ -256,8 +288,8 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
 
         yield f"event: progress\ndata: {json.dumps({'step': 'chunking', 'total': total})}\n\n"
 
-        # Phase 2: Map — summarize each chunk
-        partial_summaries: list[str] = []
+        # Phase 2: Map — detailed summary per chunk
+        chunk_summaries: list[str] = []
         for i, chunk_text in enumerate(chunks):
             yield f"event: progress\ndata: {json.dumps({'step': 'analyzing', 'current': i + 1, 'total': total})}\n\n"
 
@@ -265,30 +297,59 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
                 model=model,
                 messages=[
                     {"role": "system", "content": CHUNK_SUMMARY_PROMPT},
-                    {"role": "user", "content": chunk_text},
+                    {"role": "user", "content": f"Segment {i + 1}/{total}:\n\n{chunk_text}"},
                 ],
                 temperature=0.2,
-                max_tokens=1000,
+                max_tokens=2000,
             )
             summary = response.choices[0].message.content or ""
-            partial_summaries.append(f"--- Part {i + 1}/{total} ---\n{summary}")
+            chunk_summaries.append(summary)
             log.info("[summarize] chunk %d/%d done (%d chars)", i + 1, total, len(summary))
 
-        # Phase 3: Reduce — synthesize into final summary
+        # Phase 3: Section reduce (hierarchical) — only if many chunks
+        if total > SECTION_GROUP_SIZE:
+            yield f"event: progress\ndata: {json.dumps({'step': 'consolidating'})}\n\n"
+
+            section_summaries: list[str] = []
+            for g in range(0, total, SECTION_GROUP_SIZE):
+                group = chunk_summaries[g:g + SECTION_GROUP_SIZE]
+                group_label = f"Segments {g + 1}-{min(g + SECTION_GROUP_SIZE, total)}/{total}"
+                combined_group = "\n\n".join(
+                    f"--- Segment {g + j + 1} ---\n{s}" for j, s in enumerate(group)
+                )
+
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": SECTION_REDUCE_PROMPT},
+                        {"role": "user", "content": f"{group_label}:\n\n{combined_group}"},
+                    ],
+                    temperature=0.2,
+                    max_tokens=3000,
+                )
+                section = response.choices[0].message.content or ""
+                section_summaries.append(f"## Section: {group_label}\n{section}")
+                log.info("[summarize] section %s done (%d chars)", group_label, len(section))
+
+            combined_for_final = "\n\n".join(section_summaries)
+        else:
+            # Few chunks — skip section reduce
+            combined_for_final = "\n\n".join(
+                f"--- Part {i + 1}/{total} ---\n{s}" for i, s in enumerate(chunk_summaries)
+            )
+
+        # Phase 4: Final reduce — comprehensive minutes
         yield f"event: progress\ndata: {json.dumps({'step': 'finalizing'})}\n\n"
 
-        reduce_intro = REDUCE_PROMPT
-        combined = "\n\n".join(partial_summaries)
-
-        user_content = f"{time_context}{combined}" if time_context else combined
+        user_content = f"{time_context}{combined_for_final}" if time_context else combined_for_final
         stream = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": f"{final_prompt}\n\n{reduce_intro}"},
+                {"role": "system", "content": f"{final_prompt}\n\n{FINAL_REDUCE_PROMPT}"},
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,
-            max_tokens=4000,
+            max_tokens=8000,
             stream=True,
         )
 
