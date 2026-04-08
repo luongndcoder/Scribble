@@ -662,7 +662,8 @@ export function RecordingBar() {
                         <CustomSelect className="summary-template-select" value={summaryTemplate} onChange={setSummaryTemplate}
                             options={[
                                 { value: 'mom', label: lang === 'vi' ? 'Biên bản (MoM)' : 'Minutes (MoM)' },
-                                { value: 'summary', label: lang === 'vi' ? 'Tóm tắt chi tiết' : 'Detailed Summary' },
+                                { value: 'deep', label: lang === 'vi' ? 'Phân tích chi tiết' : 'Deep Analysis' },
+                                { value: 'summary', label: lang === 'vi' ? 'Tóm tắt' : 'Summary' },
                                 { value: 'bullets', label: 'Bullet Points' },
                                 { value: 'custom', label: lang === 'vi' ? 'Tùy chỉnh' : 'Custom Prompt' },
                             ]}

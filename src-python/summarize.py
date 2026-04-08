@@ -105,12 +105,79 @@ Rules:
 - Maximum 30 bullet points.
 """
 
+# ─── Template: Deep Analysis (timestamp-level detail) ───
+DEEP_ANALYSIS_PROMPT = """You are an expert meeting analyst who produces exhaustive, timestamp-level meeting analysis.
+
+Your output must be a comprehensive document that captures EVERYTHING discussed, organized chronologically by topic sections.
+
+## Required format for EACH section:
+
+### PHẦN N: <Section Title> (start_time → end_time)
+
+#### Nội dung chính
+For each significant statement, write:
+**[timestamp range] Speaker Name** — What they said/proposed/decided.
+- Use exact quotes when the statement is important (wrap in > blockquote)
+- Include reasoning, context, and nuance — not just conclusions
+- Capture back-and-forth discussions, disagreements, and resolutions
+
+#### Vấn đề phát hiện
+List problems, concerns, mistakes, or confusion that emerged:
+- What was the issue
+- Who raised it
+- Direct quote if impactful
+- Use > blockquote for critical feedback
+
+#### Điểm kỹ thuật rút ra
+Summary table of key technical decisions/facts from this section:
+| Thông tin | Giá trị/Ghi chú |
+|-----------|-----------------|
+| ... | ... |
+
+## Rules:
+1. **Chronological order** — follow the meeting flow, section by section
+2. **Every decision must be captured** with who decided and why
+3. **Every action item** with What - Who - When
+4. **Disagreements/feedback** — capture exact quotes, especially critical feedback
+5. **Speaker attribution** — always name who said what
+6. **Timestamp references** — use [MM:SS] or [HH:MM:SS] format from transcript
+7. **Do NOT summarize away details** — this is an ANALYSIS, not a summary
+8. **Tables for structured data** — use markdown tables for comparisons, specs, decisions
+9. Start with:
+   - `# <Meeting Title>`
+   - Date, duration, attendees with roles
+   - Brief meeting purpose (2-3 sentences)
+10. End with:
+    - `## Tổng kết & Action Items` — master list of all action items
+    - `## Vấn đề mở` — unresolved questions
+
+Output length: Be as detailed as needed. A 2-hour meeting should produce 500-700 lines of analysis.
+"""
+
 # ─── Template registry ───
 TEMPLATES = {
-    "mom":     MOM_PROMPT,
-    "summary": SUMMARY_PROMPT,
-    "bullets": BULLETS_PROMPT,
+    "mom":      MOM_PROMPT,
+    "summary":  SUMMARY_PROMPT,
+    "bullets":  BULLETS_PROMPT,
+    "deep":     DEEP_ANALYSIS_PROMPT,
 }
+
+# ─── Deep Analysis chunk prompt (preserves timestamps + quotes) ───
+DEEP_CHUNK_PROMPT = """Analyze this conversation segment in exhaustive detail.
+
+For each significant exchange, write:
+**[timestamp] Speaker** — What they said, decided, or proposed.
+- Include direct quotes for important statements (use > blockquote)
+- Capture disagreements, corrections, and feedback verbatim
+- Note decisions, action items, numbers, and technical details
+
+Preserve ALL timestamps from the transcript. Do NOT summarize — ANALYZE.
+Output: structured markdown, 600-1000 words."""
+
+DEEP_SECTION_REDUCE_PROMPT = """Merge these detailed segment analyses into a coherent section.
+Preserve ALL timestamps, quotes, speaker attributions, and details.
+Remove only exact duplicates from overlapping segments.
+Organize chronologically. Do NOT compress or summarize away details."""
 
 # ─── Chunk/Reduce prompts (shared across templates, for MapReduce) ───
 CHUNK_SUMMARY_PROMPT = """Summarize the following conversation segment in detail. You MUST preserve:
@@ -232,16 +299,18 @@ def summarize_stream(transcript: str, language: str, db, *, start_time: str = ""
             time_context += f"Recording ended: {end_time}\n"
         time_context += "---\n"
 
+    is_deep = template == "deep"
+
     # ── Single-pass for short transcripts ──
     if len(transcript) < SINGLE_PASS_MAX_CHARS:
-        yield from _single_pass(client, model, prompt, transcript, time_context)
+        yield from _single_pass(client, model, prompt, transcript, time_context, max_tokens=16000 if is_deep else 8000)
         return
 
     # ── MapReduce for long transcripts ──
-    yield from _map_reduce(client, model, prompt, transcript, language, time_context)
+    yield from _map_reduce(client, model, prompt, transcript, language, time_context, deep=is_deep)
 
 
-def _single_pass(client, model: str, prompt: str, transcript: str, time_context: str = "") -> Generator[str, None, None]:
+def _single_pass(client, model: str, prompt: str, transcript: str, time_context: str = "", max_tokens: int = 8000) -> Generator[str, None, None]:
     """Single LLM call for short transcripts."""
     try:
         yield f"event: progress\ndata: {json.dumps({'step': 'summarizing', 'progress': 0.1})}\n\n"
@@ -254,7 +323,7 @@ def _single_pass(client, model: str, prompt: str, transcript: str, time_context:
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,
-            max_tokens=8000,
+            max_tokens=max_tokens,
             stream=True,
         )
 
@@ -271,7 +340,7 @@ def _single_pass(client, model: str, prompt: str, transcript: str, time_context:
         yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
 
-def _map_reduce(client, model: str, final_prompt: str, transcript: str, language: str, time_context: str = "") -> Generator[str, None, None]:
+def _map_reduce(client, model: str, final_prompt: str, transcript: str, language: str, time_context: str = "", deep: bool = False) -> Generator[str, None, None]:
     """Hierarchical MapReduce: chunk → map → section reduce → final reduce.
 
     For a 4-hour meeting (~200k chars):
@@ -289,6 +358,8 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
         yield f"event: progress\ndata: {json.dumps({'step': 'chunking', 'total': total})}\n\n"
 
         # Phase 2: Map — detailed summary per chunk
+        map_prompt = DEEP_CHUNK_PROMPT if deep else CHUNK_SUMMARY_PROMPT
+        map_max_tokens = 4000 if deep else 2000
         chunk_summaries: list[str] = []
         for i, chunk_text in enumerate(chunks):
             yield f"event: progress\ndata: {json.dumps({'step': 'analyzing', 'current': i + 1, 'total': total})}\n\n"
@@ -296,11 +367,11 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
             response = client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": CHUNK_SUMMARY_PROMPT},
+                    {"role": "system", "content": map_prompt},
                     {"role": "user", "content": f"Segment {i + 1}/{total}:\n\n{chunk_text}"},
                 ],
                 temperature=0.2,
-                max_tokens=2000,
+                max_tokens=map_max_tokens,
             )
             summary = response.choices[0].message.content or ""
             chunk_summaries.append(summary)
@@ -318,14 +389,16 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
                     f"--- Segment {g + j + 1} ---\n{s}" for j, s in enumerate(group)
                 )
 
+                section_prompt = DEEP_SECTION_REDUCE_PROMPT if deep else SECTION_REDUCE_PROMPT
+                section_max_tokens = 6000 if deep else 3000
                 response = client.chat.completions.create(
                     model=model,
                     messages=[
-                        {"role": "system", "content": SECTION_REDUCE_PROMPT},
+                        {"role": "system", "content": section_prompt},
                         {"role": "user", "content": f"{group_label}:\n\n{combined_group}"},
                     ],
                     temperature=0.2,
-                    max_tokens=3000,
+                    max_tokens=section_max_tokens,
                 )
                 section = response.choices[0].message.content or ""
                 section_summaries.append(f"## Section: {group_label}\n{section}")
@@ -341,6 +414,7 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
         # Phase 4: Final reduce — comprehensive minutes
         yield f"event: progress\ndata: {json.dumps({'step': 'finalizing'})}\n\n"
 
+        final_max_tokens = 16000 if deep else 8000
         user_content = f"{time_context}{combined_for_final}" if time_context else combined_for_final
         stream = client.chat.completions.create(
             model=model,
@@ -349,7 +423,7 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,
-            max_tokens=8000,
+            max_tokens=final_max_tokens,
             stream=True,
         )
 
