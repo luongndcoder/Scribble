@@ -870,9 +870,14 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
 
     // Find tar.gz in app bundle
     let tar_candidates = vec![
+        // macOS .app bundle
         exe_dir.join("../Resources/binaries/sidecar-dist.tar.gz"),
         exe_dir.join("../Resources/sidecar-dist.tar.gz"),
+        // Windows installer / Linux: resources next to exe
+        exe_dir.join("binaries/sidecar-dist.tar.gz"),
         exe_dir.join("sidecar-dist.tar.gz"),
+        // Linux deb: /usr/lib/<app>/binaries/
+        exe_dir.join("../lib/scribble/binaries/sidecar-dist.tar.gz"),
     ];
     let tar_path = tar_candidates.iter().find(|p| p.exists()).cloned();
 
