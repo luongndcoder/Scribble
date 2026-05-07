@@ -88,28 +88,38 @@ jobs:
         shell: bash
         run: npx tauri build -b nsis --target x86_64-pc-windows-msvc
 
-      - name: Get version from tag
+      - name: Resolve version + installer
         id: version
         shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Upload to Release
-        shell: bash
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="${{ steps.version.outputs.tag }}"
-          INSTALLER=$(find src-tauri/target -name "*.exe" -path "*/nsis/*" | head -1)
-          if [ -n "$INSTALLER" ]; then
-            FILENAME="Scribble_${VERSION}_x64-setup.exe"
-            cp "$INSTALLER" "$FILENAME"
-            gh release upload "$TAG" "$FILENAME" --clobber
-            echo "✅ Uploaded: $FILENAME"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF_NAME#v}
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           else
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          INSTALLER=$(find src-tauri/target -name "*.exe" -path "*/nsis/*" | head -1)
+          if [ -z "$INSTALLER" ]; then
             echo "❌ No NSIS installer found"
             exit 1
           fi
+          FILENAME="Scribble_${VERSION}_x64-setup.exe"
+          cp "$INSTALLER" "$FILENAME"
+          echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
+          echo "✅ Built: $FILENAME"
+
+      - name: Upload to Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: gh release upload "${{ steps.version.outputs.tag }}" "${{ steps.version.outputs.filename }}" --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload as artifact (manual run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scribble-windows-installer
+          path: ${{ steps.version.outputs.filename }}
+          retention-days: 30
