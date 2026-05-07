@@ -25,10 +25,10 @@
 
 | Hệ điều hành | Chip / Kiến trúc | File cài đặt | Link |
 |---------------|-------------------|---------------|------|
-| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.1.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_aarch64.dmg) |
-| 🪟 **Windows** | 64-bit | `Scribble_1.1.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_x64-setup.exe) |
-| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.1.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_amd64.AppImage) |
-| 🐧 **Linux** | 64-bit (deb) | `scribble_1.1.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.1.0_amd64.deb) |
+| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.1.2_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.2_aarch64.dmg) |
+| 🪟 **Windows** | 64-bit | `Scribble_1.1.2_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.2_x64-setup.exe) |
+| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.1.2_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.2_amd64.AppImage) |
+| 🐧 **Linux** | 64-bit (deb) | `scribble_1.1.2_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.1.2_amd64.deb) |
 
 > **⚠️ Lưu ý macOS:** Lần đầu mở app nếu gặp cảnh báo **"Scribble Not Opened"**, mở Terminal và chạy:
 > ```bash
@@ -186,10 +186,10 @@ Hỗ trợ: OpenAI, Azure, Groq, Together, Ollama, ...
 
 | OS | Architecture | Installer | Link |
 |----|-------------|-----------|------|
-| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.1.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_aarch64.dmg) |
-| 🪟 **Windows** | 64-bit | `Scribble_1.1.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_x64-setup.exe) |
-| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.1.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.0_amd64.AppImage) |
-| 🐧 **Linux** | 64-bit (deb) | `scribble_1.1.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.1.0_amd64.deb) |
+| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.1.2_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.2_aarch64.dmg) |
+| 🪟 **Windows** | 64-bit | `Scribble_1.1.2_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.2_x64-setup.exe) |
+| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.1.2_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.1.2_amd64.AppImage) |
+| 🐧 **Linux** | 64-bit (deb) | `scribble_1.1.2_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.1.2_amd64.deb) |
 
 > **⚠️ macOS note:** If you see **"Scribble Not Opened"** on first launch, open Terminal and run:
 > ```bash
