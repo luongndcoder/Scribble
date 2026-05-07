@@ -30,8 +30,13 @@ hiddenimports = [
     'grpcio',
     'charset_normalizer',
     'websockets',
+    'onnxruntime',
+    'onnxruntime.capi',
+    'onnxruntime.capi._pybind_state',
 ]
 tmp_ret = collect_all('riva')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('onnxruntime')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('soniox')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
