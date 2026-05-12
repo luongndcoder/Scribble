@@ -493,12 +493,16 @@ app.include_router(upload_router, tags=["upload"])
 
 ## 7. Feature flag default
 
-Khi sidecar khởi động lần đầu, KHÔNG set `feature_upload_audio_enabled`. User phải bật thủ công qua Settings hoặc dev mode set DB.
+**Default ON** — không cần user setup gì. Setting `feature_upload_audio_enabled`
+chỉ tồn tại như opt-out cho dev/QA: chỉ disabled khi đặt thành `false`/`0`/`off`/`no`.
 
-Để bật cho dev test:
+End user cài app xong dùng được ngay (zero-manual-setup principle — xem
+`feedback_zero_manual_setup` memory).
+
+Để dev QA disable tạm (hiếm dùng):
 ```bash
 sqlite3 ~/.voicescribe/voicescribe.db \
-  "INSERT OR REPLACE INTO settings (key, value) VALUES ('feature_upload_audio_enabled', 'true')"
+  "INSERT OR REPLACE INTO settings (key, value) VALUES ('feature_upload_audio_enabled', 'false')"
 ```
 
 ## 8. Test sau Phase 1
@@ -512,7 +516,8 @@ sqlite3 ~/.voicescribe/voicescribe.db \
 - [ ] File >2GB → trả error 400 hoặc cancel job
 - [ ] File extension không hợp lệ (.txt) → trả 400
 - [ ] Filename tiếng Việt có dấu → lưu disk NFC, không vỡ
-- [ ] Feature flag off → endpoint trả 503
+- [ ] Default install (no settings touched) → endpoint hoạt động (default ON)
+- [ ] Explicit set `feature_upload_audio_enabled=false` → endpoint trả 503
 
 ### Regression (chạy [02-regression-checklist.md](./02-regression-checklist.md))
 - [ ] Section A toàn bộ pass (realtime recording không vỡ)
@@ -527,7 +532,7 @@ sqlite3 ~/.voicescribe/voicescribe.db \
 
 - [ ] Tất cả file mới được tạo, không file cũ bị sửa logic
 - [ ] DB migration idempotent, không phá DB v1.1.4
-- [ ] Feature flag default OFF
+- [ ] Feature flag default ON (zero-manual-setup)
 - [ ] Regression checklist Section A + B pass
 - [ ] 3 OS smoke test pass
 - [ ] PR ≤500 dòng net new code

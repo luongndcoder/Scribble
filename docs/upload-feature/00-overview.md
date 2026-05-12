@@ -11,7 +11,7 @@
 | D3 | **Một meeting = một nguồn** (realtime XOR upload) | Đơn giản state management, không phát sinh feature `merge meetings` |
 | D4 | **UI mutex**: không cho mở upload khi đang record và ngược lại | Tránh diarizer profile ô nhiễm, tránh sidecar overload |
 | D5 | **BatchDiarizer riêng**, không reuse `BackgroundReconciler` | Algorithm khác (global clustering tốt hơn streaming cho batch) |
-| D6 | **Feature flag** từ ngày đầu (`feature_upload_audio_enabled`) | Rollback nhanh nếu lỗi production |
+| D6 | **Feature flag default ON** (`feature_upload_audio_enabled`) — opt-out duy nhất cho dev/QA, end user không phải làm gì | Nguyên tắc zero-manual-setup: cài app là dùng được ngay (chỉ API key/model mới cần user nhập). |
 | D7 | **Job persist in-memory** ở v1, defer SQLite job state | YAGNI — chỉ làm khi telemetry cho thấy sidecar hay crash |
 | D8 | **scipy** cho clustering, KHÔNG sklearn | sklearn đã trong PyInstaller excludes (tăng installer ~50MB); scipy đã có sẵn |
 

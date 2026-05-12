@@ -38,8 +38,11 @@ DUPLICATE_ERROR_PREFIX = "DUPLICATE:"
 
 
 def _feature_enabled() -> bool:
+    # Default ON: shipped feature must work right after install (zero-setup
+    # principle). The setting exists only as a dev/QA opt-out — set it to
+    # "false"/"0"/"off"/"no" to disable.
     val = (db.get_setting(UPLOAD_FEATURE_FLAG_KEY) or "").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    return val not in ("0", "false", "no", "off")
 
 
 def _upload_audio_dir() -> Path:
@@ -56,10 +59,14 @@ async def upload_audio(
     title: str | None = Form(None),
     language: str = Form("vi"),
 ):
-    """Accept an audio/video file, create a draft meeting + job, kick off async upload.
+    """Receive audio/video upload, persist to disk synchronously, return job ref.
 
-    Returns immediately with {job_id, meeting_id}. Progress is tracked via the
-    /jobs endpoints. Phase 2 will continue the pipeline after the upload completes.
+    Why synchronous (not background task): FastAPI cleans up UploadFile after
+    the handler returns; reading from it in an asyncio.create_task() task is a
+    use-after-free that surfaces as "I/O operation on closed file". The upload
+    itself is local I/O — fast on localhost — so blocking the response until
+    bytes hit disk is acceptable. Heavy pipeline work (normalize/STT/diarize)
+    is the part that runs async via the job runner (Phase 2).
     """
     if not _feature_enabled():
         raise HTTPException(status_code=503, detail="Upload feature disabled")
@@ -81,74 +88,54 @@ async def upload_audio(
     )
     db.update_meeting(meeting_id, source_type="upload", source_filename=safe_name)
 
-    job = registry.create(meeting_id=meeting_id)
     target_path = _upload_audio_dir() / f"upload_{meeting_id}{ext}"
 
-    asyncio.create_task(_run_upload(job.job_id, meeting_id, audio, target_path, safe_name))
-
-    return {"job_id": job.job_id, "meeting_id": meeting_id}
-
-
-async def _run_upload(
-    job_id: str,
-    meeting_id: int,
-    upload: UploadFile,
-    target_path: Path,
-    original_filename: str,
-):
-    """Background coroutine — stream upload to disk, validate, hash, persist."""
-    await registry.update(
-        job_id,
-        status=JobStatus.UPLOADING,
-        message="Receiving file",
-    )
-
-    async def _progress(_chunk_bytes: int, total: int):
-        pct = min(0.2, (total / MAX_FILE_BYTES) * 0.2)
-        await registry.update(job_id, progress=pct)
-
     try:
-        size, sha256 = await stream_to_disk(upload, target_path, on_progress=_progress)
+        size, sha256 = await stream_to_disk(audio, target_path)
     except ValueError as exc:
-        log.warning("[upload] size limit exceeded for job %s: %s", job_id, exc)
+        # 2GB cap exceeded — return 413 + rollback the half-created meeting
         target_path.unlink(missing_ok=True)
         db.delete_meeting(meeting_id)
-        await registry.update(job_id, status=JobStatus.FAILED, error=str(exc))
-        return
+        raise HTTPException(status_code=413, detail=str(exc))
     except Exception as exc:
-        log.exception("[upload] streaming failed for job %s", job_id)
+        log.exception("[upload] streaming failed for meeting %s", meeting_id)
         target_path.unlink(missing_ok=True)
         db.delete_meeting(meeting_id)
-        await registry.update(job_id, status=JobStatus.FAILED, error=str(exc))
-        return
+        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
 
     existing_id = db.find_meeting_by_hash(sha256)
     if existing_id and existing_id != meeting_id:
+        # Idempotent: rollback the just-created blank meeting, create a job that
+        # points to the EXISTING meeting and is immediately marked failed with
+        # a DUPLICATE: marker so the frontend's SSE handler can redirect there.
         target_path.unlink(missing_ok=True)
         db.delete_meeting(meeting_id)
+        job = registry.create(meeting_id=existing_id)
         await registry.update(
-            job_id,
+            job.job_id,
             status=JobStatus.FAILED,
             error=f"{DUPLICATE_ERROR_PREFIX}{existing_id}",
             message=f"File đã tồn tại trong meeting #{existing_id}",
         )
-        return
+        return {"job_id": job.job_id, "meeting_id": existing_id}
 
     db.update_meeting(
         meeting_id,
         audio_path=str(target_path),
-        source_type="upload",
-        source_filename=original_filename,
         file_hash=sha256,
     )
 
-    # Phase 1 placeholder — Phase 2 will replace this with run_pipeline(job_id)
+    job = registry.create(meeting_id=meeting_id)
+    # Phase 1 placeholder — Phase 2 will replace with: asyncio.create_task(run_pipeline(job.job_id))
+    # which reads from disk (no UploadFile dep), so the same race won't recur.
     await registry.update(
-        job_id,
+        job.job_id,
         status=JobStatus.DONE,
         progress=1.0,
         message=f"Uploaded {size} bytes (pipeline pending Phase 2)",
     )
+
+    return {"job_id": job.job_id, "meeting_id": meeting_id}
 
 
 @router.get("/jobs/{job_id}")
