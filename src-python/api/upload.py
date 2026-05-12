@@ -126,14 +126,16 @@ async def upload_audio(
     )
 
     job = registry.create(meeting_id=meeting_id)
-    # Phase 1 placeholder — Phase 2 will replace with: asyncio.create_task(run_pipeline(job.job_id))
-    # which reads from disk (no UploadFile dep), so the same race won't recur.
     await registry.update(
         job.job_id,
-        status=JobStatus.DONE,
-        progress=1.0,
-        message=f"Uploaded {size} bytes (pipeline pending Phase 2)",
+        status=JobStatus.PENDING,
+        message=f"Uploaded {size} bytes — bắt đầu xử lý",
     )
+
+    # Pipeline reads from disk (target_path), not the UploadFile → no race
+    # with FastAPI's request-scope cleanup. Safe to spawn after we return.
+    from services.upload_pipeline import run_pipeline
+    asyncio.create_task(run_pipeline(job.job_id))
 
     return {"job_id": job.job_id, "meeting_id": meeting_id}
 
