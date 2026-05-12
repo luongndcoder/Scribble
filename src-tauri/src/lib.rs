@@ -1,6 +1,8 @@
 use std::sync::Mutex;
 use tauri::{Manager, Emitter};
 
+pub mod upload;
+
 struct SidecarChild(std::process::Child);
 
 impl SidecarChild {
@@ -1086,7 +1088,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(SidecarState { child: None }))
+        .manage(upload::UploadState::new())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -1153,6 +1157,9 @@ pub fn run() {
             check_screen_access,
             start_system_audio,
             stop_system_audio,
+            upload::pick_audio_file,
+            upload::upload_audio_to_sidecar,
+            upload::cancel_audio_upload,
         ])
         .on_window_event(|window, event| {
             match event {
