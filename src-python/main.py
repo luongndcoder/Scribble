@@ -123,13 +123,19 @@ def _safe_unlink(path: str):
 # ─── Upload Size Limit Middleware ───
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 
+# Paths exempt from the small-upload cap (their own size limit applies).
+# Upload audio: 2GB cap enforced in services/upload_storage.py.
+_LARGE_UPLOAD_PATH_PREFIXES = ("/meetings/upload-audio",)
+
 
 class _LimitUploadSizeMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method in ("POST", "PUT", "PATCH"):
-            content_length = request.headers.get("content-length")
-            if content_length and int(content_length) > MAX_UPLOAD_SIZE:
-                return JSONResponse({"error": "File too large (max 50MB)"}, status_code=413)
+            path = request.url.path
+            if not any(path.startswith(p) for p in _LARGE_UPLOAD_PATH_PREFIXES):
+                content_length = request.headers.get("content-length")
+                if content_length and int(content_length) > MAX_UPLOAD_SIZE:
+                    return JSONResponse({"error": "File too large (max 50MB)"}, status_code=413)
         return await call_next(request)
 
 
@@ -208,13 +214,14 @@ app.add_middleware(
 )
 
 # ─── Include routers ───
-from api import settings, meetings, drafts, diagnose, transcription
+from api import settings, meetings, drafts, diagnose, transcription, upload
 
 app.include_router(settings.router)
 app.include_router(meetings.router)
 app.include_router(drafts.router)
 app.include_router(diagnose.router)
 app.include_router(transcription.router)
+app.include_router(upload.router)
 
 
 # ─── Live Log Stream (SSE) ───

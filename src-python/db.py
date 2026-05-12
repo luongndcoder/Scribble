@@ -39,6 +39,7 @@ class Database:
 
         self._db_path = db_path
         self._create_tables()
+        self._migrate_v2()
         self._initialized = True
         log.info("SQLite: %s", db_path)
 
@@ -91,6 +92,27 @@ class Database:
         """)
         conn.commit()
 
+    def _migrate_v2(self):
+        """Idempotent migration: add columns for upload audio feature.
+
+        Safe to run repeatedly — duplicate ADD COLUMN errors are ignored.
+        Existing rows get default values; realtime flow unaffected.
+        """
+        conn = self._conn()
+        migrations = [
+            "ALTER TABLE meetings ADD COLUMN source_type TEXT DEFAULT 'realtime'",
+            "ALTER TABLE meetings ADD COLUMN file_hash TEXT DEFAULT NULL",
+            "ALTER TABLE meetings ADD COLUMN source_filename TEXT DEFAULT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_meetings_file_hash ON meetings(file_hash)",
+        ]
+        for sql in migrations:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    log.warning("Migration skipped (%s): %s", sql[:60], e)
+        conn.commit()
+
     # ─── Meetings ───
     def create_meeting(self, title: str, transcript: str, summary: str,
                        audio_duration: float, language: str, status: str = "saved") -> int:
@@ -116,6 +138,7 @@ class Database:
     _ALLOWED_UPDATE_COLS = frozenset({
         "title", "transcript", "summary", "translations", "audio_path",
         "audio_duration", "language", "status",
+        "source_type", "source_filename", "file_hash",
     })
 
     def update_meeting(self, mid: int, **kwargs):
@@ -193,6 +216,17 @@ class Database:
         conn = self._conn()
         conn.execute("DELETE FROM meetings WHERE id = ?", (mid,))
         conn.commit()
+
+    def find_meeting_by_hash(self, file_hash: str) -> int | None:
+        """Idempotency lookup for uploaded files. Returns meeting_id if exists, else None."""
+        if not file_hash:
+            return None
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT id FROM meetings WHERE file_hash = ? LIMIT 1",
+            (file_hash,),
+        ).fetchone()
+        return row["id"] if row else None
 
     # ─── Settings ───
     def get_setting(self, key: str) -> str | None:
