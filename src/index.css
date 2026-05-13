@@ -3829,7 +3829,10 @@ body.electron-app .draft-recovery-banner {
   max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* `visible` so CustomSelect's absolutely-positioned dropdown can escape
+     the card and render above sibling rows when it opens upward. With
+     `hidden` only the middle slice of the 13-item language list showed. */
+  overflow: visible;
 }
 
 .upload-modal-header {
@@ -3868,10 +3871,19 @@ body.electron-app .draft-recovery-banner {
 
 .upload-modal-body {
   padding: 20px 22px 22px;
-  overflow-y: auto;
+  /* Match the card — let the dropdown extend past the body too. The pick
+     step's form is ≤ 5 rows; if a future step needs scroll, give that
+     step's container its own overflow rule. */
+  overflow: visible;
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* Tighter max-height for the language picker dropdown so 13 options fit
+   neatly within the modal without scrolling off-screen. */
+.upload-language-select .custom-select-dropdown {
+  max-height: 220px;
 }
 
 .upload-modal-subtitle {
