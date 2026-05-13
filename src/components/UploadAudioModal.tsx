@@ -16,6 +16,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
+import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import {
     cancelAudioUpload,
     cancelJob,
@@ -29,6 +30,7 @@ import {
     type UploadProgressPayload,
     type UploadResult,
 } from '../lib/upload-audio';
+import { CustomSelect } from './CustomSelect';
 import { useToast } from './Toast';
 
 type Step = 'pick' | 'uploading' | 'pipeline' | 'done' | 'error' | 'duplicate';
@@ -371,22 +373,12 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                                 </div>
                                 <div className="upload-field">
                                     <label className="upload-field-label">{tr.languageLabel}</label>
-                                    <select
-                                        className="upload-field-input"
+                                    <CustomSelect
+                                        className="upload-language-select"
                                         value={language}
-                                        onChange={(e) => setLanguage(e.target.value)}
-                                    >
-                                        <option value="vi">Tiếng Việt</option>
-                                        <option value="en">English</option>
-                                        <option value="ja">日本語</option>
-                                        <option value="ko">한국어</option>
-                                        <option value="zh">中文</option>
-                                        <option value="fr">Français</option>
-                                        <option value="de">Deutsch</option>
-                                        <option value="es">Español</option>
-                                        <option value="th">ภาษาไทย</option>
-                                        <option value="id">Indonesia</option>
-                                    </select>
+                                        onChange={setLanguage}
+                                        options={NVIDIA_STT_LANGUAGES}
+                                    />
                                 </div>
                             </>
                         )}

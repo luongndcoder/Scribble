@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { getSettings, saveSettings, diagnose, fetchLLMModels } from '../lib/api';
+import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
 import { useToast } from './Toast';
@@ -130,21 +131,9 @@ export function SettingsPanel() {
         setTestRunning(false);
     };
 
-    const nvidiaLanguages = [
-        { value: 'vi', label: 'Vietnamese' },
-        { value: 'en', label: 'English' },
-        { value: 'zh', label: 'Chinese' },
-        { value: 'ja', label: 'Japanese' },
-        { value: 'ko', label: 'Korean' },
-        { value: 'fr', label: 'French' },
-        { value: 'de', label: 'German' },
-        { value: 'es', label: 'Spanish' },
-        { value: 'it', label: 'Italian' },
-        { value: 'pt', label: 'Portuguese' },
-        { value: 'ru', label: 'Russian' },
-        { value: 'hi', label: 'Hindi' },
-        { value: 'ar', label: 'Arabic' },
-    ];
+    // Canonical list lives in src/lib/language-options.ts so UploadAudioModal
+    // and any future selector stay in sync with the same labels + value set.
+    const nvidiaLanguages = NVIDIA_STT_LANGUAGES;
 
     const sonioxLanguages = [
         { value: 'vi', label: 'Vietnamese' },
