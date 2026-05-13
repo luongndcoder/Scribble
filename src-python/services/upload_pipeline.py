@@ -35,7 +35,11 @@ from services.audio import find_ffmpeg
 from services.batch_diarizer import cluster_speakers, extract_embedding
 from services.job_registry import JobState, JobStatus, registry
 from services.vad_splitter import AudioChunk, split_into_chunks
-from stt import HALLUCINATION_PATTERNS, get_language_code, transcribe_nvidia
+from stt import (
+    HALLUCINATION_PATTERNS,
+    get_language_code,
+    transcribe_nvidia_streaming,
+)
 
 log = logging.getLogger(__name__)
 
@@ -167,28 +171,67 @@ async def _execute(
     if _is_cancelled(job):
         return
 
-    # ── VAD-aware splitting ────────────────────────────────────────────────
+    # ── VAD-aware splitting (or restore plan from DB if resuming) ─────────
     await registry.update(
         job_id, progress=P_SPLIT, message="Phát hiện đoạn nói"
     )
     chunks_dir = tmp_root / "chunks"
-    chunks = await asyncio.to_thread(split_into_chunks, wav_path, chunks_dir)
-    if not chunks:
-        raise ValueError("Không phát hiện được giọng nói trong file")
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_chunks = {c["chunk_idx"]: c for c in db.get_upload_chunks(meeting_id)}
+    if saved_chunks:
+        # Resume mode: reuse the previously computed plan so chunk boundaries
+        # stay consistent with already-saved transcripts.
+        log.info(
+            "[pipeline] resuming meeting %s: %d chunks already in DB",
+            meeting_id, len(saved_chunks),
+        )
+        chunks = _chunks_from_db_plan(saved_chunks, wav_path, chunks_dir)
+    else:
+        chunks = await asyncio.to_thread(split_into_chunks, wav_path, chunks_dir)
+        if not chunks:
+            raise ValueError("Không phát hiện được giọng nói trong file")
+        # Persist the plan so a future resume can use the same boundaries.
+        db.upsert_chunk_plan(
+            meeting_id,
+            [(c.idx, c.start_ms, c.end_ms) for c in chunks],
+        )
+
     await registry.update(job_id, total_chunks=len(chunks))
     if _is_cancelled(job):
         return
 
-    # ── Parallel STT + embedding ───────────────────────────────────────────
+    # Re-extract WAV files for chunks that don't have STT text saved yet
+    # (saved chunks have their text/embedding in DB — no need to redo).
+    pending_chunks = [
+        c for c in chunks
+        if not (saved_chunks.get(c.idx) and saved_chunks[c.idx].get("text"))
+    ]
+    if saved_chunks:
+        # Materialize the pending chunks' WAV files on disk (extract from
+        # normalized.wav using the stored boundaries).
+        await asyncio.to_thread(_extract_pending_chunk_files, wav_path, pending_chunks)
+
+    # ── Parallel STT + embedding (only for chunks that need it) ───────────
     await registry.update(
         job_id,
         status=JobStatus.TRANSCRIBING,
         progress=P_TRANSCRIBE_START,
-        message=f"Phiên âm ({len(chunks)} chunks)",
+        message=(
+            f"Phiên âm {len(saved_chunks)}/{len(chunks)} (resume)"
+            if saved_chunks
+            else f"Phiên âm ({len(chunks)} chunks)"
+        ),
     )
-    chunk_results = await _process_chunks_parallel(job, chunks)
+    new_results = await _process_chunks_parallel(
+        job, pending_chunks, meeting_id=meeting_id, total_chunks=len(chunks),
+        already_done=sum(1 for sc in saved_chunks.values() if sc.get("text")),
+    )
     if _is_cancelled(job):
         return
+
+    # Merge saved + newly processed results into chunk_results
+    chunk_results = _merge_saved_and_new_results(saved_chunks, new_results, chunks)
 
     # ── Global speaker clustering ──────────────────────────────────────────
     await registry.update(
@@ -204,7 +247,7 @@ async def _execute(
     if _is_cancelled(job):
         return
 
-    # ── Build transcript + persist ─────────────────────────────────────────
+    # ── Build transcript + persist (final pass) ────────────────────────────
     transcript_parts = _build_transcript_parts(chunk_results, speaker_map)
     transcript_json = json.dumps(transcript_parts, ensure_ascii=False)
     db.update_meeting(meeting_id, transcript=transcript_json, status="saved")
@@ -294,14 +337,25 @@ def _normalize_to_wav(source: Path, target: Path) -> None:
 
 
 async def _process_chunks_parallel(
-    job: JobState, chunks: list[AudioChunk]
+    job: JobState,
+    chunks: list[AudioChunk],
+    *,
+    meeting_id: int,
+    total_chunks: int,
+    already_done: int = 0,
 ) -> list[dict]:
     """STT + embedding for every chunk concurrently, bounded by a semaphore.
 
-    Emits per-chunk SSE events as soon as each STT call returns, so the
-    frontend sees transcript fill in live (same UX as realtime recording).
+    Each chunk's result is persisted to ``upload_chunks`` immediately and the
+    partial transcript JSON is written to ``meetings.transcript`` after every
+    chunk. This means:
+      - Sidecar restart mid-pipeline → resume picks up where we left off
+      - User opens meeting while pipeline runs → sees text filling in live
+      - App crash → still have whatever was processed up to that point
     """
-    # Resolve config once per job.
+    if not chunks:
+        return []
+
     nvidia_key = (
         db.get_setting("nvidia_api_key")
         or os.environ.get("NVIDIA_API_KEY", "")
@@ -313,7 +367,6 @@ async def _process_chunks_parallel(
     stt_lang = db.get_setting("stt_language") or "vi"
     riva_lang = get_language_code(stt_lang)
 
-    # Resolve global diarizer for embedding extraction (no profile-state writes).
     diarizer = None
     try:
         from main import diarizer as _diarizer
@@ -322,15 +375,17 @@ async def _process_chunks_parallel(
         log.warning("[pipeline] global diarizer not available — single-speaker output")
 
     semaphore = asyncio.Semaphore(_stt_concurrency())
-    results: list[dict | None] = [None] * len(chunks)
+    results: dict[int, dict] = {}
+    lock = asyncio.Lock()
 
     async def _process_one(chunk: AudioChunk):
         async with semaphore:
             if _is_cancelled(job):
                 return
 
+            # Streaming gRPC (offline_recognize is unavailable for vi/zh on Riva Cloud).
             stt_task = asyncio.to_thread(
-                transcribe_nvidia, str(chunk.path), nvidia_key, riva_lang
+                transcribe_nvidia_streaming, str(chunk.path), nvidia_key, riva_lang
             )
             emb_task = (
                 asyncio.to_thread(extract_embedding, diarizer, chunk.path)
@@ -354,15 +409,30 @@ async def _process_chunks_parallel(
                 embedding = emb_raw
 
             text_clean = _filter_hallucinations(text or "").strip()
-            results[chunk.idx] = {
-                "idx": chunk.idx,
-                "text": text_clean,
-                "embedding": embedding,
-                "start_ms": chunk.start_ms,
-                "end_ms": chunk.end_ms,
-            }
 
-            # Stream chunk text to the frontend immediately (same UX as realtime).
+            # Persist this chunk's result so we can resume after a crash and
+            # so the user sees live updates if they open the meeting now.
+            embedding_blob = embedding.tobytes() if embedding is not None else None
+            await asyncio.to_thread(
+                db.save_chunk_result, meeting_id, chunk.idx, text_clean, embedding_blob,
+            )
+
+            async with lock:
+                results[chunk.idx] = {
+                    "idx": chunk.idx,
+                    "text": text_clean,
+                    "embedding": embedding,
+                    "start_ms": chunk.start_ms,
+                    "end_ms": chunk.end_ms,
+                }
+                # Refresh meetings.transcript with everything we have so far.
+                await asyncio.to_thread(
+                    _flush_partial_transcript, meeting_id,
+                )
+
+                done_now = already_done + len(results)
+
+            # Stream this chunk to any live SSE listeners.
             await registry.emit_chunk(
                 job.job_id,
                 {
@@ -373,20 +443,130 @@ async def _process_chunks_parallel(
                 },
             )
 
-            done = sum(1 for r in results if r is not None)
             progress = (
                 P_TRANSCRIBE_START
-                + (done / len(chunks)) * (P_TRANSCRIBE_END - P_TRANSCRIBE_START)
+                + (done_now / max(1, total_chunks))
+                * (P_TRANSCRIBE_END - P_TRANSCRIBE_START)
             )
             await registry.update(
                 job.job_id,
                 progress=progress,
-                processed_chunks=done,
-                message=f"Phiên âm {done}/{len(chunks)}",
+                processed_chunks=done_now,
+                message=f"Phiên âm {done_now}/{total_chunks}",
             )
 
     await asyncio.gather(*(_process_one(c) for c in chunks))
-    return [r for r in results if r is not None]
+    return list(results.values())
+
+
+def _chunks_from_db_plan(
+    saved_chunks: dict[int, dict], wav_path: Path, chunks_dir: Path
+) -> list[AudioChunk]:
+    """Rebuild AudioChunk list from the chunk plan persisted in DB (resume)."""
+    out: list[AudioChunk] = []
+    for idx in sorted(saved_chunks.keys()):
+        row = saved_chunks[idx]
+        chunk_path = chunks_dir / f"chunk_{idx:04d}.wav"
+        out.append(AudioChunk(
+            idx=idx,
+            start_ms=int(row["start_ms"]),
+            end_ms=int(row["end_ms"]),
+            path=chunk_path,
+        ))
+    return out
+
+
+def _extract_pending_chunk_files(wav_path: Path, pending: list[AudioChunk]) -> None:
+    """Re-extract WAV slices for chunks whose tmp files are gone after restart."""
+    from services.vad_splitter import _extract_chunk_with_ffmpeg
+    for c in pending:
+        if c.path.exists():
+            continue
+        c.path.parent.mkdir(parents=True, exist_ok=True)
+        duration = max(0, c.end_ms - c.start_ms)
+        if duration <= 0:
+            continue
+        _extract_chunk_with_ffmpeg(wav_path, c.path, c.start_ms, duration)
+
+
+def _merge_saved_and_new_results(
+    saved_chunks: dict[int, dict],
+    new_results: list[dict],
+    chunks: list[AudioChunk],
+) -> list[dict]:
+    """Combine DB-persisted chunk results with freshly processed ones.
+
+    Newly-processed (in-memory) results take precedence — they have the
+    embedding as an np.ndarray. DB rows store embedding as bytes; deserialize
+    here so the clustering step sees a uniform shape.
+    """
+    import numpy as np
+
+    new_by_idx = {r["idx"]: r for r in new_results}
+    chunk_boundaries = {c.idx: (c.start_ms, c.end_ms) for c in chunks}
+
+    out: list[dict] = []
+    for idx in sorted({*saved_chunks.keys(), *new_by_idx.keys()}):
+        if idx in new_by_idx:
+            out.append(new_by_idx[idx])
+            continue
+        row = saved_chunks[idx]
+        emb_bytes = row.get("embedding")
+        embedding = None
+        if emb_bytes:
+            try:
+                embedding = np.frombuffer(emb_bytes, dtype=np.float32).copy()
+            except Exception as exc:
+                log.warning("[pipeline] failed to decode saved embedding %d: %s", idx, exc)
+        start_ms, end_ms = chunk_boundaries.get(
+            idx, (int(row["start_ms"]), int(row["end_ms"])),
+        )
+        out.append({
+            "idx": idx,
+            "text": row.get("text") or "",
+            "embedding": embedding,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+        })
+    return out
+
+
+def _flush_partial_transcript(meeting_id: int) -> None:
+    """Write a fresh transcript JSON from all currently saved chunks.
+
+    Speakers are not yet clustered at this stage (clustering needs ALL chunks
+    done), so every chunk goes in as Speaker 1. The final pass after
+    clustering overwrites this with the correct speaker assignments.
+    """
+    rows = db.get_upload_chunks(meeting_id)
+    if not rows:
+        return
+    fake_speaker_map = {r["chunk_idx"]: 0 for r in rows}
+    interim_results = []
+    for r in rows:
+        if not (r.get("text") or "").strip():
+            continue
+        interim_results.append({
+            "idx": int(r["chunk_idx"]),
+            "text": r["text"],
+            "embedding": None,
+            "start_ms": int(r["start_ms"]),
+            "end_ms": int(r["end_ms"]),
+        })
+    if not interim_results:
+        return
+    parts = _build_transcript_parts(interim_results, fake_speaker_map)
+    db.update_meeting(
+        meeting_id,
+        transcript=json.dumps(parts, ensure_ascii=False),
+    )
+
+
+def _ms_to_seconds_str(ms: int | None) -> str:
+    """Frontend's fmtSec parses parseFloat(v); emit seconds as a string."""
+    if ms is None:
+        return "0"
+    return f"{ms / 1000:.2f}"
 
 
 def _build_transcript_parts(
@@ -398,6 +578,10 @@ def _build_transcript_parts(
     frontend MeetingDetail renderer treats upload + realtime identically.
     Consecutive chunks from the same speaker are merged into one part with
     multi-chunkIds. Overlap text from VAD splitting is de-duplicated.
+
+    Emits `startTime`/`endTime` as seconds strings (parseable by the frontend
+    fmtSec helper) so meeting detail displays per-part timestamps like
+    "1:24 – 1:46". The merged part's window grows to span all of its chunks.
     """
     parts: list[dict] = []
     prev_tail = ""
@@ -414,9 +598,11 @@ def _build_transcript_parts(
         speaker_id = speaker_map.get(r["idx"], 0)
         speaker = f"Speaker {speaker_id + 1}"
         chunk_id = f"upload-{r['idx']:04d}-{uuid4().hex[:8]}"
+        start_ms = int(r.get("start_ms") or 0)
+        end_ms = int(r.get("end_ms") or 0)
 
         if parts and parts[-1].get("speakerId") == speaker_id:
-            # Same speaker as the previous part — merge.
+            # Same speaker — merge into the previous part and extend its window.
             p = parts[-1]
             ids = p.setdefault("chunkIds", [p.get("chunkId")])
             ids.append(chunk_id)
@@ -430,6 +616,7 @@ def _build_transcript_parts(
                 if cid is not None and chunk_data.get(cid)
             ]
             p["text"] = " ".join(t.strip() for t in ordered if t).strip()
+            p["endTime"] = _ms_to_seconds_str(max(int(float(p.get("endTime") or 0) * 1000), end_ms))
         else:
             parts.append(
                 {
@@ -439,8 +626,11 @@ def _build_transcript_parts(
                     "chunkId": chunk_id,
                     "chunkIds": [chunk_id],
                     "chunkData": {chunk_id: text},
-                    "startMs": r.get("start_ms"),
-                    "endMs": r.get("end_ms"),
+                    # Frontend-compatible (seconds string) — drives the MM:SS badge.
+                    "startTime": _ms_to_seconds_str(start_ms),
+                    "endTime": _ms_to_seconds_str(end_ms),
+                    "timestamp": "",
+                    "translation": "",
                 }
             )
 

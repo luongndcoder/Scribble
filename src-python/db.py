@@ -111,6 +111,79 @@ class Database:
             except sqlite3.OperationalError as e:
                 if "duplicate column" not in str(e).lower():
                     log.warning("Migration skipped (%s): %s", sql[:60], e)
+
+        # ── Per-chunk progress (upload pipeline resume) ──
+        # text IS NULL until STT completes; embedding BLOB is the raw 512×f32
+        # vector from CAM++ (or NULL when diarizer disabled).
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS upload_chunks (
+                meeting_id INTEGER NOT NULL,
+                chunk_idx INTEGER NOT NULL,
+                start_ms INTEGER NOT NULL,
+                end_ms INTEGER NOT NULL,
+                text TEXT DEFAULT NULL,
+                embedding BLOB DEFAULT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (meeting_id, chunk_idx)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_upload_chunks_meeting ON upload_chunks(meeting_id)"
+        )
+        conn.commit()
+
+    # ─── Upload chunks (resume support) ───
+    def upsert_chunk_plan(self, meeting_id: int, plan: list[tuple[int, int, int]]) -> None:
+        """Persist the chunk plan (idx, start_ms, end_ms). Idempotent — won't
+        overwrite text/embedding of chunks already processed.
+        """
+        if not plan:
+            return
+        conn = self._conn()
+        conn.executemany(
+            "INSERT OR IGNORE INTO upload_chunks (meeting_id, chunk_idx, start_ms, end_ms) "
+            "VALUES (?, ?, ?, ?)",
+            [(meeting_id, idx, s, e) for (idx, s, e) in plan],
+        )
+        conn.commit()
+
+    def save_chunk_result(
+        self,
+        meeting_id: int,
+        chunk_idx: int,
+        text: str,
+        embedding: bytes | None,
+    ) -> None:
+        """Persist STT result + embedding for one chunk. Upsert semantics."""
+        conn = self._conn()
+        conn.execute(
+            """
+            INSERT INTO upload_chunks (meeting_id, chunk_idx, start_ms, end_ms, text, embedding, updated_at)
+            VALUES (?, ?, 0, 0, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(meeting_id, chunk_idx) DO UPDATE SET
+                text = excluded.text,
+                embedding = excluded.embedding,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (meeting_id, chunk_idx, text, embedding),
+        )
+        conn.commit()
+
+    def get_upload_chunks(self, meeting_id: int) -> list[dict]:
+        """Return all upload_chunks rows for a meeting, ordered by chunk_idx."""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT chunk_idx, start_ms, end_ms, text, embedding "
+            "FROM upload_chunks WHERE meeting_id = ? ORDER BY chunk_idx",
+            (meeting_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_upload_chunks(self, meeting_id: int) -> None:
+        conn = self._conn()
+        conn.execute("DELETE FROM upload_chunks WHERE meeting_id = ?", (meeting_id,))
         conn.commit()
 
     # ─── Meetings ───

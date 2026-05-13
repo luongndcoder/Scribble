@@ -195,3 +195,39 @@ async def cancel_job(job_id: str):
             status_code=404, detail="Job not found or already finished"
         )
     return {"ok": True}
+
+
+@router.post("/meetings/{meeting_id}/resume")
+async def resume_upload(meeting_id: int):
+    """Re-run the upload pipeline for a meeting that didn't finish.
+
+    Use when a previous run was interrupted (sidecar restart, app quit,
+    cancel, or transient STT failure). Persisted chunks in ``upload_chunks``
+    are reused — only missing/empty chunks get re-transcribed.
+
+    Returns {job_id, meeting_id} so the frontend can subscribe to the SSE
+    progress stream the same way it does for a fresh upload.
+    """
+    meeting = db.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    if (meeting.get("source_type") or "realtime") != "upload":
+        raise HTTPException(
+            status_code=400, detail="Only upload meetings can be resumed",
+        )
+    audio_path = (meeting.get("audio_path") or "").strip()
+    if not audio_path or not Path(audio_path).is_file():
+        raise HTTPException(
+            status_code=410, detail="Original audio file missing on disk",
+        )
+
+    job = registry.create(meeting_id=meeting_id)
+    await registry.update(
+        job.job_id,
+        status=JobStatus.PENDING,
+        message="Tiếp tục xử lý",
+    )
+    from services.upload_pipeline import run_pipeline
+    asyncio.create_task(run_pipeline(job.job_id))
+
+    return {"job_id": job.job_id, "meeting_id": meeting_id}
