@@ -3850,93 +3850,176 @@ body.electron-app .draft-recovery-banner {
 }
 
 /* ─── Connecting Overlay ─── */
-.connecting-overlay {
+/* ─── Startup status bar (slim bottom strip — replaces old center modal) ─── */
+.startup-status {
   position: fixed;
-  inset: 0;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
   z-index: 9999;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  box-shadow:
+    0 10px 30px rgba(15, 23, 42, 0.12),
+    0 2px 6px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  overflow: hidden;
+  animation: startup-strip-in 280ms ease-out;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+@keyframes startup-strip-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.startup-status-bar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  animation: fadeIn 0.3s ease;
+  gap: 10px;
+  padding: 10px 14px;
 }
 
-.connecting-card {
-  text-align: center;
-  max-width: 420px;
-  padding: 48px 40px;
-  border-radius: 24px;
-  background: #ffffff;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.15), 0 4px 16px rgba(0, 0, 0, 0.08);
-}
-
-.connecting-spinner {
-  width: 48px;
-  height: 48px;
-  border: 3px solid var(--gray-200, #e2e8f0);
-  border-top-color: var(--indigo-500, #6366f1);
-  border-radius: 50%;
-  margin: 0 auto 24px;
-  animation: spin 0.8s linear infinite;
-}
-
-.connecting-card h2 {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text, #0f172a);
-  margin: 0 0 8px;
-}
-
-.connecting-card p {
-  font-size: 14px;
-  color: var(--text-secondary, #64748b);
-  line-height: 1.6;
-  margin: 0 0 28px;
-}
-
-.connecting-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  text-align: left;
-}
-
-.connecting-step {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-  color: var(--gray-400, #94a3b8);
-  transition: color 0.3s;
-}
-
-.connecting-step.active {
-  color: var(--text, #0f172a);
-  font-weight: 500;
-}
-
-.step-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--gray-300, #cbd5e1);
+.startup-status-spinner {
+  color: var(--primary, #6366f1);
+  display: inline-flex;
+  animation: spin 0.9s linear infinite;
   flex-shrink: 0;
 }
 
-.step-dot.pulse {
-  background: var(--indigo-500, #6366f1);
+.startup-status-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.startup-status-text strong {
+  font-weight: 600;
+}
+
+.startup-status-dim {
+  color: var(--text-secondary, #64748b);
+  font-weight: 400;
+}
+
+.startup-status-elapsed {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  font-variant-numeric: tabular-nums;
+  background: rgba(99, 102, 241, 0.08);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.startup-status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: var(--primary, #6366f1);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 8px 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+  flex-shrink: 0;
+}
+
+.startup-status-toggle:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: var(--primary, #6366f1);
+}
+
+.startup-status-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 14px 12px;
+  border-top: 1px solid rgba(99, 102, 241, 0.12);
+}
+
+.startup-status-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.startup-status-step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.startup-status-step-label {
+  font-weight: 500;
+}
+
+.startup-status-step-hint {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.startup-status-step--pending .startup-status-step-label {
+  color: var(--text-secondary, #94a3b8);
+}
+
+.startup-status-step--active .startup-status-step-label {
+  color: var(--text, #0f172a);
+}
+
+.startup-status-step--done .startup-status-step-label {
+  color: #16a34a;
+}
+
+.startup-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.startup-status-dot--pending {
+  background: var(--gray-300, #cbd5e1);
+}
+
+.startup-status-dot--active {
+  background: var(--primary, #6366f1);
   animation: dotPulse 1.5s ease-in-out infinite;
 }
 
-.step-dot.done {
-  background: var(--green-500, #22c55e);
-  animation: none;
+.startup-status-dot--done {
+  background: #22c55e;
 }
 
-.connecting-step.done {
-  color: var(--green-500, #22c55e);
+.startup-status-inline-hint,
+.startup-status-slow-hint {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  padding: 0 14px 10px;
+  line-height: 1.4;
+  font-style: italic;
+}
+
+/* Visual feedback that some buttons are intentionally inactive while the
+   backend warms up — kept subtle (not greying the whole shell). Applied
+   via the .app--offline class on the root wrapper. */
+.app--offline .icon-btn:disabled,
+.app--offline .lang-toggle:disabled,
+.app--offline button[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 @keyframes dotPulse {

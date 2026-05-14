@@ -16,7 +16,7 @@ import { UploadAudioModal } from './UploadAudioModal';
 import { t } from '../i18n';
 
 export function MeetingList() {
-    const { meetings, setMeetings, setCurrentView, setCurrentMeetingId, setDraftId, setActiveTab, lang, recording } = useAppStore();
+    const { meetings, setMeetings, setCurrentView, setCurrentMeetingId, setDraftId, setActiveTab, lang, recording, backendOnline } = useAppStore();
     const { showToast } = useToast();
     const [editingMeetingId, setEditingMeetingId] = useState<number | null>(null);
     const [editingTitle, setEditingTitle] = useState('');
@@ -279,11 +279,13 @@ export function MeetingList() {
                         <button
                             className="action-btn"
                             onClick={openUploadModal}
-                            disabled={recording}
+                            disabled={recording || !backendOnline}
                             title={
-                                recording
-                                    ? (lang === 'vi' ? 'Đang ghi âm — dừng trước khi upload' : 'Stop recording before uploading')
-                                    : (lang === 'vi' ? 'Upload file ghi âm có sẵn' : 'Upload an audio file')
+                                !backendOnline
+                                    ? (lang === 'vi' ? 'Đang khởi động — vui lòng chờ' : 'Starting up — please wait')
+                                    : recording
+                                        ? (lang === 'vi' ? 'Đang ghi âm — dừng trước khi upload' : 'Stop recording before uploading')
+                                        : (lang === 'vi' ? 'Upload file ghi âm có sẵn' : 'Upload an audio file')
                             }
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
@@ -295,7 +297,12 @@ export function MeetingList() {
                             <span>{lang === 'vi' ? 'Upload file' : 'Upload file'}</span>
                         </button>
                     )}
-                    <button className="action-btn primary" onClick={newMeeting} disabled={recording}>
+                    <button
+                        className="action-btn primary"
+                        onClick={newMeeting}
+                        disabled={recording || !backendOnline}
+                        title={!backendOnline ? (lang === 'vi' ? 'Đang khởi động — vui lòng chờ' : 'Starting up — please wait') : undefined}
+                    >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
                             strokeLinecap="round" strokeLinejoin="round">
                             <path d="M12 5v14" /><path d="M5 12h14" />
