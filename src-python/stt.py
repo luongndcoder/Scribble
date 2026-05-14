@@ -181,10 +181,14 @@ def transcribe_nvidia(file_path: str, api_key: str, language: str = "vi-VN") -> 
     log.info("[stt:nvidia] Using %s for %s", model['name'], language)
 
     # Convert to WAV PCM 16kHz mono (Riva requires this format)
+    # Use find_ffmpeg() not bare "ffmpeg" — when launched from Finder the
+    # bundled app inherits a stripped PATH that excludes /opt/homebrew/bin.
+    from services.audio import find_ffmpeg
     wav_path = file_path + "_riva.wav"
+    ffmpeg_bin = find_ffmpeg()
     try:
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", file_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
+            [ffmpeg_bin, "-y", "-i", file_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
             capture_output=True, timeout=10,
         )
         if result.returncode != 0:
@@ -252,13 +256,19 @@ def transcribe_nvidia_streaming(file_path: str, api_key: str, language: str = "v
     log.info("[stt:nvidia-stream-batch] %s for %s", model["name"], language)
 
     # Normalize to 16kHz mono PCM WAV (Riva contract).
+    # find_ffmpeg() not bare "ffmpeg" — bundled app launch path lacks
+    # /opt/homebrew/bin so subprocess.run(["ffmpeg", ...]) returns
+    # FileNotFoundError every chunk and the whole pipeline silently
+    # produces an empty transcript. (Hit by user during testing.)
+    from services.audio import find_ffmpeg
     wav_path = file_path + "_riva_stream.wav"
+    ffmpeg_bin = find_ffmpeg()
     kwargs: dict = {"capture_output": True, "timeout": 30}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     try:
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", file_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
+            [ffmpeg_bin, "-y", "-i", file_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
             **kwargs,
         )
         if result.returncode != 0:
