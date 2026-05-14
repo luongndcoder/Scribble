@@ -883,11 +883,23 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     ];
     let tar_path = tar_candidates.iter().find(|p| p.exists()).cloned();
 
-    // Version check: re-extract if app version changed
+    // Cache invalidation: re-extract whenever the bundled tar.gz changes,
+    // not just when Cargo version bumps. Otherwise rebuilding the app
+    // without a version bump (common during a dev cycle) leaves users
+    // running the *previously extracted* sidecar — bytes inside the new
+    // .app never reach disk. Cache key combines version + tar.gz mtime.
     let app_version = env!("CARGO_PKG_VERSION");
     let version_file = cache_dir.join(".version");
     let cached_version = std::fs::read_to_string(&version_file).unwrap_or_default();
-    let needs_extract = !cached_bin.exists() || cached_version.trim() != app_version;
+    let tar_mtime_secs: u64 = tar_path
+        .as_ref()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let cache_key = format!("{}-{}", app_version, tar_mtime_secs);
+    let needs_extract = !cached_bin.exists() || cached_version.trim() != cache_key;
 
     if let Some(tar) = &tar_path {
         if needs_extract {
@@ -906,11 +918,11 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
                             .args(["+x", &cached_bin.to_string_lossy()])
                             .status();
                     }
-                    let _ = std::fs::write(&version_file, app_version);
+                    let _ = std::fs::write(&version_file, &cache_key);
                     // Kill old sidecar so new version starts fresh
                     kill_sidecar_port();
                     std::thread::sleep(std::time::Duration::from_millis(200));
-                    println!("[sidecar] Extraction complete (v{}): {:?}", app_version, cached_bin);
+                    println!("[sidecar] Extraction complete (key={}): {:?}", cache_key, cached_bin);
                 }
                 Ok(s) => println!("[sidecar] tar exited with {}", s),
                 Err(e) => println!("[sidecar] tar failed: {}", e),
