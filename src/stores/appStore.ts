@@ -56,6 +56,8 @@ interface AppState {
     activeTab: 'recording' | 'summary';
     settingsOpen: boolean;
     lang: 'vi' | 'en';
+    /** Sidecar health — drives which buttons are interactive during startup. */
+    backendOnline: boolean;
 
     // Meetings
     meetings: Meeting[];
@@ -86,6 +88,7 @@ interface AppState {
     setActiveTab: (v: 'recording' | 'summary') => void;
     setSettingsOpen: (v: boolean) => void;
     setLang: (v: 'vi' | 'en') => void;
+    setBackendOnline: (v: boolean) => void;
     setMeetings: (m: Meeting[]) => void;
     setCurrentMeetingId: (id: number | null) => void;
     setTransientSummary: (v: string) => void;
@@ -117,6 +120,7 @@ export const useAppStore = create<AppState>((set) => ({
     activeTab: 'recording',
     settingsOpen: false,
     lang: 'vi',
+    backendOnline: false,
     meetings: [],
     currentMeetingId: null,
     transientSummary: '',
@@ -234,6 +238,7 @@ export const useAppStore = create<AppState>((set) => ({
     setActiveTab: (v) => set({ activeTab: v }),
     setSettingsOpen: (v) => set({ settingsOpen: v }),
     setLang: (v) => set({ lang: v }),
+    setBackendOnline: (v) => set({ backendOnline: v }),
     setMeetings: (m) => set({ meetings: m }),
     setCurrentMeetingId: (id) => set({ currentMeetingId: id }),
     setTransientSummary: (v) => set({ transientSummary: v }),

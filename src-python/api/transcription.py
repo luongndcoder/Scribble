@@ -152,7 +152,12 @@ async def summarize(request: Request):
 
     from summarize import summarize_stream
     return StreamingResponse(
-        summarize_stream(transcript_str, language, db, start_time=start_time, end_time=end_time, template=template, custom_prompt=custom_prompt),
+        summarize_stream(
+            transcript_str, language, db,
+            start_time=start_time, end_time=end_time,
+            template=template, custom_prompt=custom_prompt,
+            meeting_id=int(meeting_id) if meeting_id else None,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

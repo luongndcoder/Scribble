@@ -242,13 +242,27 @@ def _chunk_transcript(transcript: str) -> list[str]:
     return segments
 
 
-def summarize_stream(transcript: str, language: str, db, *, start_time: str = "", end_time: str = "", template: str = "mom", custom_prompt: str = "") -> Generator[str, None, None]:
+def summarize_stream(
+    transcript: str,
+    language: str,
+    db,
+    *,
+    start_time: str = "",
+    end_time: str = "",
+    template: str = "mom",
+    custom_prompt: str = "",
+    meeting_id: int | None = None,
+) -> Generator[str, None, None]:
     """Stream meeting summary token-by-token via SSE.
     Uses single-pass for short transcripts, MapReduce for long ones.
 
     Args:
         template: one of 'mom', 'summary', 'bullets', 'custom'
         custom_prompt: user-provided prompt (used when template='custom')
+        meeting_id: when supplied, attached reference materials (md/txt
+            uploaded via /meetings/{id}/attachments) are fetched and
+            included as system context. Optional so callers without a
+            persisted meeting (ad-hoc transcript) still work.
     """
     from openai import OpenAI
 
@@ -289,6 +303,24 @@ def summarize_stream(transcript: str, language: str, db, *, start_time: str = ""
     lang_name = lang_names.get(language, language)
     prompt += f"\n\nIMPORTANT: You MUST write the entire output in {lang_name}. All section headers and content must be in {lang_name}."
 
+    # If the user attached reference materials, lift their importance at the
+    # system level too (the user-content block alone wasn't enough — LLMs tend
+    # to treat user-content as conversational data and skim it).
+    if meeting_id is not None:
+        try:
+            _ref_probe = db.get_attachments_combined_text(meeting_id)
+        except Exception:
+            _ref_probe = ""
+        if _ref_probe:
+            prompt += (
+                "\n\nCRITICAL: The user attached REFERENCE MATERIALS (documents) "
+                "to this meeting. Those documents are authoritative context — "
+                "use them to correct mistranscribed names, ground the minutes "
+                "in project-specific terminology, and cross-check what was "
+                "discussed vs. what was planned. Treat them with at least the "
+                "same weight as the transcript when they contradict it."
+            )
+
     # Build timestamp context
     time_context = ""
     if start_time or end_time:
@@ -299,23 +331,85 @@ def summarize_stream(transcript: str, language: str, db, *, start_time: str = ""
             time_context += f"Recording ended: {end_time}\n"
         time_context += "---\n"
 
+    # Build reference-materials context from attachments (md/txt). Injected
+    # only at the user-content layer of single-pass + final reduce — adding
+    # to every map step would multiply token cost without much win since
+    # chunk summaries are already abstractive.
+    reference_context = ""
+    if meeting_id is not None:
+        try:
+            ref_text = db.get_attachments_combined_text(meeting_id)
+        except Exception as exc:
+            log.warning("[summarize] failed to load attachments for %s: %s", meeting_id, exc)
+            ref_text = ""
+        if ref_text:
+            # Strong, action-oriented framing — earlier "background only / do
+            # NOT copy verbatim" wording made the LLM ignore the materials and
+            # produced minutes that looked identical to ones without context.
+            # Now we explicitly tell it to use the info, cite it, and reconcile
+            # discrepancies between transcript and docs.
+            reference_context = (
+                "\n\n=== REFERENCE MATERIALS (USE THESE) ===\n"
+                "The user attached the following document(s) as REQUIRED CONTEXT for "
+                "this meeting. You MUST:\n"
+                "  1. Use names, titles, terminology, project codes from these docs "
+                "as the source of truth (transcripts often mistranscribe proper nouns).\n"
+                "  2. Cross-reference the meeting against agendas / briefs / specs — "
+                "note which items WERE covered and which were SKIPPED.\n"
+                "  3. When the meeting decision differs from what the doc proposed, "
+                "call it out explicitly (e.g. 'agenda đề xuất X, cuộc họp chốt Y').\n"
+                "  4. Pull in background details (deadlines, prior decisions, "
+                "stakeholders) that clarify what was said in the meeting.\n"
+                "  5. At the END of the minutes, add a short section "
+                "'## Tài liệu tham khảo / Reference Materials' listing the file "
+                "names you used.\n\n"
+                "Do NOT copy long passages verbatim, but DO weave the information "
+                "throughout the minutes wherever it adds value.\n\n"
+                f"{ref_text}\n"
+                "=== END REFERENCE MATERIALS ===\n"
+            )
+            log.info(
+                "[summarize] including %d chars of reference materials for meeting %s",
+                len(ref_text), meeting_id,
+            )
+
     is_deep = template == "deep"
 
     # ── Single-pass for short transcripts ──
     if len(transcript) < SINGLE_PASS_MAX_CHARS:
-        yield from _single_pass(client, model, prompt, transcript, time_context, max_tokens=16000 if is_deep else 8000)
+        yield from _single_pass(
+            client, model, prompt, transcript, time_context,
+            max_tokens=16000 if is_deep else 8000,
+            reference_context=reference_context,
+        )
         return
 
     # ── MapReduce for long transcripts ──
-    yield from _map_reduce(client, model, prompt, transcript, language, time_context, deep=is_deep)
+    yield from _map_reduce(
+        client, model, prompt, transcript, language, time_context,
+        deep=is_deep, reference_context=reference_context,
+    )
 
 
-def _single_pass(client, model: str, prompt: str, transcript: str, time_context: str = "", max_tokens: int = 8000) -> Generator[str, None, None]:
+def _single_pass(
+    client,
+    model: str,
+    prompt: str,
+    transcript: str,
+    time_context: str = "",
+    max_tokens: int = 8000,
+    *,
+    reference_context: str = "",
+) -> Generator[str, None, None]:
     """Single LLM call for short transcripts."""
     try:
         yield f"event: progress\ndata: {json.dumps({'step': 'summarizing', 'progress': 0.1})}\n\n"
 
-        user_content = f"{time_context}Transcript:\n{transcript}" if time_context else f"Transcript:\n{transcript}"
+        # Order: time → reference materials → transcript.
+        # Reference goes BEFORE transcript so the model reads it as a setup
+        # before the conversation it has to summarize.
+        prefix = f"{time_context}{reference_context}" if (time_context or reference_context) else ""
+        user_content = f"{prefix}Transcript:\n{transcript}"
         stream = client.chat.completions.create(
             model=model,
             messages=[
@@ -340,7 +434,17 @@ def _single_pass(client, model: str, prompt: str, transcript: str, time_context:
         yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
 
-def _map_reduce(client, model: str, final_prompt: str, transcript: str, language: str, time_context: str = "", deep: bool = False) -> Generator[str, None, None]:
+def _map_reduce(
+    client,
+    model: str,
+    final_prompt: str,
+    transcript: str,
+    language: str,
+    time_context: str = "",
+    deep: bool = False,
+    *,
+    reference_context: str = "",
+) -> Generator[str, None, None]:
     """Hierarchical MapReduce: chunk → map → section reduce → final reduce.
 
     For a 4-hour meeting (~200k chars):
@@ -415,7 +519,8 @@ def _map_reduce(client, model: str, final_prompt: str, transcript: str, language
         yield f"event: progress\ndata: {json.dumps({'step': 'finalizing'})}\n\n"
 
         final_max_tokens = 16000 if deep else 8000
-        user_content = f"{time_context}{combined_for_final}" if time_context else combined_for_final
+        prefix = f"{time_context}{reference_context}" if (time_context or reference_context) else ""
+        user_content = f"{prefix}{combined_for_final}" if prefix else combined_for_final
         stream = client.chat.completions.create(
             model=model,
             messages=[

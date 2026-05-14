@@ -264,7 +264,7 @@ body.electron-app .sub-tabs {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 24px;
+  padding: 5px 16px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
   background: rgba(255, 255, 255, 0.8);
@@ -275,25 +275,25 @@ body.electron-app .sub-tabs {
 .topnav-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .topnav-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .backend-status-chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 6px;
+  padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
   background: var(--gray-50);
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
@@ -410,8 +410,8 @@ body.electron-app .sub-tabs {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 1.1rem;
+  gap: 6px;
+  font-size: 0.95rem;
   font-weight: 800;
   letter-spacing: -0.03em;
   color: var(--text);
@@ -421,8 +421,13 @@ body.electron-app .sub-tabs {
   background-clip: text;
 }
 
+.brand svg {
+  width: 15px;
+  height: 15px;
+}
+
 .app-version {
-  font-size: 0.6rem;
+  font-size: 0.55rem;
   font-weight: 500;
   color: var(--gray-400);
   -webkit-text-fill-color: var(--gray-400);
@@ -438,8 +443,8 @@ body.electron-app .sub-tabs {
 }
 
 .icon-btn {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -449,6 +454,11 @@ body.electron-app .sub-tabs {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--duration);
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .icon-btn:hover {
@@ -490,6 +500,25 @@ body.electron-app .sub-tabs {
   margin-bottom: 8px;
 }
 
+/* ─── Compact toolbar: back-btn + sub-tabs + pane-actions all on one row.
+       Replaces the old 3-row layout (back-btn block, sub-tabs row, pane-header
+       row) — saves ~80px of vertical space and matches the density of
+       Linear / Otter / GitHub. */
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 8px;
+  flex-shrink: 0;
+}
+
+.detail-toolbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .back-btn {
   display: flex;
   align-items: center;
@@ -504,6 +533,12 @@ body.electron-app .sub-tabs {
   color: var(--primary);
   cursor: pointer;
   transition: all var(--duration);
+}
+
+.back-btn-compact {
+  padding: 5px 11px;
+  font-size: 0.8rem;
+  gap: 4px;
 }
 
 .back-btn:hover {
@@ -522,6 +557,11 @@ body.electron-app .sub-tabs {
   border: 1px solid var(--border);
 }
 
+.sub-tabs-compact {
+  margin-bottom: 0;
+  padding: 3px;
+}
+
 .sub-tab {
   display: flex;
   align-items: center;
@@ -536,6 +576,12 @@ body.electron-app .sub-tabs {
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--duration) var(--ease);
+}
+
+.sub-tabs-compact .sub-tab {
+  padding: 5px 14px;
+  font-size: 0.8rem;
+  gap: 5px;
 }
 
 .sub-tab:hover {
@@ -603,16 +649,20 @@ body.electron-app .sub-tabs {
   margin-bottom: 12px;
 }
 
+.detail-view .sub-tabs-compact {
+  margin-bottom: 0;
+}
+
 .detail-view .pane-header {
   margin-bottom: 0;
-  padding: 12px 14px;
+  padding: 6px 14px 8px;
   flex-shrink: 0;
 }
 
 .pane-title {
-  font-size: 1.3rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text);
 }
 
@@ -742,6 +792,254 @@ body.electron-app .sub-tabs {
   text-align: center;
   color: var(--text-secondary);
   font-size: 0.9rem;
+}
+
+/* ─── Meeting Attachments (reference materials) ─── */
+/* Two visual modes:
+   - `--collapsed`: just the slim 1-line bar (when there are files but user
+     wants minutes to take the space)
+   - `--open`: bar + subtitle row + file list + hint
+   Empty meetings always render open so users can discover the feature. */
+.meeting-attachments {
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-elevated, rgba(99, 102, 241, 0.03));
+}
+
+.meeting-attachments--open {
+  padding: 8px 16px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.meeting-attachments--collapsed {
+  padding: 0;
+}
+
+/* Slim clickable bar — full width when collapsed, header row when open. */
+.meeting-attachments-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text, #0f172a);
+  text-align: left;
+  transition: background 120ms ease;
+}
+
+.meeting-attachments-bar:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.meeting-attachments-bar:disabled {
+  cursor: default;
+}
+
+.meeting-attachments--open .meeting-attachments-bar {
+  padding: 0;
+}
+
+.meeting-attachments--open .meeting-attachments-bar:hover {
+  background: transparent;
+}
+
+.meeting-attachments-bar-icon {
+  display: inline-flex;
+  color: var(--primary, #6366f1);
+  flex-shrink: 0;
+}
+
+.meeting-attachments-bar-title {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.meeting-attachments-bar-meta {
+  font-size: 11px;
+  color: var(--text-secondary, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+
+.meeting-attachments-bar-spacer {
+  flex: 1;
+}
+
+.meeting-attachments-bar-chevron {
+  display: inline-flex;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.meeting-attachments-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.meeting-attachments-subtitle {
+  font-size: 11px;
+  color: var(--text-secondary, #6b7280);
+  margin: 0;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.action-btn-compact {
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+  flex-shrink: 0;
+}
+
+.meeting-attachments-empty {
+  font-size: 11px;
+  color: var(--text-secondary, #94a3b8);
+  font-style: italic;
+  padding: 2px 0;
+}
+
+.meeting-attachments-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(234, 179, 8, 0.10);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  color: #92400e;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.meeting-attachments-warning svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #ca8a04;
+}
+
+.meeting-attachments-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: rgba(99, 102, 241, 0.07);
+  color: var(--primary, #6366f1);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.meeting-attachments-hint svg {
+  flex-shrink: 0;
+}
+
+.meeting-attachments-skeleton {
+  height: 28px;
+  border-radius: 6px;
+  background: linear-gradient(90deg,
+    rgba(0,0,0,0.04) 0%,
+    rgba(0,0,0,0.08) 50%,
+    rgba(0,0,0,0.04) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.meeting-attachments-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meeting-attachments-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: var(--bg, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.meeting-attachments-item:hover {
+  border-color: var(--primary, #6366f1);
+  background: var(--bg-hover, #f9fafb);
+}
+
+.meeting-attachments-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--primary, #6366f1);
+  flex-shrink: 0;
+}
+
+.meeting-attachments-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.meeting-attachments-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.meeting-attachments-item-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text, #1f2937);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.meeting-attachments-item-meta {
+  font-size: 10.5px;
+  color: var(--text-secondary, #6b7280);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.meeting-attachments-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #94a3b8);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+  flex-shrink: 0;
+}
+
+.meeting-attachments-delete:hover:not(:disabled) {
+  color: var(--danger, #ef4444);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.meeting-attachments-delete:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ─── Processing ─── */
@@ -1191,8 +1489,8 @@ body.electron-app .sub-tabs {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  padding: 10px 16px;
+  gap: 10px;
+  padding: 6px 14px;
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -1209,8 +1507,8 @@ body.electron-app .sub-tabs {
 }
 
 .rec-main-btn {
-  width: 52px;
-  height: 52px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: none;
   background: linear-gradient(135deg, var(--red-500), var(--red-600));
@@ -1221,7 +1519,12 @@ body.electron-app .sub-tabs {
   cursor: pointer;
   transition: all 200ms var(--ease);
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3), 0 0 0 4px rgba(239, 68, 68, 0.08);
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.28), 0 0 0 3px rgba(239, 68, 68, 0.08);
+}
+
+.rec-main-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .rec-main-icon {
@@ -1548,9 +1851,9 @@ body.electron-app .sub-tabs {
   border: none;
   border-radius: var(--radius-full, 20px) 0 0 var(--radius-full, 20px);
   font-weight: 600;
-  font-size: 0.82rem;
-  padding: 8px 12px;
-  gap: 6px;
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  gap: 5px;
 }
 
 /* Middle select: no rounding */
@@ -1561,9 +1864,9 @@ body.electron-app .sub-tabs {
   border-radius: 0;
   border-left: 1px solid rgba(255,255,255,0.2);
   font-weight: 600;
-  font-size: 0.82rem;
-  padding: 8px 12px;
-  gap: 6px;
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  gap: 5px;
 }
 
 .summarize-group .custom-select-trigger:hover {
@@ -1618,14 +1921,14 @@ body.electron-app .sub-tabs {
 .rec-summarize-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 5px;
+  padding: 5px 12px;
   background: var(--primary);
   color: var(--white);
   border: none;
   border-radius: var(--radius-full);
   font-family: var(--font);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   transition: opacity var(--duration);
@@ -1680,7 +1983,10 @@ body.electron-app .sub-tabs {
 }
 
 .settings-panel {
-  width: 520px;
+  /* Wider panel + 2-col grid inside sections = no scrolling on typical
+     laptop screens. On narrow windows (< 720px) the grid collapses to
+     a single column via the auto-fit minmax() below. */
+  width: 760px;
   max-width: 100vw;
   height: 100vh;
   background: var(--bg);
@@ -1705,7 +2011,7 @@ body.electron-app .sub-tabs {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  padding: 8px 18px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
   background: linear-gradient(180deg, rgba(248, 250, 252, 0.8), var(--white));
@@ -1745,25 +2051,35 @@ body.electron-app .sub-tabs {
   transform: rotate(90deg);
 }
 
+/* Panel body is itself a 2-column grid: STT lives in column 1, AI lives
+   in column 2. Test/footer sections span both columns. This makes the
+   two parallel concepts (Speech ↔ LLM) read at a glance — earlier they
+   stacked vertically and the user had to scroll just to see "what's in
+   the AI block". */
 .settings-panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 28px 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  padding: 12px 16px 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-content: start;
 }
 
+/* Sections inside each grid cell stack their setting-groups vertically.
+   Single-column inside the section keeps the layout predictable; the
+   horizontal arrangement happens at the panel-body level above. */
 .settings-section {
   background: var(--white);
   border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: var(--radius-lg);
-  padding: 24px;
+  border-radius: var(--radius-md);
+  padding: 12px 14px 14px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 10px;
   box-shadow: var(--shadow-card);
   transition: box-shadow 200ms var(--ease);
+  min-width: 0; /* avoid blow-out from long select labels */
 }
 
 .settings-section:hover {
@@ -1773,23 +2089,25 @@ body.electron-app .sub-tabs {
 .settings-section-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 0.95rem;
+  gap: 8px;
+  font-size: 0.85rem;
   font-weight: 700;
   color: var(--text);
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border-light);
 }
 
 .settings-section-title svg {
   color: var(--indigo-500);
+  width: 14px;
+  height: 14px;
 }
 
+/* Section header (title + description) — title on its own row, desc
+   underneath. Both inside one cell of the panel-body grid. */
 .settings-section-header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-bottom: 14px;
+  gap: 2px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--border-light);
 }
 
@@ -1799,14 +2117,31 @@ body.electron-app .sub-tabs {
 }
 
 .settings-section-desc {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
-  line-height: 1.4;
+  line-height: 1.35;
+}
+
+/* Span both columns of the panel-body grid — used for Test section + any
+   future "global" rows. Inside an individual section the marker is a
+   no-op (sections are single-column flex now). */
+.settings-section.span-full {
+  grid-column: 1 / -1;
+}
+
+/* On narrow windows (when the panel collapses to ≤ 600px via 100vw max-width
+   on small screens) fall back to 1-column. */
+@media (max-width: 720px) {
+  .settings-panel-body {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── Unified Test Button ── */
 .settings-test-section {
-  padding: 16px 24px;
+  /* Override the 2-col grid for this section — single column, compact */
+  display: block;
+  padding: 10px 14px;
 }
 
 .settings-test-btn {
@@ -1815,13 +2150,13 @@ body.electron-app .sub-tabs {
   justify-content: center;
   gap: 8px;
   width: 100%;
-  padding: 12px 20px;
+  padding: 8px 16px;
   border: none;
   border-radius: var(--radius-md);
   background: linear-gradient(135deg, var(--indigo-500), var(--indigo-600));
   color: white;
   font-family: var(--font);
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 200ms var(--ease);
@@ -1899,8 +2234,8 @@ body.electron-app .sub-tabs {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 16px 10px;
+  gap: 3px;
+  padding: 8px 10px;
   background: var(--gray-50);
   border: 2px solid var(--border);
   border-radius: var(--radius-md);
@@ -1923,7 +2258,7 @@ body.electron-app .sub-tabs {
 }
 
 .provider-tab strong {
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 700;
   color: var(--text);
 }
@@ -2078,20 +2413,25 @@ body.electron-app .sub-tabs {
 .setting-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .setting-label {
-  font-size: 0.78rem;
+  font-size: 0.7rem;
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .setting-hint {
-  font-size: 0.78rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
+  line-height: 1.35;
 }
 
 .setting-hint a {
@@ -2106,14 +2446,14 @@ body.electron-app .sub-tabs {
 .setting-warning {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 10px 14px;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 6px 10px;
   background: rgba(245, 158, 11, 0.08);
   border: 1px solid rgba(245, 158, 11, 0.2);
   border-radius: var(--radius-sm);
-  font-size: 0.78rem;
-  line-height: 1.5;
+  font-size: 0.72rem;
+  line-height: 1.4;
   color: #92400e;
 }
 
@@ -2251,13 +2591,13 @@ body.electron-app .sub-tabs {
 }
 
 .setting-input {
-  padding: 10px 14px;
+  padding: 6px 10px;
   background: var(--gray-50);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   outline: none;
   transition: border-color 200ms var(--ease), box-shadow 200ms var(--ease), background 200ms var(--ease);
 }
@@ -2800,13 +3140,20 @@ body.electron-app .draft-recovery-banner {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 8px 16px;
+  gap: 12px;
+  padding: 4px 14px 6px;
   background: var(--gray-50);
-  border-top: 1px solid var(--border);
+  /* No top border — the rec-bar above already has bottom contrast. Removing
+     this border visually merges the two bars into one band. */
+  border-top: 0;
   flex-shrink: 0;
   z-index: 90;
+  font-size: 0.8rem;
   -webkit-app-region: no-drag;
+}
+
+.translation-bar svg {
+  flex-shrink: 0;
 }
 
 /* ─── Audio Source Selector ─── */
@@ -2964,8 +3311,8 @@ body.electron-app .draft-recovery-banner {
 .translation-toggle-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
+  gap: 6px;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -3544,9 +3891,9 @@ body.electron-app .draft-recovery-banner {
 
 .setting-eye-btn {
   position: absolute;
-  right: 10px;
-  width: 28px;
-  height: 28px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3663,93 +4010,176 @@ body.electron-app .draft-recovery-banner {
 }
 
 /* ─── Connecting Overlay ─── */
-.connecting-overlay {
+/* ─── Startup status bar (slim bottom strip — replaces old center modal) ─── */
+.startup-status {
   position: fixed;
-  inset: 0;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
   z-index: 9999;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  box-shadow:
+    0 10px 30px rgba(15, 23, 42, 0.12),
+    0 2px 6px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  overflow: hidden;
+  animation: startup-strip-in 280ms ease-out;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+@keyframes startup-strip-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.startup-status-bar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  animation: fadeIn 0.3s ease;
+  gap: 10px;
+  padding: 10px 14px;
 }
 
-.connecting-card {
-  text-align: center;
-  max-width: 420px;
-  padding: 48px 40px;
-  border-radius: 24px;
-  background: #ffffff;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.15), 0 4px 16px rgba(0, 0, 0, 0.08);
-}
-
-.connecting-spinner {
-  width: 48px;
-  height: 48px;
-  border: 3px solid var(--gray-200, #e2e8f0);
-  border-top-color: var(--indigo-500, #6366f1);
-  border-radius: 50%;
-  margin: 0 auto 24px;
-  animation: spin 0.8s linear infinite;
-}
-
-.connecting-card h2 {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text, #0f172a);
-  margin: 0 0 8px;
-}
-
-.connecting-card p {
-  font-size: 14px;
-  color: var(--text-secondary, #64748b);
-  line-height: 1.6;
-  margin: 0 0 28px;
-}
-
-.connecting-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  text-align: left;
-}
-
-.connecting-step {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-  color: var(--gray-400, #94a3b8);
-  transition: color 0.3s;
-}
-
-.connecting-step.active {
-  color: var(--text, #0f172a);
-  font-weight: 500;
-}
-
-.step-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--gray-300, #cbd5e1);
+.startup-status-spinner {
+  color: var(--primary, #6366f1);
+  display: inline-flex;
+  animation: spin 0.9s linear infinite;
   flex-shrink: 0;
 }
 
-.step-dot.pulse {
-  background: var(--indigo-500, #6366f1);
+.startup-status-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.startup-status-text strong {
+  font-weight: 600;
+}
+
+.startup-status-dim {
+  color: var(--text-secondary, #64748b);
+  font-weight: 400;
+}
+
+.startup-status-elapsed {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  font-variant-numeric: tabular-nums;
+  background: rgba(99, 102, 241, 0.08);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.startup-status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: var(--primary, #6366f1);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 8px 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+  flex-shrink: 0;
+}
+
+.startup-status-toggle:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: var(--primary, #6366f1);
+}
+
+.startup-status-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 14px 12px;
+  border-top: 1px solid rgba(99, 102, 241, 0.12);
+}
+
+.startup-status-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.startup-status-step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.startup-status-step-label {
+  font-weight: 500;
+}
+
+.startup-status-step-hint {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.startup-status-step--pending .startup-status-step-label {
+  color: var(--text-secondary, #94a3b8);
+}
+
+.startup-status-step--active .startup-status-step-label {
+  color: var(--text, #0f172a);
+}
+
+.startup-status-step--done .startup-status-step-label {
+  color: #16a34a;
+}
+
+.startup-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.startup-status-dot--pending {
+  background: var(--gray-300, #cbd5e1);
+}
+
+.startup-status-dot--active {
+  background: var(--primary, #6366f1);
   animation: dotPulse 1.5s ease-in-out infinite;
 }
 
-.step-dot.done {
-  background: var(--green-500, #22c55e);
-  animation: none;
+.startup-status-dot--done {
+  background: #22c55e;
 }
 
-.connecting-step.done {
-  color: var(--green-500, #22c55e);
+.startup-status-inline-hint,
+.startup-status-slow-hint {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  padding: 0 14px 10px;
+  line-height: 1.4;
+  font-style: italic;
+}
+
+/* Visual feedback that some buttons are intentionally inactive while the
+   backend warms up — kept subtle (not greying the whole shell). Applied
+   via the .app--offline class on the root wrapper. */
+.app--offline .icon-btn:disabled,
+.app--offline .lang-toggle:disabled,
+.app--offline button[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 @keyframes dotPulse {
@@ -3805,4 +4235,301 @@ body.electron-app .draft-recovery-banner {
 @keyframes slideDown {
   from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+/* ─── Upload Audio Modal ─────────────────────────────────────────────── */
+
+.upload-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 24px;
+  animation: fadeIn 0.18s ease;
+}
+
+.upload-modal-card {
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.18), 0 6px 18px rgba(0, 0, 0, 0.08);
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  /* `visible` so CustomSelect's absolutely-positioned dropdown can escape
+     the card and render above sibling rows when it opens upward. With
+     `hidden` only the middle slice of the 13-item language list showed. */
+  overflow: visible;
+}
+
+.upload-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--gray-100, #f1f5f9);
+}
+
+.upload-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+  margin: 0;
+}
+
+.upload-modal-close {
+  background: transparent;
+  border: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-secondary, #64748b);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.upload-modal-close:hover {
+  background: var(--gray-100, #f1f5f9);
+  color: var(--text, #0f172a);
+}
+
+.upload-modal-body {
+  padding: 20px 22px 22px;
+  /* Match the card — let the dropdown extend past the body too. The pick
+     step's form is ≤ 5 rows; if a future step needs scroll, give that
+     step's container its own overflow rule. */
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Tighter max-height for the language picker dropdown so 13 options fit
+   neatly within the modal without scrolling off-screen. */
+.upload-language-select .custom-select-dropdown {
+  max-height: 220px;
+}
+
+.upload-modal-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary, #64748b);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.upload-file-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1.5px dashed var(--gray-300, #cbd5e1);
+  background: var(--gray-50, #f8fafc);
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text, #0f172a);
+  transition: border-color 0.15s, background 0.15s;
+  text-align: left;
+}
+
+.upload-file-picker:hover {
+  border-color: var(--indigo-400, #818cf8);
+  background: #fff;
+}
+
+.upload-file-picker svg {
+  color: var(--indigo-500, #6366f1);
+  flex-shrink: 0;
+}
+
+.upload-file-picker span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.upload-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.upload-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.upload-field-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-200, #e2e8f0);
+  border-radius: 9px;
+  font-size: 13px;
+  color: var(--text, #0f172a);
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.upload-field-input:focus {
+  border-color: var(--indigo-400, #818cf8);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.upload-modal-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #94a3b8);
+  margin: 4px 0 0;
+}
+
+.upload-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.upload-stage-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text, #0f172a);
+}
+
+.upload-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--gray-100, #f1f5f9);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.upload-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #818cf8);
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.upload-progress-meta {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-progress-sub {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  margin-top: -8px;
+}
+
+.upload-progress-sub--accent {
+  margin-top: 2px;
+  color: var(--primary, #6366f1);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.upload-progress-sub--accent::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary, #6366f1);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1; transform: scale(1.15); }
+}
+
+.upload-chunk-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.upload-chunk-preview-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.upload-chunk-preview-body {
+  background: var(--gray-50, #f8fafc);
+  border: 1px solid var(--gray-100, #f1f5f9);
+  border-radius: 10px;
+  padding: 12px 14px;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.upload-chunk-line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #0f172a);
+  animation: fadeIn 0.2s ease;
+}
+
+.upload-modal-done {
+  align-items: center;
+  text-align: center;
+}
+
+.upload-done-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #dcfce7;
+  color: #15803d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 8px auto 4px;
+}
+
+.upload-modal-stage-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+  margin: 4px 0 2px;
+}
+
+.upload-modal-stage-desc {
+  font-size: 13px;
+  color: var(--text-secondary, #64748b);
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
+.upload-error-detail {
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+  text-align: left;
+  background: var(--gray-50, #f8fafc);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
 }

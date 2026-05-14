@@ -9,17 +9,43 @@ import {
     downloadMeetingMinutes,
     downloadTextFile,
 } from '../lib/api';
+import { IS_TAURI } from '../lib/sidecar';
 import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
+import { UploadAudioModal } from './UploadAudioModal';
 import { t } from '../i18n';
 
 export function MeetingList() {
-    const { meetings, setMeetings, setCurrentView, setCurrentMeetingId, setDraftId, setActiveTab, lang } = useAppStore();
+    const { meetings, setMeetings, setCurrentView, setCurrentMeetingId, setDraftId, setActiveTab, lang, recording, backendOnline } = useAppStore();
     const { showToast } = useToast();
     const [editingMeetingId, setEditingMeetingId] = useState<number | null>(null);
     const [editingTitle, setEditingTitle] = useState('');
     const [busyMap, setBusyMap] = useState<Record<string, boolean>>({});
     const [searchQuery, setSearchQuery] = useState('');
+    const [uploadModalOpen, setUploadModalOpen] = useState(false);
+
+    const openUploadModal = () => {
+        if (recording) {
+            showToast(
+                lang === 'vi'
+                    ? 'Đang ghi âm — dừng ghi âm trước khi upload file'
+                    : 'Recording in progress — stop recording first before uploading',
+                'warning',
+            );
+            return;
+        }
+        setUploadModalOpen(true);
+    };
+
+    const handleUploadReady = async (meetingId: number) => {
+        try {
+            await loadMeetings();
+        } catch { /* best effort refresh */ }
+        setCurrentMeetingId(meetingId);
+        setDraftId(null);
+        setActiveTab('summary');
+        setCurrentView('detail');
+    };
 
     const filteredMeetings = useMemo(() => {
         if (!searchQuery.trim()) return meetings;
@@ -249,7 +275,34 @@ export function MeetingList() {
             <div className="pane-header">
                 <h2 className="pane-title">{lang === 'vi' ? 'Lịch sử cuộc họp' : 'Meeting History'}</h2>
                 <div className="pane-actions">
-                    <button className="action-btn primary" onClick={newMeeting}>
+                    {IS_TAURI && (
+                        <button
+                            className="action-btn"
+                            onClick={openUploadModal}
+                            disabled={recording || !backendOnline}
+                            title={
+                                !backendOnline
+                                    ? (lang === 'vi' ? 'Đang khởi động — vui lòng chờ' : 'Starting up — please wait')
+                                    : recording
+                                        ? (lang === 'vi' ? 'Đang ghi âm — dừng trước khi upload' : 'Stop recording before uploading')
+                                        : (lang === 'vi' ? 'Upload file ghi âm có sẵn' : 'Upload an audio file')
+                            }
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                                strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" x2="12" y1="3" y2="15" />
+                            </svg>
+                            <span>{lang === 'vi' ? 'Upload file' : 'Upload file'}</span>
+                        </button>
+                    )}
+                    <button
+                        className="action-btn primary"
+                        onClick={newMeeting}
+                        disabled={recording || !backendOnline}
+                        title={!backendOnline ? (lang === 'vi' ? 'Đang khởi động — vui lòng chờ' : 'Starting up — please wait') : undefined}
+                    >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
                             strokeLinecap="round" strokeLinejoin="round">
                             <path d="M12 5v14" /><path d="M5 12h14" />
@@ -412,6 +465,12 @@ export function MeetingList() {
                     </div>
                 ))}
             </div>
+
+            <UploadAudioModal
+                open={uploadModalOpen}
+                onClose={() => setUploadModalOpen(false)}
+                onMeetingReady={handleUploadReady}
+            />
         </section>
     );
 }

@@ -7,6 +7,7 @@ import { RecordingBar } from './components/RecordingBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ToastProvider, useToast } from './components/Toast';
 import { UpdateChecker } from './components/UpdateChecker';
+import { StartupStatusBar } from './components/StartupStatusBar';
 import { SIDECAR_HTTP_BASES } from './lib/sidecar';
 import './index.css';
 
@@ -14,21 +15,50 @@ const queryClient = new QueryClient();
 const SIDECAR_BASES = SIDECAR_HTTP_BASES;
 
 function AppInner() {
-  const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording } = useAppStore();
+  const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline } = useAppStore();
   const { showToast } = useToast();
-  const [backendStatus, setBackendStatus] = useState<'online' | 'offline'>('offline');
+  const [backendStatus, setBackendStatusLocal] = useState<'online' | 'offline'>('offline');
+  // Mirror local backend state into the global store so unrelated components
+  // (MeetingList action buttons, RecordingBar) can gate themselves without
+  // re-running their own health probes.
+  const setBackendStatus = (v: 'online' | 'offline') => {
+    setBackendStatusLocal(v);
+    setBackendOnline(v === 'online');
+  };
   const [appVersion, setAppVersion] = useState('');
   // Startup progress: 0=connecting, 1=sidecar online, 2=diarizer loaded, 3=ready
   const [startupStep, setStartupStep] = useState(0);
+  const [startupElapsed, setStartupElapsed] = useState(0); // seconds since boot
+  const [showStartupDetails, setShowStartupDetails] = useState(false);
   const hasBeenOnline = useRef(false);
+  const startupBeganAt = useRef<number>(Date.now());
 
   const showRecBar = currentView === 'recording' || currentView === 'detail';
   const isOffline = backendStatus !== 'online';
 
+  // Tick elapsed-time counter once a second while offline. Resets when we
+  // go online (startupBeganAt is captured on each fresh boot cycle).
+  useEffect(() => {
+    if (!isOffline) {
+      setStartupElapsed(0);
+      return;
+    }
+    const id = setInterval(() => {
+      setStartupElapsed(Math.floor((Date.now() - startupBeganAt.current) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isOffline]);
+
   const backendLabel = useMemo(() => {
-    if (lang === 'vi') return backendStatus === 'online' ? '✓ Sẵn sàng' : 'Đang kết nối...';
-    return backendStatus === 'online' ? '✓ Ready' : 'Connecting...';
-  }, [backendStatus, lang]);
+    if (backendStatus === 'online') {
+      return lang === 'vi' ? '✓ Sẵn sàng' : '✓ Ready';
+    }
+    // While offline, surface elapsed time in the chip so the user has
+    // *two* progress signals (chip + bottom strip) without having to look
+    // around the screen.
+    const elapsedSuffix = startupElapsed > 0 ? ` · ${startupElapsed}s` : '';
+    return (lang === 'vi' ? 'Đang khởi động' : 'Starting') + elapsedSuffix;
+  }, [backendStatus, lang, startupElapsed]);
 
   useEffect(() => {
     if (window.__TAURI_INTERNALS__) {
@@ -44,6 +74,9 @@ function AppInner() {
 
     // Sequential startup: each step must complete before moving to next
     const runStartup = async () => {
+      // Reset elapsed-time anchor whenever startup re-runs (initial boot or
+      // a backend hiccup that knocked us offline).
+      startupBeganAt.current = Date.now();
       // ── Step 0→1: Wait for sidecar to respond to /health ──
       while (active) {
         try {
@@ -119,11 +152,12 @@ function AppInner() {
 
   return (
       <QueryClientProvider client={queryClient}>
-        <div className="app">
-          <main
-              className="main"
-              style={isOffline ? { pointerEvents: 'none' } : undefined}
-            >
+        <div className={`app ${isOffline ? 'app--offline' : ''}`}>
+          <main className="main">
+            {/* App shell stays interactive (scroll meeting list, open
+                settings) while sidecar warms up. Buttons that need the
+                backend disable themselves via the `disabled={isOffline}`
+                flag below, plus the .app--offline class dims them via CSS. */}
             {/* Top Navigation */}
             <header className="topnav">
               <div className="topnav-left">
@@ -147,10 +181,13 @@ function AppInner() {
                   <span className={`status-dot ${backendStatus === 'online' ? 'online' : 'offline'}`} />
                   <span>{backendLabel}</span>
                 </div>
-                <button className="lang-toggle" disabled={isOffline} onClick={() => setLang(lang === 'vi' ? 'en' : 'vi')}>
+                {/* Language + Settings stay enabled during startup — users
+                    often want to configure API keys / language while waiting,
+                    and neither needs the backend running. */}
+                <button className="lang-toggle" onClick={() => setLang(lang === 'vi' ? 'en' : 'vi')}>
                   {lang === 'vi' ? 'VI' : 'EN'}
                 </button>
-                <button className="icon-btn" id="btnSettings" disabled={isOffline} onClick={() => setSettingsOpen(true)} aria-label="Settings">
+                <button className="icon-btn" id="btnSettings" onClick={() => setSettingsOpen(true)} aria-label="Settings">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
                     strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
@@ -169,32 +206,18 @@ function AppInner() {
               {showRecBar && <RecordingBar />}
             </>
 
-            {/* Connecting overlay */}
+            {/* Startup status — slim bottom strip (replaces the old center
+                overlay). App shell stays visible behind so the user can see
+                structure (logo, nav, meeting list shape) instead of staring
+                at a giant blocking modal. */}
             {isOffline && !recording && (
-              <div className="connecting-overlay">
-                <div className="connecting-card">
-                  <div className="connecting-spinner" />
-                  <h2>{lang === 'vi' ? 'Đang khởi động hệ thống' : 'Starting up'}</h2>
-                  <p>{lang === 'vi'
-                    ? 'Scribble đang khởi chạy dịch vụ AI phía sau. Quá trình này có thể mất vài giây...'
-                    : 'Scribble is starting the AI backend service. This may take a few seconds...'
-                  }</p>
-                  <div className="connecting-steps">
-                    <div className={`connecting-step ${startupStep >= 0 ? 'active' : ''} ${startupStep >= 1 ? 'done' : ''}`}>
-                      <span className={`step-dot ${startupStep === 0 ? 'pulse' : startupStep >= 1 ? 'done' : ''}`} />
-                      <span>{lang === 'vi' ? 'Kết nối tới sidecar' : 'Connecting to sidecar'}</span>
-                    </div>
-                    <div className={`connecting-step ${startupStep >= 1 ? 'active' : ''} ${startupStep >= 2 ? 'done' : ''}`}>
-                      <span className={`step-dot ${startupStep === 1 ? 'pulse' : startupStep >= 2 ? 'done' : ''}`} />
-                      <span>{lang === 'vi' ? 'Tải mô hình nhận diện giọng nói' : 'Loading speaker model'}</span>
-                    </div>
-                    <div className={`connecting-step ${startupStep >= 3 ? 'active done' : ''}`}>
-                      <span className={`step-dot ${startupStep >= 3 ? 'done' : ''}`} />
-                      <span>{lang === 'vi' ? 'Sẵn sàng ghi âm' : 'Ready to record'}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <StartupStatusBar
+                lang={lang}
+                step={startupStep}
+                elapsed={startupElapsed}
+                expanded={showStartupDetails}
+                onToggleExpand={() => setShowStartupDetails((v) => !v)}
+              />
             )}
 
           </main>

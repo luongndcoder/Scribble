@@ -14,6 +14,7 @@ Nvidia Models:
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -180,10 +181,14 @@ def transcribe_nvidia(file_path: str, api_key: str, language: str = "vi-VN") -> 
     log.info("[stt:nvidia] Using %s for %s", model['name'], language)
 
     # Convert to WAV PCM 16kHz mono (Riva requires this format)
+    # Use find_ffmpeg() not bare "ffmpeg" — when launched from Finder the
+    # bundled app inherits a stripped PATH that excludes /opt/homebrew/bin.
+    from services.audio import find_ffmpeg
     wav_path = file_path + "_riva.wav"
+    ffmpeg_bin = find_ffmpeg()
     try:
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", file_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
+            [ffmpeg_bin, "-y", "-i", file_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
             capture_output=True, timeout=10,
         )
         if result.returncode != 0:
@@ -228,6 +233,136 @@ def transcribe_nvidia(file_path: str, api_key: str, language: str = "vi-VN") -> 
         text = normalize_vietnamese_text(text)
     text = filter_hallucinations(text)
     return text
+
+
+def transcribe_nvidia_streaming(file_path: str, api_key: str, language: str = "vi-VN") -> str:
+    """Transcribe a finite audio file via Nvidia Riva STREAMING gRPC.
+
+    Why this exists alongside transcribe_nvidia (offline_recognize):
+      Riva Cloud does not expose the Vietnamese / Chinese Parakeet models in
+      offline mode — they return INVALID_ARGUMENT
+      "Unavailable model … type=offline". Streaming mode works for those
+      languages, so the batch upload pipeline drives the same gRPC stream
+      realtime recording uses, just fed from a file instead of a mic.
+
+    Audio is normalized to WAV PCM 16kHz mono, the RIFF header is stripped,
+    and the raw PCM is yielded in ~320ms chunks through
+    streaming_response_generator. Final results are concatenated.
+    """
+    if not api_key:
+        raise RuntimeError("NVIDIA_API_KEY not set")
+
+    model = get_nvidia_model(language)
+    log.info("[stt:nvidia-stream-batch] %s for %s", model["name"], language)
+
+    # Normalize to 16kHz mono PCM WAV (Riva contract).
+    # find_ffmpeg() not bare "ffmpeg" — bundled app launch path lacks
+    # /opt/homebrew/bin so subprocess.run(["ffmpeg", ...]) returns
+    # FileNotFoundError every chunk and the whole pipeline silently
+    # produces an empty transcript. (Hit by user during testing.)
+    from services.audio import find_ffmpeg
+    wav_path = file_path + "_riva_stream.wav"
+    ffmpeg_bin = find_ffmpeg()
+    kwargs: dict = {"capture_output": True, "timeout": 30}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    try:
+        result = subprocess.run(
+            [ffmpeg_bin, "-y", "-i", file_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
+            **kwargs,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg failed: {result.stderr.decode(errors='replace')[:200]}"
+            )
+    except FileNotFoundError:
+        raise RuntimeError("ffmpeg not found — install ffmpeg")
+
+    try:
+        with open(wav_path, "rb") as f:
+            wav_bytes = f.read()
+    finally:
+        try:
+            os.unlink(wav_path)
+        except Exception:
+            pass
+
+    pcm = _strip_wav_header(wav_bytes)
+    if not pcm:
+        return ""
+
+    asr = _get_riva_asr(api_key, model["function_id"])
+
+    from riva.client import (
+        AudioEncoding,
+        RecognitionConfig,
+        StreamingRecognitionConfig,
+    )
+
+    config = RecognitionConfig()
+    config.encoding = AudioEncoding.LINEAR_PCM
+    config.sample_rate_hertz = 16000
+    config.language_code = language
+    config.max_alternatives = 1
+    config.enable_automatic_punctuation = True
+    config.audio_channel_count = 1
+
+    streaming_config = StreamingRecognitionConfig()
+    streaming_config.config.CopyFrom(config)
+    streaming_config.interim_results = False  # batch — finals only
+
+    # 320ms of 16kHz mono 16-bit PCM = 16000 * 0.32 * 2 = 10_240 bytes
+    CHUNK_BYTES = 10_240
+
+    def _audio_iter():
+        for i in range(0, len(pcm), CHUNK_BYTES):
+            yield pcm[i : i + CHUNK_BYTES]
+
+    try:
+        responses = asr.streaming_response_generator(
+            audio_chunks=_audio_iter(),
+            streaming_config=streaming_config,
+        )
+        pieces: list[str] = []
+        for response in responses:
+            if not response.results:
+                continue
+            for r in response.results:
+                if not r.is_final or not r.alternatives:
+                    continue
+                t = (r.alternatives[0].transcript or "").strip()
+                if t:
+                    pieces.append(t)
+    except Exception:
+        # Reset cached ASR so a stale stream/auth doesn't poison the next call.
+        _reset_riva_asr(model["function_id"])
+        raise
+
+    text = " ".join(pieces).strip()
+    if language.startswith("vi"):
+        text = normalize_vietnamese_text(text)
+    text = filter_hallucinations(text)
+    return text
+
+
+def _strip_wav_header(wav_bytes: bytes) -> bytes:
+    """Return raw PCM payload of a RIFF/WAVE buffer.
+
+    Falls back to a fixed 44-byte skip (or the full buffer) when the RIFF
+    structure is malformed.
+    """
+    if len(wav_bytes) < 44 or wav_bytes[:4] != b"RIFF":
+        return wav_bytes
+    idx = wav_bytes.find(b"data", 12)
+    if idx < 0 or idx + 8 > len(wav_bytes):
+        return wav_bytes[44:]
+    try:
+        size = int.from_bytes(wav_bytes[idx + 4 : idx + 8], "little")
+    except Exception:
+        return wav_bytes[idx + 8 :]
+    start = idx + 8
+    end = min(start + size, len(wav_bytes))
+    return wav_bytes[start:end]
 
 
 class NvidiaStreamingSTT:

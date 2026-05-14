@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { getSettings, saveSettings, diagnose, fetchLLMModels } from '../lib/api';
+import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
 import { useToast } from './Toast';
@@ -130,21 +131,9 @@ export function SettingsPanel() {
         setTestRunning(false);
     };
 
-    const nvidiaLanguages = [
-        { value: 'vi', label: 'Vietnamese' },
-        { value: 'en', label: 'English' },
-        { value: 'zh', label: 'Chinese' },
-        { value: 'ja', label: 'Japanese' },
-        { value: 'ko', label: 'Korean' },
-        { value: 'fr', label: 'French' },
-        { value: 'de', label: 'German' },
-        { value: 'es', label: 'Spanish' },
-        { value: 'it', label: 'Italian' },
-        { value: 'pt', label: 'Portuguese' },
-        { value: 'ru', label: 'Russian' },
-        { value: 'hi', label: 'Hindi' },
-        { value: 'ar', label: 'Arabic' },
-    ];
+    // Canonical list lives in src/lib/language-options.ts so UploadAudioModal
+    // and any future selector stay in sync with the same labels + value set.
+    const nvidiaLanguages = NVIDIA_STT_LANGUAGES;
 
     const sonioxLanguages = [
         { value: 'vi', label: 'Vietnamese' },
@@ -236,8 +225,8 @@ export function SettingsPanel() {
                             <div className="settings-section-desc">{t('voice_recognition_desc', lang)}</div>
                         </div>
 
-                        {/* Provider Selector */}
-                        <div className="setting-group">
+                        {/* Provider Selector — span full row, the tab pair is wide. */}
+                        <div className="setting-group setting-group--full">
                             <div className="setting-label">{t('stt_provider', lang)}</div>
                             <div className="setting-provider-tabs">
                                 <button
@@ -268,8 +257,8 @@ export function SettingsPanel() {
                             )}
                         </div>
 
-                        {/* API Key — unified for both providers */}
-                        <div className="setting-group">
+                        {/* API Key — span full so the long input row breathes */}
+                        <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 API Key
                                 <ConfigBadge ok={hasApiKey} />
@@ -336,7 +325,7 @@ export function SettingsPanel() {
                         </div>
 
                         {/* Max Speakers — only for Nvidia (Soniox has built-in diarization) */}
-                        {sttProvider === 'nvidia' && <div className="setting-group">
+                        {sttProvider === 'nvidia' && <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 {lang === 'vi' ? 'Số người nói tối đa' : 'Max Speakers'}
                             </div>
@@ -390,7 +379,7 @@ export function SettingsPanel() {
                         </div>
 
                         {/* API Key */}
-                        <div className="setting-group">
+                        <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 API Key
                                 <ConfigBadge ok={hasLlmKey} />
@@ -409,7 +398,7 @@ export function SettingsPanel() {
 
                         {/* Custom URL — only for compatible */}
                         {llmProvider === 'compatible' && (
-                            <div className="setting-group">
+                            <div className="setting-group setting-group--full">
                                 <div className="setting-label" style={{ textTransform: 'uppercase' }}>Base URL</div>
                                 <input type="text" className="setting-input" value={llmUrl} onChange={(e) => { setLlmUrl(e.target.value); setLlmModelOptions([]); }} placeholder="https://api.example.com/v1" />
                             </div>
@@ -445,8 +434,8 @@ export function SettingsPanel() {
                     </div>
 
 
-                    {/* ── Unified Test Connection ── */}
-                    <div className="settings-section settings-test-section">
+                    {/* ── Unified Test Connection (spans both grid cols) ── */}
+                    <div className="settings-section settings-test-section span-full">
                         <button className="settings-test-btn" onClick={testAll} disabled={testRunning}>
                             {testRunning ? (
                                 <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

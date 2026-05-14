@@ -21,12 +21,22 @@ class Database:
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            inst = super().__new__(cls)
+            # One-time init lives in __new__ so subsequent `Database()` calls
+            # from any module (e.g. lazy imports during a request) don't blow
+            # away the already-initialised _db_path. Previously __init__ ran
+            # every time, resetting state and producing the classic crash
+            # "expected str, bytes or os.PathLike object, not NoneType" the
+            # next time anything called db.get_setting()/get_meeting().
+            inst._db_path = None
+            inst._initialized = False
+            cls._instance = inst
         return cls._instance
 
     def __init__(self):
-        self._db_path = None
-        self._initialized = False
+        # Intentionally a no-op. State is set in __new__ once; later
+        # `Database()` calls return the same singleton without resetting.
+        pass
 
     def init(self, db_path: str | None = None):
         if self._initialized:
@@ -39,6 +49,7 @@ class Database:
 
         self._db_path = db_path
         self._create_tables()
+        self._migrate_v2()
         self._initialized = True
         log.info("SQLite: %s", db_path)
 
@@ -91,6 +102,196 @@ class Database:
         """)
         conn.commit()
 
+    def _migrate_v2(self):
+        """Idempotent migration: add columns for upload audio feature.
+
+        Safe to run repeatedly — duplicate ADD COLUMN errors are ignored.
+        Existing rows get default values; realtime flow unaffected.
+        """
+        conn = self._conn()
+        migrations = [
+            "ALTER TABLE meetings ADD COLUMN source_type TEXT DEFAULT 'realtime'",
+            "ALTER TABLE meetings ADD COLUMN file_hash TEXT DEFAULT NULL",
+            "ALTER TABLE meetings ADD COLUMN source_filename TEXT DEFAULT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_meetings_file_hash ON meetings(file_hash)",
+        ]
+        for sql in migrations:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    log.warning("Migration skipped (%s): %s", sql[:60], e)
+
+        # ── Per-chunk progress (upload pipeline resume) ──
+        # text IS NULL until STT completes; embedding BLOB is the raw 512×f32
+        # vector from CAM++ (or NULL when diarizer disabled).
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS upload_chunks (
+                meeting_id INTEGER NOT NULL,
+                chunk_idx INTEGER NOT NULL,
+                start_ms INTEGER NOT NULL,
+                end_ms INTEGER NOT NULL,
+                text TEXT DEFAULT NULL,
+                embedding BLOB DEFAULT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (meeting_id, chunk_idx)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_upload_chunks_meeting ON upload_chunks(meeting_id)"
+        )
+
+        # ── Reference materials attached to a meeting ──
+        # Plain-text only (md / txt). Content lives directly in the DB row —
+        # md/txt are tiny so the simpler model wins over disk+DB hybrid.
+        # FK with CASCADE so deleting a meeting also drops its attachments.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meeting_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT DEFAULT 'text/plain',
+                size_bytes INTEGER NOT NULL,
+                content_text TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_attachments_meeting ON meeting_attachments(meeting_id)"
+        )
+        conn.commit()
+
+    # ─── Upload chunks (resume support) ───
+    def upsert_chunk_plan(self, meeting_id: int, plan: list[tuple[int, int, int]]) -> None:
+        """Persist the chunk plan (idx, start_ms, end_ms). Idempotent — won't
+        overwrite text/embedding of chunks already processed.
+        """
+        if not plan:
+            return
+        conn = self._conn()
+        conn.executemany(
+            "INSERT OR IGNORE INTO upload_chunks (meeting_id, chunk_idx, start_ms, end_ms) "
+            "VALUES (?, ?, ?, ?)",
+            [(meeting_id, idx, s, e) for (idx, s, e) in plan],
+        )
+        conn.commit()
+
+    def save_chunk_result(
+        self,
+        meeting_id: int,
+        chunk_idx: int,
+        text: str,
+        embedding: bytes | None,
+    ) -> None:
+        """Persist STT result + embedding for one chunk. Upsert semantics."""
+        conn = self._conn()
+        conn.execute(
+            """
+            INSERT INTO upload_chunks (meeting_id, chunk_idx, start_ms, end_ms, text, embedding, updated_at)
+            VALUES (?, ?, 0, 0, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(meeting_id, chunk_idx) DO UPDATE SET
+                text = excluded.text,
+                embedding = excluded.embedding,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (meeting_id, chunk_idx, text, embedding),
+        )
+        conn.commit()
+
+    def get_upload_chunks(self, meeting_id: int) -> list[dict]:
+        """Return all upload_chunks rows for a meeting, ordered by chunk_idx."""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT chunk_idx, start_ms, end_ms, text, embedding "
+            "FROM upload_chunks WHERE meeting_id = ? ORDER BY chunk_idx",
+            (meeting_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_upload_chunks(self, meeting_id: int) -> None:
+        conn = self._conn()
+        conn.execute("DELETE FROM upload_chunks WHERE meeting_id = ?", (meeting_id,))
+        conn.commit()
+
+    # ─── Meeting attachments (reference materials for LLM summary) ───
+    def add_attachment(
+        self,
+        meeting_id: int,
+        filename: str,
+        mime_type: str,
+        size_bytes: int,
+        content_text: str,
+    ) -> int:
+        conn = self._conn()
+        cur = conn.execute(
+            "INSERT INTO meeting_attachments "
+            "(meeting_id, filename, mime_type, size_bytes, content_text) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (meeting_id, filename, mime_type, size_bytes, content_text),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+    def list_attachments(self, meeting_id: int) -> list[dict]:
+        """Return attachment metadata (without content_text — that can be huge).
+
+        Use ``get_attachment(id)`` to fetch full text for display/preview.
+        """
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT id, meeting_id, filename, mime_type, size_bytes, created_at "
+            "FROM meeting_attachments WHERE meeting_id = ? ORDER BY created_at ASC",
+            (meeting_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_attachment(self, attachment_id: int) -> dict | None:
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT id, meeting_id, filename, mime_type, size_bytes, content_text, created_at "
+            "FROM meeting_attachments WHERE id = ?",
+            (attachment_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def delete_attachment(self, attachment_id: int, meeting_id: int) -> bool:
+        """Delete a single attachment, scoped to its meeting (defence-in-depth).
+
+        Returns True if a row was actually removed.
+        """
+        conn = self._conn()
+        cur = conn.execute(
+            "DELETE FROM meeting_attachments WHERE id = ? AND meeting_id = ?",
+            (attachment_id, meeting_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    def get_attachments_combined_text(self, meeting_id: int) -> str:
+        """Concatenate all attachments for a meeting into a single string.
+
+        Used by ``summarize_stream`` to inject reference context. Each block is
+        delimited with the filename so the LLM can cite if needed.
+        """
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT filename, content_text FROM meeting_attachments "
+            "WHERE meeting_id = ? ORDER BY created_at ASC",
+            (meeting_id,),
+        ).fetchall()
+        if not rows:
+            return ""
+        blocks = [
+            f"### {r['filename']}\n{r['content_text']}".strip()
+            for r in rows if (r["content_text"] or "").strip()
+        ]
+        return "\n\n---\n\n".join(blocks)
+
     # ─── Meetings ───
     def create_meeting(self, title: str, transcript: str, summary: str,
                        audio_duration: float, language: str, status: str = "saved") -> int:
@@ -116,6 +317,7 @@ class Database:
     _ALLOWED_UPDATE_COLS = frozenset({
         "title", "transcript", "summary", "translations", "audio_path",
         "audio_duration", "language", "status",
+        "source_type", "source_filename", "file_hash",
     })
 
     def update_meeting(self, mid: int, **kwargs):
@@ -193,6 +395,17 @@ class Database:
         conn = self._conn()
         conn.execute("DELETE FROM meetings WHERE id = ?", (mid,))
         conn.commit()
+
+    def find_meeting_by_hash(self, file_hash: str) -> int | None:
+        """Idempotency lookup for uploaded files. Returns meeting_id if exists, else None."""
+        if not file_hash:
+            return None
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT id FROM meetings WHERE file_hash = ? LIMIT 1",
+            (file_hash,),
+        ).fetchone()
+        return row["id"] if row else None
 
     # ─── Settings ───
     def get_setting(self, key: str) -> str | None:
