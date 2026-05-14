@@ -346,17 +346,31 @@ def transcribe_nvidia_streaming(file_path: str, api_key: str, language: str = "v
 
 
 def transcribe_soniox_file(
-    file_path: str, api_key: str, language_hints: list[str] | None = None,
-) -> str:
-    """Transcribe a finite audio file via Soniox async file API.
+    file_path: str,
+    api_key: str,
+    language_hints: list[str] | None = None,
+    *,
+    progress_cb=None,
+) -> list[dict]:
+    """Transcribe a finite audio file via Soniox async API — returns
+    diarized segments with absolute timestamps.
 
-    Used by the upload pipeline when stt_provider == 'soniox'. Soniox's
-    realtime API exists too (see SonioxStreamingSTT), but the file/async
-    path is simpler for batched chunk transcription — upload, wait for
-    job completion, fetch transcript text.
+    Soniox's stt-async-v4 returns tokens with built-in speaker labels
+    (consistent across the WHOLE file — no need for our own cross-chunk
+    clustering). This function groups consecutive same-speaker tokens
+    into segments and returns:
+
+        [
+          {"start_ms": 0, "end_ms": 5230, "text": "...", "speaker": "1"},
+          {"start_ms": 5230, "end_ms": 8100, "text": "...", "speaker": "2"},
+          ...
+        ]
 
     The file is auto-deleted from Soniox after we fetch the transcript
-    (delete_after=True) so files don't accumulate in the user's account.
+    (delete_after=True) so files don't pile up in the user's account.
+
+    progress_cb is called with float progress 0.0..1.0 while polling for
+    completion — used by the upload pipeline to drive SSE progress.
     """
     if not api_key:
         raise RuntimeError("Soniox API key chưa được cấu hình")
@@ -368,7 +382,7 @@ def transcribe_soniox_file(
 
     hints = language_hints or ["vi"]
     log.info(
-        "[stt:soniox-batch] stt-async-v4, language_hints=%s, file=%s",
+        "[stt:soniox-async] stt-async-v4, language_hints=%s, file=%s, diarization=ON",
         hints, Path(file_path).name,
     )
 
@@ -376,33 +390,122 @@ def transcribe_soniox_file(
     config = CreateTranscriptionConfig(
         model="stt-async-v4",
         language_hints=hints,
-        # Diarization is done by our own clustering pass on CAM++ embeddings
-        # so we can stay consistent with Nvidia-path output. Soniox's
-        # built-in diarization would conflict with that grouping.
-        enable_speaker_diarization=False,
+        # Soniox's diarization is excellent and globally consistent across
+        # the whole file — we use it directly and skip our CAM++ pass for
+        # the Soniox path.
+        enable_speaker_diarization=True,
         enable_language_identification=False,
     )
 
     try:
-        result = client.stt.transcribe_and_wait_with_tokens(
+        # Use the lower-level transcribe() + wait() so we can emit
+        # progress events while polling. The convenience
+        # transcribe_and_wait_with_tokens() hides the poll loop.
+        transcription = client.stt.transcribe(
             file=file_path,
             filename=Path(file_path).name,
             config=config,
-            delete_after=True,
-            wait_interval_sec=2.0,
-            # 10 minutes per chunk is generous — chunks are ≤28s, async
-            # transcribe rarely takes more than ~30-60s on stt-async-v4.
-            wait_timeout_sec=600,
         )
+        # Poll manually so the upload pipeline can stream progress.
+        import time as _time
+
+        deadline = _time.time() + 3600  # 1-hour absolute cap for safety
+        last_progress = 0.0
+        while _time.time() < deadline:
+            t = client.stt.get(transcription.id)
+            status = getattr(t, "status", None)
+            status_str = str(status)
+            if status_str.endswith("completed") or status_str == "completed":
+                transcription = t
+                break
+            if status_str.endswith("error") or status_str == "error":
+                err = getattr(t, "error_message", None) or "Soniox transcription failed"
+                raise RuntimeError(err)
+            # Heuristic progress: ramp 0.0 → 0.9 over expected duration.
+            # Soniox doesn't expose a true progress %, so we ease toward 0.9.
+            if progress_cb is not None:
+                last_progress = min(0.9, last_progress + 0.05)
+                try:
+                    progress_cb(last_progress)
+                except Exception:
+                    pass
+            _time.sleep(3.0)
+        else:
+            raise TimeoutError("Soniox transcription timeout (>1h)")
+
+        result = client.stt.get_transcript(transcription.id)
+        if progress_cb is not None:
+            try: progress_cb(1.0)
+            except Exception: pass
+
+        # Clean up server-side. Errors here are non-fatal.
+        try:
+            file_id_to_delete = transcription.file_id
+            client.stt.delete(transcription.id)
+            if file_id_to_delete:
+                client.files.delete(file_id_to_delete)
+        except Exception as cleanup_exc:
+            log.warning("[stt:soniox-async] cleanup failed (non-fatal): %s", cleanup_exc)
     except Exception as exc:
-        log.warning("[stt:soniox-batch] failed: %s", exc)
+        log.warning("[stt:soniox-async] failed: %s", exc)
         raise
 
-    text = (result.text or "").strip()
-    # Soniox already returns properly-cased Vietnamese; keep the same
-    # hallucination filter as the Nvidia path for parity.
-    text = filter_hallucinations(text)
-    return text
+    # ── Token → segment grouping ─────────────────────────────────────
+    tokens = list(result.tokens or [])
+    segments: list[dict] = []
+    cur_speaker: str | None = None
+    cur_start: int | None = None
+    cur_end: int | None = None
+    cur_pieces: list[str] = []
+
+    def _flush():
+        if cur_pieces and cur_start is not None and cur_end is not None:
+            text = "".join(cur_pieces).strip()
+            text = filter_hallucinations(text)
+            if text:
+                segments.append({
+                    "start_ms": int(cur_start),
+                    "end_ms": int(cur_end),
+                    "text": text,
+                    "speaker": str(cur_speaker or "1"),
+                })
+
+    for token in tokens:
+        text_piece = getattr(token, "text", "") or ""
+        if text_piece in ("<end>", ""):
+            continue
+        speaker = getattr(token, "speaker", None)
+        speaker = str(speaker) if speaker is not None else "1"
+        start_ms = getattr(token, "start_ms", None)
+        end_ms = getattr(token, "end_ms", None)
+        if start_ms is None or end_ms is None:
+            continue
+
+        if cur_speaker is None:
+            # First token
+            cur_speaker = speaker
+            cur_start = start_ms
+            cur_end = end_ms
+            cur_pieces = [text_piece]
+        elif speaker != cur_speaker:
+            # Speaker changed → flush current and start new segment
+            _flush()
+            cur_speaker = speaker
+            cur_start = start_ms
+            cur_end = end_ms
+            cur_pieces = [text_piece]
+        else:
+            # Same speaker — extend current segment
+            cur_pieces.append(text_piece)
+            cur_end = end_ms
+
+    _flush()
+    log.info(
+        "[stt:soniox-async] parsed %d segments from %d tokens (%d distinct speakers)",
+        len(segments), len(tokens),
+        len({s["speaker"] for s in segments}),
+    )
+    return segments
 
 
 def _strip_wav_header(wav_bytes: bytes) -> bytes:
