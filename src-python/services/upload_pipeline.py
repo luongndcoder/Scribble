@@ -271,7 +271,7 @@ async def _execute(
         message="Đang tạo biên bản (có thể mất vài phút)",
     )
     summary_md = await asyncio.to_thread(
-        _summarize_blocking, transcript_parts, meeting.get("language") or "vi"
+        _summarize_blocking, transcript_parts, meeting.get("language") or "vi", meeting_id,
     )
     if summary_md:
         db.update_meeting(meeting_id, summary=summary_md)
@@ -650,7 +650,7 @@ def _strip_overlap_prefix(prev_tail: str, current: str) -> str:
     return current
 
 
-def _summarize_blocking(parts: list[dict], language: str) -> str:
+def _summarize_blocking(parts: list[dict], language: str, meeting_id: int) -> str:
     """Drain summarize_stream into a single markdown string.
 
     Best-effort: returns empty string on any failure so the job still ends
@@ -676,7 +676,7 @@ def _summarize_blocking(parts: list[dict], language: str) -> str:
 
     tokens: list[str] = []
     try:
-        for raw_event in summarize_stream(flat_transcript, language, db):
+        for raw_event in summarize_stream(flat_transcript, language, db, meeting_id=meeting_id):
             # Each yielded string is one SSE block: "data: {...}\n\n" or
             # "event: progress\ndata: {...}\n\n" — we only collect token data.
             for line in raw_event.splitlines():

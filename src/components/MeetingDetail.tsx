@@ -4,6 +4,7 @@ import { TranscriptPart, Meeting, useAppStore } from '../stores/appStore';
 import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile } from '../lib/api';
 import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
+import { MeetingAttachments } from './MeetingAttachments';
 
 const SPEAKER_COLORS = ['#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 type LegacyMinutes = {
@@ -929,6 +930,9 @@ export function MeetingDetail() {
                         )}
                     </div>
                 </div>
+                {viewingMeetingId && typeof viewingMeetingId === 'number' && (
+                    <MeetingAttachments meetingId={viewingMeetingId} />
+                )}
                 {editingMinutes ? (
                     <div
                         ref={minutesEditRef}

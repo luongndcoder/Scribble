@@ -214,7 +214,7 @@ app.add_middleware(
 )
 
 # ─── Include routers ───
-from api import settings, meetings, drafts, diagnose, transcription, upload
+from api import settings, meetings, drafts, diagnose, transcription, upload, attachments
 
 app.include_router(settings.router)
 app.include_router(meetings.router)
@@ -222,6 +222,7 @@ app.include_router(drafts.router)
 app.include_router(diagnose.router)
 app.include_router(transcription.router)
 app.include_router(upload.router)
+app.include_router(attachments.router)
 
 
 # ─── Live Log Stream (SSE) ───

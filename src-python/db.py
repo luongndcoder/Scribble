@@ -142,6 +142,28 @@ class Database:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_upload_chunks_meeting ON upload_chunks(meeting_id)"
         )
+
+        # ── Reference materials attached to a meeting ──
+        # Plain-text only (md / txt). Content lives directly in the DB row —
+        # md/txt are tiny so the simpler model wins over disk+DB hybrid.
+        # FK with CASCADE so deleting a meeting also drops its attachments.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meeting_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT DEFAULT 'text/plain',
+                size_bytes INTEGER NOT NULL,
+                content_text TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_attachments_meeting ON meeting_attachments(meeting_id)"
+        )
         conn.commit()
 
     # ─── Upload chunks (resume support) ───
@@ -195,6 +217,80 @@ class Database:
         conn = self._conn()
         conn.execute("DELETE FROM upload_chunks WHERE meeting_id = ?", (meeting_id,))
         conn.commit()
+
+    # ─── Meeting attachments (reference materials for LLM summary) ───
+    def add_attachment(
+        self,
+        meeting_id: int,
+        filename: str,
+        mime_type: str,
+        size_bytes: int,
+        content_text: str,
+    ) -> int:
+        conn = self._conn()
+        cur = conn.execute(
+            "INSERT INTO meeting_attachments "
+            "(meeting_id, filename, mime_type, size_bytes, content_text) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (meeting_id, filename, mime_type, size_bytes, content_text),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+    def list_attachments(self, meeting_id: int) -> list[dict]:
+        """Return attachment metadata (without content_text — that can be huge).
+
+        Use ``get_attachment(id)`` to fetch full text for display/preview.
+        """
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT id, meeting_id, filename, mime_type, size_bytes, created_at "
+            "FROM meeting_attachments WHERE meeting_id = ? ORDER BY created_at ASC",
+            (meeting_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_attachment(self, attachment_id: int) -> dict | None:
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT id, meeting_id, filename, mime_type, size_bytes, content_text, created_at "
+            "FROM meeting_attachments WHERE id = ?",
+            (attachment_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def delete_attachment(self, attachment_id: int, meeting_id: int) -> bool:
+        """Delete a single attachment, scoped to its meeting (defence-in-depth).
+
+        Returns True if a row was actually removed.
+        """
+        conn = self._conn()
+        cur = conn.execute(
+            "DELETE FROM meeting_attachments WHERE id = ? AND meeting_id = ?",
+            (attachment_id, meeting_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+    def get_attachments_combined_text(self, meeting_id: int) -> str:
+        """Concatenate all attachments for a meeting into a single string.
+
+        Used by ``summarize_stream`` to inject reference context. Each block is
+        delimited with the filename so the LLM can cite if needed.
+        """
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT filename, content_text FROM meeting_attachments "
+            "WHERE meeting_id = ? ORDER BY created_at ASC",
+            (meeting_id,),
+        ).fetchall()
+        if not rows:
+            return ""
+        blocks = [
+            f"### {r['filename']}\n{r['content_text']}".strip()
+            for r in rows if (r["content_text"] or "").strip()
+        ]
+        return "\n\n---\n\n".join(blocks)
 
     # ─── Meetings ───
     def create_meeting(self, title: str, transcript: str, summary: str,
