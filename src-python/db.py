@@ -21,12 +21,22 @@ class Database:
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            inst = super().__new__(cls)
+            # One-time init lives in __new__ so subsequent `Database()` calls
+            # from any module (e.g. lazy imports during a request) don't blow
+            # away the already-initialised _db_path. Previously __init__ ran
+            # every time, resetting state and producing the classic crash
+            # "expected str, bytes or os.PathLike object, not NoneType" the
+            # next time anything called db.get_setting()/get_meeting().
+            inst._db_path = None
+            inst._initialized = False
+            cls._instance = inst
         return cls._instance
 
     def __init__(self):
-        self._db_path = None
-        self._initialized = False
+        # Intentionally a no-op. State is set in __new__ once; later
+        # `Database()` calls return the same singleton without resetting.
+        pass
 
     def init(self, db_path: str | None = None):
         if self._initialized:

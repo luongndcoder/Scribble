@@ -20,6 +20,13 @@ from fastapi.responses import StreamingResponse
 
 from db import Database
 from services.job_registry import JobStatus, registry
+# Eagerly import the pipeline module at top-level (NOT inside the handler).
+# Lazy-importing it on first upload triggered `db = Database()` at the
+# pipeline module's load time — which used to reset the DB singleton's
+# state and crash subsequent requests. The Database singleton is now
+# idempotent, but keeping this import at module-load time is also the
+# right default (no first-request import cost, no surprise side effects).
+from services.upload_pipeline import run_pipeline
 from services.upload_storage import (
     MAX_FILE_BYTES,
     sanitize_filename,
@@ -134,7 +141,6 @@ async def upload_audio(
 
     # Pipeline reads from disk (target_path), not the UploadFile → no race
     # with FastAPI's request-scope cleanup. Safe to spawn after we return.
-    from services.upload_pipeline import run_pipeline
     asyncio.create_task(run_pipeline(job.job_id))
 
     return {"job_id": job.job_id, "meeting_id": meeting_id}
@@ -227,7 +233,6 @@ async def resume_upload(meeting_id: int):
         status=JobStatus.PENDING,
         message="Tiếp tục xử lý",
     )
-    from services.upload_pipeline import run_pipeline
     asyncio.create_task(run_pipeline(job.job_id))
 
     return {"job_id": job.job_id, "meeting_id": meeting_id}
