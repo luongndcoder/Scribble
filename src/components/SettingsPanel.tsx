@@ -225,8 +225,8 @@ export function SettingsPanel() {
                             <div className="settings-section-desc">{t('voice_recognition_desc', lang)}</div>
                         </div>
 
-                        {/* Provider Selector */}
-                        <div className="setting-group">
+                        {/* Provider Selector — span full row, the tab pair is wide. */}
+                        <div className="setting-group setting-group--full">
                             <div className="setting-label">{t('stt_provider', lang)}</div>
                             <div className="setting-provider-tabs">
                                 <button
@@ -257,8 +257,8 @@ export function SettingsPanel() {
                             )}
                         </div>
 
-                        {/* API Key — unified for both providers */}
-                        <div className="setting-group">
+                        {/* API Key — span full so the long input row breathes */}
+                        <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 API Key
                                 <ConfigBadge ok={hasApiKey} />
@@ -325,7 +325,7 @@ export function SettingsPanel() {
                         </div>
 
                         {/* Max Speakers — only for Nvidia (Soniox has built-in diarization) */}
-                        {sttProvider === 'nvidia' && <div className="setting-group">
+                        {sttProvider === 'nvidia' && <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 {lang === 'vi' ? 'Số người nói tối đa' : 'Max Speakers'}
                             </div>
@@ -379,7 +379,7 @@ export function SettingsPanel() {
                         </div>
 
                         {/* API Key */}
-                        <div className="setting-group">
+                        <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 API Key
                                 <ConfigBadge ok={hasLlmKey} />
@@ -398,7 +398,7 @@ export function SettingsPanel() {
 
                         {/* Custom URL — only for compatible */}
                         {llmProvider === 'compatible' && (
-                            <div className="setting-group">
+                            <div className="setting-group setting-group--full">
                                 <div className="setting-label" style={{ textTransform: 'uppercase' }}>Base URL</div>
                                 <input type="text" className="setting-input" value={llmUrl} onChange={(e) => { setLlmUrl(e.target.value); setLlmModelOptions([]); }} placeholder="https://api.example.com/v1" />
                             </div>
