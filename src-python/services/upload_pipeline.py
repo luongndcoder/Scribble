@@ -572,16 +572,19 @@ def _ms_to_seconds_str(ms: int | None) -> str:
 def _build_transcript_parts(
     chunk_results: list[dict], speaker_map: dict[int, int]
 ) -> list[dict]:
-    """Assemble realtime-format transcript JSON.
+    """Assemble realtime-format transcript JSON — ONE PART PER CHUNK.
 
-    Format mirrors src-python/main.py `_send_results._accumulate_part` so the
-    frontend MeetingDetail renderer treats upload + realtime identically.
-    Consecutive chunks from the same speaker are merged into one part with
-    multi-chunkIds. Overlap text from VAD splitting is de-duplicated.
+    Why no same-speaker merging here (unlike main.py realtime):
+      Without a working diarizer every chunk gets speakerId=0 → merging
+      collapses a 60-minute meeting into a single block with no per-chunk
+      timestamps. Keeping chunks separate guarantees the user sees per-22s
+      time badges ("1:24 – 1:46") regardless of whether CAM++ is loaded.
 
-    Emits `startTime`/`endTime` as seconds strings (parseable by the frontend
-    fmtSec helper) so meeting detail displays per-part timestamps like
-    "1:24 – 1:46". The merged part's window grows to span all of its chunks.
+    Overlap text from VAD splitting (1.5s) is de-duplicated against the
+    previous chunk's tail so the displayed text doesn't repeat at boundaries.
+
+    Emits `startTime`/`endTime` as seconds strings parseable by the frontend
+    fmtSec helper.
     """
     parts: list[dict] = []
     prev_tail = ""
@@ -601,38 +604,21 @@ def _build_transcript_parts(
         start_ms = int(r.get("start_ms") or 0)
         end_ms = int(r.get("end_ms") or 0)
 
-        if parts and parts[-1].get("speakerId") == speaker_id:
-            # Same speaker — merge into the previous part and extend its window.
-            p = parts[-1]
-            ids = p.setdefault("chunkIds", [p.get("chunkId")])
-            ids.append(chunk_id)
-            chunk_data = p.setdefault(
-                "chunkData", {p.get("chunkId"): p.get("text", "")}
-            )
-            chunk_data[chunk_id] = text
-            ordered = [
-                chunk_data[cid]
-                for cid in ids
-                if cid is not None and chunk_data.get(cid)
-            ]
-            p["text"] = " ".join(t.strip() for t in ordered if t).strip()
-            p["endTime"] = _ms_to_seconds_str(max(int(float(p.get("endTime") or 0) * 1000), end_ms))
-        else:
-            parts.append(
-                {
-                    "text": text,
-                    "speaker": speaker,
-                    "speakerId": speaker_id,
-                    "chunkId": chunk_id,
-                    "chunkIds": [chunk_id],
-                    "chunkData": {chunk_id: text},
-                    # Frontend-compatible (seconds string) — drives the MM:SS badge.
-                    "startTime": _ms_to_seconds_str(start_ms),
-                    "endTime": _ms_to_seconds_str(end_ms),
-                    "timestamp": "",
-                    "translation": "",
-                }
-            )
+        parts.append(
+            {
+                "text": text,
+                "speaker": speaker,
+                "speakerId": speaker_id,
+                "chunkId": chunk_id,
+                "chunkIds": [chunk_id],
+                "chunkData": {chunk_id: text},
+                # Frontend fmtSec parses parseFloat — seconds as string.
+                "startTime": _ms_to_seconds_str(start_ms),
+                "endTime": _ms_to_seconds_str(end_ms),
+                "timestamp": "",
+                "translation": "",
+            }
+        )
 
         prev_tail = text[-120:]
 
