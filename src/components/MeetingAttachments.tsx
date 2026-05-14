@@ -30,6 +30,10 @@ interface Props {
     onChange?: () => void;
 }
 
+/** Per-user preference: should the attachments panel default to collapsed?
+ *  Persist so the user's choice survives between meetings. */
+const COLLAPSED_KEY = 'scribble:attachments-collapsed';
+
 export function MeetingAttachments({ meetingId, onChange }: Props) {
     const { lang } = useAppStore();
     const { showToast } = useToast();
@@ -38,7 +42,23 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
     const [loading, setLoading] = useState<boolean>(false);
     const [uploading, setUploading] = useState<boolean>(false);
     const [deletingId, setDeletingId] = useState<number | null>(null);
+    // Default: collapsed once there are attachments (user already knows they
+    // exist — give the minutes the screen space). Empty state stays expanded
+    // so users know the feature is there.
+    const [expanded, setExpanded] = useState<boolean>(() => {
+        try {
+            const stored = localStorage.getItem(COLLAPSED_KEY);
+            if (stored === 'true') return false;
+            if (stored === 'false') return true;
+        } catch { /* SSR / private mode */ }
+        return false; // default to collapsed
+    });
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+    const setExpandedPersist = (v: boolean) => {
+        setExpanded(v);
+        try { localStorage.setItem(COLLAPSED_KEY, v ? 'false' : 'true'); } catch { /* ignore */ }
+    };
 
     const tr = lang === 'vi'
         ? {
@@ -53,7 +73,6 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
               regenerateHint: 'Tài liệu chỉ áp dụng cho lần tạo biên bản TIẾP THEO. Bấm "Tạo biên bản" để regenerate với context mới.',
               loadFailed: 'Không tải được danh sách tài liệu',
               wrongExt: `Chỉ chấp nhận: ${ALLOWED_ATTACHMENT_EXTENSIONS.join(', ')}`,
-              totalLabel: (used: string, max: string) => `${used} / ${max}`,
               countLabel: (n: number, max: number) => `${n}/${max} file`,
               warnLarge: 'Tổng dung lượng đang lớn — với LLM có context 128k (vd: gpt-4o-mini) có thể bị cắt bớt khi tạo biên bản. Cân nhắc dùng model context lớn hơn (Claude, Gemini) hoặc gỡ bớt file.',
           }
@@ -69,7 +88,6 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
               regenerateHint: 'Reference materials only apply on the NEXT minutes generation. Click "Create Minutes" to regenerate with the new context.',
               loadFailed: 'Failed to load attachments',
               wrongExt: `Only ${ALLOWED_ATTACHMENT_EXTENSIONS.join(', ')} files are allowed`,
-              totalLabel: (used: string, max: string) => `${used} / ${max}`,
               countLabel: (n: number, max: number) => `${n}/${max} files`,
               warnLarge: 'Total size is getting large — 128k-context LLMs (e.g. gpt-4o-mini) may truncate during summary. Consider a larger-context model (Claude, Gemini) or removing some files.',
           };
@@ -144,75 +162,113 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
 
     const items = list?.items ?? [];
     const totalBytes = list?.total_bytes ?? 0;
-    const maxTotal = list?.max_total_bytes ?? 0;
     const warnTotal = list?.warn_total_bytes ?? 0;
     const maxFiles = list?.max_files ?? 0;
     const limitReached = list ? items.length >= maxFiles : false;
     const overWarnThreshold = list ? totalBytes >= warnTotal : false;
+    const hasItems = items.length > 0;
+    // Empty state always renders open — the user needs to discover the
+    // feature. When there's at least one file, honour the collapse state.
+    const isOpen = !hasItems || expanded;
 
     return (
-        <div className="meeting-attachments">
-            <div className="meeting-attachments-header">
-                <div>
-                    <h3 className="meeting-attachments-title">{tr.title}</h3>
-                    <p className="meeting-attachments-subtitle">{tr.subtitle}</p>
-                </div>
-                <div className="meeting-attachments-actions">
-                    {list && items.length > 0 && (
-                        <span className="meeting-attachments-meta">
-                            {tr.countLabel(items.length, maxFiles)} ·{' '}
-                            {tr.totalLabel(formatAttachmentSize(totalBytes), formatAttachmentSize(maxTotal))}
-                        </span>
+        <div className={`meeting-attachments ${isOpen ? 'meeting-attachments--open' : 'meeting-attachments--collapsed'}`}>
+            {/* Compact one-line header — always visible. Clicking it toggles. */}
+            <button
+                type="button"
+                className="meeting-attachments-bar"
+                onClick={() => hasItems && setExpandedPersist(!expanded)}
+                disabled={!hasItems}
+                aria-expanded={isOpen}
+            >
+                <span className="meeting-attachments-bar-icon" aria-hidden>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                </span>
+                <span className="meeting-attachments-bar-title">{tr.title}</span>
+                {hasItems && (
+                    <span className="meeting-attachments-bar-meta">
+                        {tr.countLabel(items.length, maxFiles)}
+                        {' · '}
+                        {formatAttachmentSize(totalBytes)}
+                    </span>
+                )}
+                <span className="meeting-attachments-bar-spacer" />
+                {hasItems && (
+                    <span className="meeting-attachments-bar-chevron" aria-hidden>
+                        <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 180ms ease' }}
+                        >
+                            <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                    </span>
+                )}
+            </button>
+
+            {isOpen && (
+                <>
+                    {/* Subtitle + add button row — only when panel is open */}
+                    <div className="meeting-attachments-actions-row">
+                        <p className="meeting-attachments-subtitle">{tr.subtitle}</p>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept={ATTACHMENT_ACCEPT}
+                            style={{ display: 'none' }}
+                            onChange={handleFileChosen}
+                        />
+                        <button
+                            type="button"
+                            className="action-btn primary action-btn-compact"
+                            disabled={uploading || limitReached}
+                            onClick={handlePick}
+                        >
+                            {uploading ? tr.uploading : tr.add}
+                        </button>
+                    </div>
+
+                    {loading && !list && (
+                        <div className="meeting-attachments-skeleton" />
                     )}
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept={ATTACHMENT_ACCEPT}
-                        style={{ display: 'none' }}
-                        onChange={handleFileChosen}
-                    />
-                    <button
-                        type="button"
-                        className="action-btn primary"
-                        disabled={uploading || limitReached}
-                        onClick={handlePick}
-                    >
-                        {uploading ? tr.uploading : tr.add}
-                    </button>
-                </div>
-            </div>
 
-            {loading && !list && (
-                <div className="meeting-attachments-skeleton" />
+                    {list && items.length === 0 && (
+                        <div className="meeting-attachments-empty">{tr.empty}</div>
+                    )}
+
+                    {overWarnThreshold && (
+                        <div className="meeting-attachments-warning" role="alert">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                                <path d="M12 9v4" />
+                                <path d="M12 17h.01" />
+                            </svg>
+                            <span>{tr.warnLarge}</span>
+                        </div>
+                    )}
+
+                    {hasItems && (
+                        <div className="meeting-attachments-hint">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M12 16v-4" />
+                                <path d="M12 8h.01" />
+                            </svg>
+                            <span>{tr.regenerateHint}</span>
+                        </div>
+                    )}
+                </>
             )}
 
-            {list && items.length === 0 && (
-                <div className="meeting-attachments-empty">{tr.empty}</div>
-            )}
-
-            {overWarnThreshold && (
-                <div className="meeting-attachments-warning" role="alert">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                        <path d="M12 9v4" />
-                        <path d="M12 17h.01" />
-                    </svg>
-                    <span>{tr.warnLarge}</span>
-                </div>
-            )}
-
-            {items.length > 0 && (
-                <div className="meeting-attachments-hint">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M12 16v-4" />
-                        <path d="M12 8h.01" />
-                    </svg>
-                    <span>{tr.regenerateHint}</span>
-                </div>
-            )}
-
-            {items.length > 0 && (
+            {hasItems && isOpen && (
                 <ul className="meeting-attachments-list">
                     {items.map((att) => (
                         <li key={att.id} className="meeting-attachments-item">
