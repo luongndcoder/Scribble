@@ -490,6 +490,25 @@ body.electron-app .sub-tabs {
   margin-bottom: 8px;
 }
 
+/* ─── Compact toolbar: back-btn + sub-tabs + pane-actions all on one row.
+       Replaces the old 3-row layout (back-btn block, sub-tabs row, pane-header
+       row) — saves ~80px of vertical space and matches the density of
+       Linear / Otter / GitHub. */
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 8px;
+  flex-shrink: 0;
+}
+
+.detail-toolbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .back-btn {
   display: flex;
   align-items: center;
@@ -504,6 +523,12 @@ body.electron-app .sub-tabs {
   color: var(--primary);
   cursor: pointer;
   transition: all var(--duration);
+}
+
+.back-btn-compact {
+  padding: 5px 11px;
+  font-size: 0.8rem;
+  gap: 4px;
 }
 
 .back-btn:hover {
@@ -522,6 +547,11 @@ body.electron-app .sub-tabs {
   border: 1px solid var(--border);
 }
 
+.sub-tabs-compact {
+  margin-bottom: 0;
+  padding: 3px;
+}
+
 .sub-tab {
   display: flex;
   align-items: center;
@@ -536,6 +566,12 @@ body.electron-app .sub-tabs {
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--duration) var(--ease);
+}
+
+.sub-tabs-compact .sub-tab {
+  padding: 5px 14px;
+  font-size: 0.8rem;
+  gap: 5px;
 }
 
 .sub-tab:hover {
@@ -603,16 +639,20 @@ body.electron-app .sub-tabs {
   margin-bottom: 12px;
 }
 
+.detail-view .sub-tabs-compact {
+  margin-bottom: 0;
+}
+
 .detail-view .pane-header {
   margin-bottom: 0;
-  padding: 12px 14px;
+  padding: 6px 14px 8px;
   flex-shrink: 0;
 }
 
 .pane-title {
-  font-size: 1.3rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text);
 }
 
@@ -1439,8 +1479,8 @@ body.electron-app .sub-tabs {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  padding: 10px 16px;
+  gap: 10px;
+  padding: 6px 14px;
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -1457,8 +1497,8 @@ body.electron-app .sub-tabs {
 }
 
 .rec-main-btn {
-  width: 52px;
-  height: 52px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: none;
   background: linear-gradient(135deg, var(--red-500), var(--red-600));
@@ -1469,7 +1509,12 @@ body.electron-app .sub-tabs {
   cursor: pointer;
   transition: all 200ms var(--ease);
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3), 0 0 0 4px rgba(239, 68, 68, 0.08);
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.28), 0 0 0 3px rgba(239, 68, 68, 0.08);
+}
+
+.rec-main-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .rec-main-icon {
@@ -1796,9 +1841,9 @@ body.electron-app .sub-tabs {
   border: none;
   border-radius: var(--radius-full, 20px) 0 0 var(--radius-full, 20px);
   font-weight: 600;
-  font-size: 0.82rem;
-  padding: 8px 12px;
-  gap: 6px;
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  gap: 5px;
 }
 
 /* Middle select: no rounding */
@@ -1809,9 +1854,9 @@ body.electron-app .sub-tabs {
   border-radius: 0;
   border-left: 1px solid rgba(255,255,255,0.2);
   font-weight: 600;
-  font-size: 0.82rem;
-  padding: 8px 12px;
-  gap: 6px;
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  gap: 5px;
 }
 
 .summarize-group .custom-select-trigger:hover {
@@ -1866,14 +1911,14 @@ body.electron-app .sub-tabs {
 .rec-summarize-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 5px;
+  padding: 5px 12px;
   background: var(--primary);
   color: var(--white);
   border: none;
   border-radius: var(--radius-full);
   font-family: var(--font);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   transition: opacity var(--duration);
@@ -3048,13 +3093,20 @@ body.electron-app .draft-recovery-banner {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 8px 16px;
+  gap: 12px;
+  padding: 4px 14px 6px;
   background: var(--gray-50);
-  border-top: 1px solid var(--border);
+  /* No top border — the rec-bar above already has bottom contrast. Removing
+     this border visually merges the two bars into one band. */
+  border-top: 0;
   flex-shrink: 0;
   z-index: 90;
+  font-size: 0.8rem;
   -webkit-app-region: no-drag;
+}
+
+.translation-bar svg {
+  flex-shrink: 0;
 }
 
 /* ─── Audio Source Selector ─── */
@@ -3212,8 +3264,8 @@ body.electron-app .draft-recovery-banner {
 .translation-toggle-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
+  gap: 6px;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-secondary);
 }

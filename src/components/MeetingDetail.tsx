@@ -716,14 +716,70 @@ export function MeetingDetail() {
 
     return (
         <section className="view active detail-view">
-            {/* Back button */}
-            <div className="detail-header">
-                <button className="back-btn" onClick={() => setCurrentView('list')}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            {/* Compact toolbar: back button + tab switcher on ONE row.
+                Earlier these lived on two separate rows (~90px combined). */}
+            <div className="detail-toolbar">
+                <button className="back-btn back-btn-compact" onClick={() => setCurrentView('list')}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="m15 18-6-6 6-6" />
                     </svg>
                     <span>{lang === 'vi' ? 'Cuộc họp' : 'Meetings'}</span>
                 </button>
+
+                <nav className="sub-tabs sub-tabs-compact">
+                    <button className={`sub-tab ${activeTab === 'recording' ? 'active' : ''}`} onClick={() => setActiveTab('recording')}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" />
+                        </svg>
+                        <span>{lang === 'vi' ? 'Ghi âm' : 'Recording'}</span>
+                    </button>
+                    <button className={`sub-tab ${activeTab === 'summary' ? 'active' : ''}`} onClick={() => setActiveTab('summary')}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
+                        </svg>
+                        <span>{lang === 'vi' ? 'Biên bản' : 'Minutes'}</span>
+                    </button>
+                </nav>
+
+                {/* Active pane's actions show inline on the right side of the
+                    toolbar — saves a whole pane-header row. */}
+                <div className="detail-toolbar-actions">
+                    {activeTab === 'summary' && (
+                        <>
+                            {hasMinutes && !editingMinutes && (
+                                <button className="action-btn action-btn-compact" onClick={() => setEditingMinutes(true)}>
+                                    {lang === 'vi' ? 'Chỉnh sửa' : 'Edit'}
+                                </button>
+                            )}
+                            {editingMinutes && (
+                                <>
+                                    <button className="action-btn action-btn-compact" onClick={() => setEditingMinutes(false)}>
+                                        {lang === 'vi' ? 'Huỷ' : 'Cancel'}
+                                    </button>
+                                    <button className="action-btn action-btn-compact primary" onClick={async () => {
+                                        if (!viewingMeetingId || !minutesEditRef.current) return;
+                                        const md = htmlToMarkdown(minutesEditRef.current.innerHTML);
+                                        await updateMeeting(viewingMeetingId as number, { summary: md });
+                                        const updated = await getMeeting(viewingMeetingId);
+                                        setMeetingData(updated);
+                                        const list = await getMeetings();
+                                        if (list) useAppStore.getState().setMeetings(list);
+                                        setEditingMinutes(false);
+                                        showToast(lang === 'vi' ? 'Đã lưu biên bản' : 'Minutes saved', 'success');
+                                    }}>
+                                        {lang === 'vi' ? 'Lưu' : 'Save'}
+                                    </button>
+                                </>
+                            )}
+                            {hasMinutes && !editingMinutes && (
+                                <button className="action-btn action-btn-compact" onClick={() => setExportPickerOpen(true)}>
+                                    {lang === 'vi' ? 'Xuất biên bản' : 'Export'}
+                                </button>
+                            )}
+                        </>
+                    )}
+                </div>
             </div>
 
             {meetingLoading && !meetingData && (
@@ -731,23 +787,6 @@ export function MeetingDetail() {
                     <div className="summary-loading-spinner" />
                 </div>
             )}
-
-            {/* Sub-tabs */}
-            <nav className="sub-tabs">
-                <button className={`sub-tab ${activeTab === 'recording' ? 'active' : ''}`} onClick={() => setActiveTab('recording')}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" />
-                    </svg>
-                    <span>{lang === 'vi' ? 'Ghi âm' : 'Recording'}</span>
-                </button>
-                <button className={`sub-tab ${activeTab === 'summary' ? 'active' : ''}`} onClick={() => setActiveTab('summary')}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
-                    </svg>
-                    <span>{lang === 'vi' ? 'Biên bản' : 'Minutes'}</span>
-                </button>
-            </nav>
 
             {/* Recording Pane */}
             <div className="detail-pane recording-pane" style={{ display: activeTab === 'recording' ? 'flex' : 'none' }}>
@@ -889,47 +928,11 @@ export function MeetingDetail() {
                 )}
             </div>
 
-            {/* Summary Pane */}
+            {/* Summary Pane — pane-header moved up into the toolbar above to
+                save a ~60px row. The "Biên bản cuộc họp" h2 is gone too: the
+                active tab pill already says "Biên bản" so the duplicate
+                heading was redundant. */}
             <div className="detail-pane summary-pane" style={{ display: activeTab === 'summary' ? 'flex' : 'none' }}>
-                <div className="pane-header">
-                    <h2 className="pane-title">{lang === 'vi' ? 'Biên bản cuộc họp' : 'Meeting Minutes'}</h2>
-                    <div className="pane-actions">
-                        {hasMinutes && !editingMinutes && (
-                            <button className="action-btn" onClick={() => {
-                                setEditingMinutes(true);
-                            }}>
-                                {lang === 'vi' ? 'Chỉnh sửa' : 'Edit'}
-                            </button>
-                        )}
-                        {editingMinutes && (
-                            <>
-                                <button className="action-btn" onClick={() => setEditingMinutes(false)}>
-                                    {lang === 'vi' ? 'Huỷ' : 'Cancel'}
-                                </button>
-                                <button className="action-btn primary" onClick={async () => {
-                                    if (!viewingMeetingId || !minutesEditRef.current) return;
-                                    const md = htmlToMarkdown(minutesEditRef.current.innerHTML);
-                                    await updateMeeting(viewingMeetingId as number, { summary: md });
-                                    // Refresh meeting data
-                                    const updated = await getMeeting(viewingMeetingId);
-                                    setMeetingData(updated);
-                                    // Also update meetings list
-                                    const list = await getMeetings();
-                                    if (list) useAppStore.getState().setMeetings(list);
-                                    setEditingMinutes(false);
-                                    showToast(lang === 'vi' ? 'Đã lưu biên bản' : 'Minutes saved', 'success');
-                                }}>
-                                    {lang === 'vi' ? 'Lưu' : 'Save'}
-                                </button>
-                            </>
-                        )}
-                        {hasMinutes && !editingMinutes && (
-                            <button className="action-btn" onClick={() => setExportPickerOpen(true)}>
-                                {lang === 'vi' ? 'Xuất biên bản' : 'Export minutes'}
-                            </button>
-                        )}
-                    </div>
-                </div>
                 {viewingMeetingId && typeof viewingMeetingId === 'number' && (
                     <MeetingAttachments meetingId={viewingMeetingId} />
                 )}
