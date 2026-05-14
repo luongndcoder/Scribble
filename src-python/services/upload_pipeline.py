@@ -39,6 +39,7 @@ from stt import (
     HALLUCINATION_PATTERNS,
     get_language_code,
     transcribe_nvidia_streaming,
+    transcribe_soniox_file,
 )
 
 log = logging.getLogger(__name__)
@@ -368,16 +369,41 @@ async def _process_chunks_parallel(
     if not chunks:
         return []
 
-    nvidia_key = (
-        db.get_setting("nvidia_api_key")
-        or os.environ.get("NVIDIA_API_KEY", "")
-    )
-    if not nvidia_key:
-        raise RuntimeError(
-            "Nvidia API key chưa được cấu hình. Vào Settings → Nvidia API Key."
+    # ── STT provider routing ────────────────────────────────────────────
+    # Earlier this hardcoded Nvidia and ignored the user's Settings choice
+    # — uploading on a Soniox-configured app still ran Riva, producing
+    # "[stt:nvidia-stream-batch] Parakeet …" in the log no matter what.
+    stt_provider = (db.get_setting("stt_provider") or "nvidia").strip().lower()
+    if stt_provider not in ("nvidia", "soniox"):
+        stt_provider = "nvidia"
+
+    if stt_provider == "nvidia":
+        nvidia_key = (
+            db.get_setting("nvidia_api_key")
+            or os.environ.get("NVIDIA_API_KEY", "")
         )
-    stt_lang = db.get_setting("stt_language") or "vi"
-    riva_lang = get_language_code(stt_lang)
+        if not nvidia_key:
+            raise RuntimeError(
+                "Nvidia API key chưa được cấu hình. Vào Settings → Nvidia API Key."
+            )
+        stt_lang = db.get_setting("stt_language") or "vi"
+        riva_lang = get_language_code(stt_lang)
+        soniox_key = ""
+        soniox_hints: list[str] = []
+    else:
+        soniox_key = (
+            db.get_setting("soniox_api_key")
+            or os.environ.get("SONIOX_API_KEY", "")
+        )
+        if not soniox_key:
+            raise RuntimeError(
+                "Soniox API key chưa được cấu hình. Vào Settings → Soniox API Key."
+            )
+        hints_raw = db.get_setting("soniox_language_hints") or "vi"
+        soniox_hints = [h.strip() for h in hints_raw.split(",") if h.strip()] or ["vi"]
+        nvidia_key = ""
+        riva_lang = ""
+    log.info("[pipeline] STT provider: %s", stt_provider)
 
     diarizer = None
     try:
@@ -395,10 +421,17 @@ async def _process_chunks_parallel(
             if _is_cancelled(job):
                 return
 
-            # Streaming gRPC (offline_recognize is unavailable for vi/zh on Riva Cloud).
-            stt_task = asyncio.to_thread(
-                transcribe_nvidia_streaming, str(chunk.path), nvidia_key, riva_lang
-            )
+            # Dispatch to the configured provider. Nvidia uses streaming gRPC
+            # (offline_recognize unavailable for vi/zh). Soniox uses the
+            # async file API (stt-async-v4) with auto-cleanup.
+            if stt_provider == "nvidia":
+                stt_task = asyncio.to_thread(
+                    transcribe_nvidia_streaming, str(chunk.path), nvidia_key, riva_lang
+                )
+            else:
+                stt_task = asyncio.to_thread(
+                    transcribe_soniox_file, str(chunk.path), soniox_key, soniox_hints
+                )
             emb_task = (
                 asyncio.to_thread(extract_embedding, diarizer, chunk.path)
                 if diarizer is not None

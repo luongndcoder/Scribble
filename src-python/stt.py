@@ -345,6 +345,66 @@ def transcribe_nvidia_streaming(file_path: str, api_key: str, language: str = "v
     return text
 
 
+def transcribe_soniox_file(
+    file_path: str, api_key: str, language_hints: list[str] | None = None,
+) -> str:
+    """Transcribe a finite audio file via Soniox async file API.
+
+    Used by the upload pipeline when stt_provider == 'soniox'. Soniox's
+    realtime API exists too (see SonioxStreamingSTT), but the file/async
+    path is simpler for batched chunk transcription — upload, wait for
+    job completion, fetch transcript text.
+
+    The file is auto-deleted from Soniox after we fetch the transcript
+    (delete_after=True) so files don't accumulate in the user's account.
+    """
+    if not api_key:
+        raise RuntimeError("Soniox API key chưa được cấu hình")
+
+    from pathlib import Path
+
+    from soniox import SonioxClient
+    from soniox.types import CreateTranscriptionConfig
+
+    hints = language_hints or ["vi"]
+    log.info(
+        "[stt:soniox-batch] stt-async-v4, language_hints=%s, file=%s",
+        hints, Path(file_path).name,
+    )
+
+    client = SonioxClient(api_key=api_key)
+    config = CreateTranscriptionConfig(
+        model="stt-async-v4",
+        language_hints=hints,
+        # Diarization is done by our own clustering pass on CAM++ embeddings
+        # so we can stay consistent with Nvidia-path output. Soniox's
+        # built-in diarization would conflict with that grouping.
+        enable_speaker_diarization=False,
+        enable_language_identification=False,
+    )
+
+    try:
+        result = client.stt.transcribe_and_wait_with_tokens(
+            file=file_path,
+            filename=Path(file_path).name,
+            config=config,
+            delete_after=True,
+            wait_interval_sec=2.0,
+            # 10 minutes per chunk is generous — chunks are ≤28s, async
+            # transcribe rarely takes more than ~30-60s on stt-async-v4.
+            wait_timeout_sec=600,
+        )
+    except Exception as exc:
+        log.warning("[stt:soniox-batch] failed: %s", exc)
+        raise
+
+    text = (result.text or "").strip()
+    # Soniox already returns properly-cased Vietnamese; keep the same
+    # hallucination filter as the Nvidia path for parity.
+    text = filter_hallucinations(text)
+    return text
+
+
 def _strip_wav_header(wav_bytes: bytes) -> bytes:
     """Return raw PCM payload of a RIFF/WAVE buffer.
 
