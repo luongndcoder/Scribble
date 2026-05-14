@@ -43,7 +43,7 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
     const tr = lang === 'vi'
         ? {
               title: 'Tài liệu tham khảo',
-              subtitle: 'AI dùng các file này làm context khi tạo biên bản (md, txt — tối đa 200 KB/file).',
+              subtitle: 'AI dùng các file này làm context khi tạo biên bản (md, txt — tối đa 1 MB/file).',
               add: '+ Thêm tài liệu',
               empty: 'Chưa có tài liệu nào. Thêm brief dự án, agenda hoặc thuật ngữ để AI tham khảo.',
               uploading: 'Đang tải lên…',
@@ -54,10 +54,11 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
               wrongExt: `Chỉ chấp nhận: ${ALLOWED_ATTACHMENT_EXTENSIONS.join(', ')}`,
               totalLabel: (used: string, max: string) => `${used} / ${max}`,
               countLabel: (n: number, max: number) => `${n}/${max} file`,
+              warnLarge: 'Tổng dung lượng đang lớn — với LLM có context 128k (vd: gpt-4o-mini) có thể bị cắt bớt khi tạo biên bản. Cân nhắc dùng model context lớn hơn (Claude, Gemini) hoặc gỡ bớt file.',
           }
         : {
               title: 'Reference materials',
-              subtitle: 'AI uses these as context when generating minutes (md, txt — max 200 KB each).',
+              subtitle: 'AI uses these as context when generating minutes (md, txt — max 1 MB each).',
               add: '+ Add file',
               empty: 'No reference materials yet. Add a project brief, agenda, or glossary to give the AI context.',
               uploading: 'Uploading…',
@@ -68,6 +69,7 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
               wrongExt: `Only ${ALLOWED_ATTACHMENT_EXTENSIONS.join(', ')} files are allowed`,
               totalLabel: (used: string, max: string) => `${used} / ${max}`,
               countLabel: (n: number, max: number) => `${n}/${max} files`,
+              warnLarge: 'Total size is getting large — 128k-context LLMs (e.g. gpt-4o-mini) may truncate during summary. Consider a larger-context model (Claude, Gemini) or removing some files.',
           };
 
     const refresh = useCallback(async () => {
@@ -141,8 +143,10 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
     const items = list?.items ?? [];
     const totalBytes = list?.total_bytes ?? 0;
     const maxTotal = list?.max_total_bytes ?? 0;
+    const warnTotal = list?.warn_total_bytes ?? 0;
     const maxFiles = list?.max_files ?? 0;
     const limitReached = list ? items.length >= maxFiles : false;
+    const overWarnThreshold = list ? totalBytes >= warnTotal : false;
 
     return (
         <div className="meeting-attachments">
@@ -182,6 +186,17 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
 
             {list && items.length === 0 && (
                 <div className="meeting-attachments-empty">{tr.empty}</div>
+            )}
+
+            {overWarnThreshold && (
+                <div className="meeting-attachments-warning" role="alert">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                        <path d="M12 9v4" />
+                        <path d="M12 17h.01" />
+                    </svg>
+                    <span>{tr.warnLarge}</span>
+                </div>
             )}
 
             {items.length > 0 && (

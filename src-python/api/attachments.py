@@ -10,9 +10,11 @@ Routes:
   GET    /meetings/{meeting_id}/attachments/{id}    — fetch full text
   DELETE /meetings/{meeting_id}/attachments/{id}    — remove
 
-Limits (chosen to keep summary token-budget sane):
-  - per-file:   200 KB (~50k tokens worst case)
-  - per-meeting total: 800 KB across all attachments
+Limits (chosen to cover real specs/PRDs while flagging token risk):
+  - per-file:   1 MB         — covers most technical specs and long PRDs
+  - per-meeting total: 2 MB  — room for 2-3 large docs; safe for 128k+ models
+  - soft warn threshold: 400 KB total — past here a 128k-context model like
+    gpt-4o-mini risks truncation when transcript + summary output are added
   - allowed extensions: .md, .markdown, .txt
   - UTF-8 required (binary files rejected)
 """
@@ -30,13 +32,18 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 db = Database()
 
-MAX_FILE_BYTES = 200 * 1024            # 200 KB per file
-MAX_TOTAL_BYTES_PER_MEETING = 800 * 1024  # 800 KB combined across attachments
+MAX_FILE_BYTES = 1024 * 1024              # 1 MB per file — fits most specs/PRDs
+MAX_TOTAL_BYTES_PER_MEETING = 2 * 1024 * 1024  # 2 MB combined across attachments
+# Past this threshold the UI warns: a 128k-context LLM (gpt-4o-mini) may
+# truncate when transcript + summary output are added on top. Hard reject
+# only at MAX_TOTAL_BYTES_PER_MEETING; users with larger-context models
+# (claude / gemini) can keep going.
+WARN_TOTAL_BYTES = 400 * 1024
 MAX_FILES_PER_MEETING = 10
 ALLOWED_EXTENSIONS = {".md", ".markdown", ".txt"}
 # Pin a conservative read cap a hair above MAX_FILE_BYTES so the size check
 # can still fire instead of silently truncating.
-_READ_CAP = MAX_FILE_BYTES + 1024
+_READ_CAP = MAX_FILE_BYTES + 4096
 
 
 def _sanitize_filename(name: str | None) -> str:
@@ -91,7 +98,9 @@ async def upload_attachment(meeting_id: int, file: UploadFile = File(...)):
     if len(raw) > MAX_FILE_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"File quá lớn (giới hạn {MAX_FILE_BYTES // 1024} KB)",
+            detail=(
+                f"File quá lớn (giới hạn {MAX_FILE_BYTES // (1024 * 1024)} MB / file)"
+            ),
         )
 
     total_existing = sum(int(a.get("size_bytes") or 0) for a in existing)
@@ -100,7 +109,7 @@ async def upload_attachment(meeting_id: int, file: UploadFile = File(...)):
             status_code=413,
             detail=(
                 f"Tổng dung lượng tài liệu vượt giới hạn "
-                f"{MAX_TOTAL_BYTES_PER_MEETING // 1024} KB cho mỗi cuộc họp"
+                f"{MAX_TOTAL_BYTES_PER_MEETING // (1024 * 1024)} MB cho mỗi cuộc họp"
             ),
         )
 
@@ -151,6 +160,7 @@ async def list_attachments(meeting_id: int):
         "items": items,
         "total_bytes": total_bytes,
         "max_total_bytes": MAX_TOTAL_BYTES_PER_MEETING,
+        "warn_total_bytes": WARN_TOTAL_BYTES,
         "max_files": MAX_FILES_PER_MEETING,
         "max_file_bytes": MAX_FILE_BYTES,
     }

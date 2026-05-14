@@ -26,6 +26,8 @@ export interface AttachmentsListResponse {
   items: AttachmentMeta[];
   total_bytes: number;
   max_total_bytes: number;
+  /** Past this point the UI warns about possible LLM-context truncation. */
+  warn_total_bytes: number;
   max_files: number;
   max_file_bytes: number;
 }
