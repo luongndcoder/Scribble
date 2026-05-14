@@ -148,6 +148,9 @@ async def upload_attachment(meeting_id: int, file: UploadFile = File(...)):
         "filename": safe_name,
         "mime_type": mime,
         "size_bytes": len(raw),
+        # Hint to the UI: the existing summary doesn't know about this file
+        # yet — the user should regenerate to apply it.
+        "regenerate_required": True,
     }
 
 

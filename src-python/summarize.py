@@ -303,6 +303,24 @@ def summarize_stream(
     lang_name = lang_names.get(language, language)
     prompt += f"\n\nIMPORTANT: You MUST write the entire output in {lang_name}. All section headers and content must be in {lang_name}."
 
+    # If the user attached reference materials, lift their importance at the
+    # system level too (the user-content block alone wasn't enough — LLMs tend
+    # to treat user-content as conversational data and skim it).
+    if meeting_id is not None:
+        try:
+            _ref_probe = db.get_attachments_combined_text(meeting_id)
+        except Exception:
+            _ref_probe = ""
+        if _ref_probe:
+            prompt += (
+                "\n\nCRITICAL: The user attached REFERENCE MATERIALS (documents) "
+                "to this meeting. Those documents are authoritative context — "
+                "use them to correct mistranscribed names, ground the minutes "
+                "in project-specific terminology, and cross-check what was "
+                "discussed vs. what was planned. Treat them with at least the "
+                "same weight as the transcript when they contradict it."
+            )
+
     # Build timestamp context
     time_context = ""
     if start_time or end_time:
@@ -325,12 +343,30 @@ def summarize_stream(
             log.warning("[summarize] failed to load attachments for %s: %s", meeting_id, exc)
             ref_text = ""
         if ref_text:
+            # Strong, action-oriented framing — earlier "background only / do
+            # NOT copy verbatim" wording made the LLM ignore the materials and
+            # produced minutes that looked identical to ones without context.
+            # Now we explicitly tell it to use the info, cite it, and reconcile
+            # discrepancies between transcript and docs.
             reference_context = (
-                "\n\n--- Reference Materials (background context only — "
-                "do NOT copy verbatim, use to disambiguate names, terminology, "
-                "and prior decisions) ---\n"
+                "\n\n=== REFERENCE MATERIALS (USE THESE) ===\n"
+                "The user attached the following document(s) as REQUIRED CONTEXT for "
+                "this meeting. You MUST:\n"
+                "  1. Use names, titles, terminology, project codes from these docs "
+                "as the source of truth (transcripts often mistranscribe proper nouns).\n"
+                "  2. Cross-reference the meeting against agendas / briefs / specs — "
+                "note which items WERE covered and which were SKIPPED.\n"
+                "  3. When the meeting decision differs from what the doc proposed, "
+                "call it out explicitly (e.g. 'agenda đề xuất X, cuộc họp chốt Y').\n"
+                "  4. Pull in background details (deadlines, prior decisions, "
+                "stakeholders) that clarify what was said in the meeting.\n"
+                "  5. At the END of the minutes, add a short section "
+                "'## Tài liệu tham khảo / Reference Materials' listing the file "
+                "names you used.\n\n"
+                "Do NOT copy long passages verbatim, but DO weave the information "
+                "throughout the minutes wherever it adds value.\n\n"
                 f"{ref_text}\n"
-                "--- End Reference Materials ---\n"
+                "=== END REFERENCE MATERIALS ===\n"
             )
             log.info(
                 "[summarize] including %d chars of reference materials for meeting %s",

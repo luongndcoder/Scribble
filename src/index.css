@@ -816,6 +816,23 @@ body.electron-app .sub-tabs {
   color: #ca8a04;
 }
 
+.meeting-attachments-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--primary, #6366f1);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.meeting-attachments-hint svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 .meeting-attachments-skeleton {
   height: 28px;
   border-radius: 6px;
