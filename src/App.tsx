@@ -14,6 +14,12 @@ import './index.css';
 const queryClient = new QueryClient();
 const SIDECAR_BASES = SIDECAR_HTTP_BASES;
 
+/** macOS overlay title bar leaves the traffic lights floating over our content
+ *  (78×28 area starting at top-left). Detect once at module load so the topnav
+ *  can reserve room. We use platform from navigator — Tauri exposes the host
+ *  OS via the standard UA on macOS. */
+const IS_MACOS = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
+
 function AppInner() {
   const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline } = useAppStore();
   const { showToast } = useToast();
@@ -150,7 +156,7 @@ function AppInner() {
 
   return (
       <QueryClientProvider client={queryClient}>
-        <div className={`app ${isOffline ? 'app--offline' : ''}`}>
+        <div className={`app ${isOffline ? 'app--offline' : ''} ${IS_MACOS ? 'app--macos' : ''}`}>
           <main className="main">
             {/* App shell stays interactive (scroll meeting list, open
                 settings) while sidecar warms up. Buttons that need the

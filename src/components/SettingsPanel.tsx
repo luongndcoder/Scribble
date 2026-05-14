@@ -436,6 +436,11 @@ export function SettingsPanel() {
 
                     {/* ── Unified Test Connection (spans both grid cols) ── */}
                     <div className="settings-section settings-test-section span-full">
+                        <span className="settings-test-label">
+                            {lang === 'vi'
+                                ? 'Kiểm tra API key đã hoạt động chưa'
+                                : 'Verify your API keys'}
+                        </span>
                         <button className="settings-test-btn" onClick={testAll} disabled={testRunning}>
                             {testRunning ? (
                                 <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
