@@ -56,7 +56,8 @@ P_NORMALIZE = 0.10
 P_SPLIT = 0.18
 P_TRANSCRIBE_START = 0.20
 P_TRANSCRIBE_END = 0.85
-P_FINALIZE = 0.90
+P_FINALIZE = 0.88
+P_CLUSTER_DONE = 0.92
 P_SUMMARIZE = 0.95
 
 
@@ -254,9 +255,20 @@ async def _execute(
     if _is_cancelled(job):
         return
 
+    # Bridge message between "transcribing done" and "summary running" — without
+    # this jump the modal sits at 90% "Phân loại người nói" for the whole length
+    # of the LLM call and the user can't tell what's happening next.
+    await registry.update(
+        job_id,
+        progress=P_CLUSTER_DONE,
+        message="Hoàn tất phiên âm — chuẩn bị biên bản",
+    )
+
     # ── Auto-summarize (best-effort) ───────────────────────────────────────
     await registry.update(
-        job_id, progress=P_SUMMARIZE, message="Tạo biên bản"
+        job_id,
+        progress=P_SUMMARIZE,
+        message="Đang tạo biên bản (có thể mất vài phút)",
     )
     summary_md = await asyncio.to_thread(
         _summarize_blocking, transcript_parts, meeting.get("language") or "vi"

@@ -155,6 +155,9 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
               openExisting: 'Mở cuộc họp cũ',
               chunkStats: (done: number, total: number) =>
                   total > 0 ? `Đã phiên âm ${done}/${total} đoạn` : '',
+              chunkStatsDone: (total: number) =>
+                  total > 0 ? `✓ Đã phiên âm xong ${total}/${total} đoạn` : '',
+              summarizingHint: 'Đang tổng hợp biên bản tự động (vài phút)…',
               hint: 'Tip: file lớn có thể mất vài phút.',
               cancelling: 'Đang hủy…',
           }
@@ -182,6 +185,9 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
               openExisting: 'Open existing meeting',
               chunkStats: (done: number, total: number) =>
                   total > 0 ? `Transcribed ${done}/${total} chunks` : '',
+              chunkStatsDone: (total: number) =>
+                  total > 0 ? `✓ Transcribed ${total}/${total} chunks` : '',
+              summarizingHint: 'Generating meeting minutes (a few minutes)…',
               hint: 'Tip: large files may take several minutes.',
               cancelling: 'Cancelling…',
           };
@@ -425,11 +431,28 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                         <div className="upload-progress-meta">
                             {showLabel || ' '} · {(pipelinePct * 100).toFixed(0)}%
                         </div>
-                        {jobState && jobState.total_chunks > 0 && (
-                            <div className="upload-progress-sub">
-                                {tr.chunkStats(jobState.processed_chunks, jobState.total_chunks)}
-                            </div>
-                        )}
+                        {jobState && jobState.total_chunks > 0 && (() => {
+                            // Past transcription stage: show ✓ + summarizing hint so the
+                            // user understands the LLM call (which can take minutes) is
+                            // running and the bar isn't stuck.
+                            const transcribingDone =
+                                jobState.processed_chunks >= jobState.total_chunks
+                                || (jobState.status === 'finalizing' && pipelinePct >= 0.88);
+                            return (
+                                <>
+                                    <div className="upload-progress-sub">
+                                        {transcribingDone
+                                            ? tr.chunkStatsDone(jobState.total_chunks)
+                                            : tr.chunkStats(jobState.processed_chunks, jobState.total_chunks)}
+                                    </div>
+                                    {transcribingDone && pipelinePct >= 0.9 && (
+                                        <div className="upload-progress-sub upload-progress-sub--accent">
+                                            {tr.summarizingHint}
+                                        </div>
+                                    )}
+                                </>
+                            );
+                        })()}
 
                         {chunks.length > 0 && (
                             <div className="upload-chunk-preview" aria-label={tr.transcript}>
