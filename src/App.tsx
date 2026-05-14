@@ -53,12 +53,10 @@ function AppInner() {
     if (backendStatus === 'online') {
       return lang === 'vi' ? '✓ Sẵn sàng' : '✓ Ready';
     }
-    // While offline, surface elapsed time in the chip so the user has
-    // *two* progress signals (chip + bottom strip) without having to look
-    // around the screen.
-    const elapsedSuffix = startupElapsed > 0 ? ` · ${startupElapsed}s` : '';
-    return (lang === 'vi' ? 'Đang khởi động' : 'Starting') + elapsedSuffix;
-  }, [backendStatus, lang, startupElapsed]);
+    // Elapsed time lives in the bottom status strip — no need to also
+    // surface it here (duplicate signal, eyes have to scan two corners).
+    return lang === 'vi' ? 'Đang khởi động' : 'Starting';
+  }, [backendStatus, lang]);
 
   useEffect(() => {
     if (window.__TAURI_INTERNALS__) {

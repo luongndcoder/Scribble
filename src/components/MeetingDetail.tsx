@@ -466,7 +466,7 @@ export function MeetingDetail() {
         try {
             const rawTitle = (meetingData?.title || `meeting-${meetingId}`).toString();
             const safeTitle = rawTitle.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() || `meeting-${meetingId}`;
-            await downloadMeetingAudio(meetingId, `${safeTitle}.wav`, 'wav');
+            await downloadMeetingAudio(meetingId, `${safeTitle}.mp3`, 'mp3');
             showToast(lang === 'vi' ? 'Đã tải ghi âm thành công!' : 'Audio downloaded!', 'success');
         } catch (e) {
             console.warn('[detail] Download audio failed:', e);

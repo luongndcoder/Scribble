@@ -72,6 +72,14 @@ def transcode_audio_for_export(source: Path, fmt: str) -> Path:
 
     if fmt == "wav":
         cmd = [ffmpeg, "-y", *input_args, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", str(tmp_path)]
+    elif fmt == "mp3":
+        # 96 kbps mono → ~43MB/hour (vs WAV ~115MB/hour). Good speech-quality
+        # at this rate. libmp3lame ships with the standard ffmpeg build.
+        cmd = [
+            ffmpeg, "-y", *input_args, "-vn",
+            "-acodec", "libmp3lame", "-b:a", "96k", "-ar", "16000", "-ac", "1",
+            str(tmp_path),
+        ]
     else:  # mp4
         cmd = [ffmpeg, "-y", *input_args, "-vn", "-acodec", "aac", "-b:a", "192k", str(tmp_path)]
 

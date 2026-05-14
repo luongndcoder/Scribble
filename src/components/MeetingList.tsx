@@ -228,7 +228,7 @@ export function MeetingList() {
         await runBusy('audio', meeting.id, async () => {
             try {
                 const base = safeFilenameBase(String(meeting.title || ''), `meeting-${meeting.id}`);
-                await downloadMeetingAudio(meeting.id, `${base}.wav`, 'wav');
+                await downloadMeetingAudio(meeting.id, `${base}.mp3`, 'mp3');
                 showToast(lang === 'vi' ? 'Đã tải file ghi âm' : 'Audio downloaded', 'success');
             } catch (err) {
                 showToast(lang === 'vi' ? 'Tải ghi âm thất bại' : 'Audio download failed', 'error');
