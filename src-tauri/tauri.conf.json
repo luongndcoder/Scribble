@@ -12,13 +12,15 @@
   "app": {
     "windows": [
       {
-        "title": "Scribble — AI Meeting Notes",
+        "title": "Scribble",
         "width": 960,
         "height": 720,
         "minWidth": 600,
         "minHeight": 480,
         "decorations": true,
-        "transparent": false
+        "transparent": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {

@@ -118,8 +118,9 @@ function parseDownloadFilename(contentDisposition: string | null): string | null
 
 export async function downloadMeetingAudio(
     id: number,
-    fallbackName = 'meeting-audio.wav',
-    format: 'wav' | 'mp4' = 'wav'
+    fallbackName = 'meeting-audio.mp3',
+    /** mp3 = ~43MB/hr (default), wav = ~115MB/hr (lossless), mp4 = AAC */
+    format: 'wav' | 'mp3' | 'mp4' = 'mp3'
 ) {
     const path = `/meetings/${id}/audio?format=${encodeURIComponent(format)}`;
 

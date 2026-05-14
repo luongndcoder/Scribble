@@ -39,6 +39,7 @@ from stt import (
     HALLUCINATION_PATTERNS,
     get_language_code,
     transcribe_nvidia_streaming,
+    transcribe_soniox_file,
 )
 
 log = logging.getLogger(__name__)
@@ -172,84 +173,24 @@ async def _execute(
     if _is_cancelled(job):
         return
 
-    # ── VAD-aware splitting (or restore plan from DB if resuming) ─────────
-    await registry.update(
-        job_id, progress=P_SPLIT, message="Phát hiện đoạn nói"
-    )
-    chunks_dir = tmp_root / "chunks"
-    chunks_dir.mkdir(parents=True, exist_ok=True)
-
-    saved_chunks = {c["chunk_idx"]: c for c in db.get_upload_chunks(meeting_id)}
-    if saved_chunks:
-        # Resume mode: reuse the previously computed plan so chunk boundaries
-        # stay consistent with already-saved transcripts.
-        log.info(
-            "[pipeline] resuming meeting %s: %d chunks already in DB",
-            meeting_id, len(saved_chunks),
-        )
-        chunks = _chunks_from_db_plan(saved_chunks, wav_path, chunks_dir)
+    # ── Provider dispatch ──────────────────────────────────────────────────
+    # Soniox's async API does its own diarization + handles long files natively
+    # (up to 5h). For that path we send the whole WAV in a single call so
+    # speaker IDs are globally consistent (no CAM++ clustering needed). Nvidia
+    # still uses the chunked path because Riva caps audio length per call and
+    # we get parallel STT speedup + per-chunk resume.
+    stt_provider = (db.get_setting("stt_provider") or "nvidia").strip().lower()
+    if stt_provider == "soniox":
+        transcript_parts = await _run_soniox_pipeline(job, meeting_id, wav_path)
     else:
-        chunks = await asyncio.to_thread(split_into_chunks, wav_path, chunks_dir)
-        if not chunks:
-            raise ValueError("Không phát hiện được giọng nói trong file")
-        # Persist the plan so a future resume can use the same boundaries.
-        db.upsert_chunk_plan(
-            meeting_id,
-            [(c.idx, c.start_ms, c.end_ms) for c in chunks],
+        transcript_parts = await _run_nvidia_chunked_pipeline(
+            job, meeting, meeting_id, wav_path, tmp_root,
         )
 
-    await registry.update(job_id, total_chunks=len(chunks))
-    if _is_cancelled(job):
-        return
-
-    # Re-extract WAV files for chunks that don't have STT text saved yet
-    # (saved chunks have their text/embedding in DB — no need to redo).
-    pending_chunks = [
-        c for c in chunks
-        if not (saved_chunks.get(c.idx) and saved_chunks[c.idx].get("text"))
-    ]
-    if saved_chunks:
-        # Materialize the pending chunks' WAV files on disk (extract from
-        # normalized.wav using the stored boundaries).
-        await asyncio.to_thread(_extract_pending_chunk_files, wav_path, pending_chunks)
-
-    # ── Parallel STT + embedding (only for chunks that need it) ───────────
-    await registry.update(
-        job_id,
-        status=JobStatus.TRANSCRIBING,
-        progress=P_TRANSCRIBE_START,
-        message=(
-            f"Phiên âm {len(saved_chunks)}/{len(chunks)} (resume)"
-            if saved_chunks
-            else f"Phiên âm ({len(chunks)} chunks)"
-        ),
-    )
-    new_results = await _process_chunks_parallel(
-        job, pending_chunks, meeting_id=meeting_id, total_chunks=len(chunks),
-        already_done=sum(1 for sc in saved_chunks.values() if sc.get("text")),
-    )
-    if _is_cancelled(job):
-        return
-
-    # Merge saved + newly processed results into chunk_results
-    chunk_results = _merge_saved_and_new_results(saved_chunks, new_results, chunks)
-
-    # ── Global speaker clustering ──────────────────────────────────────────
-    await registry.update(
-        job_id,
-        status=JobStatus.FINALIZING,
-        progress=P_FINALIZE,
-        message="Phân loại người nói",
-    )
-    embeddings = [
-        (r["idx"], r["embedding"]) for r in chunk_results if r["embedding"] is not None
-    ]
-    speaker_map = await asyncio.to_thread(cluster_speakers, embeddings)
     if _is_cancelled(job):
         return
 
     # ── Build transcript + persist (final pass) ────────────────────────────
-    transcript_parts = _build_transcript_parts(chunk_results, speaker_map)
     transcript_json = json.dumps(transcript_parts, ensure_ascii=False)
     db.update_meeting(meeting_id, transcript=transcript_json, status="saved")
     if _is_cancelled(job):
@@ -282,6 +223,186 @@ async def _execute(
         progress=1.0,
         message="Hoàn thành",
     )
+
+
+async def _run_soniox_pipeline(
+    job: JobState, meeting_id: int, wav_path: Path,
+) -> list[dict]:
+    """Send the whole normalized WAV to Soniox stt-async-v4 in one call.
+
+    Returns transcript_parts ready for ``db.update_meeting(transcript=...)``.
+    No VAD chunking, no CAM++ clustering — Soniox does both diarization and
+    long-file transcription natively, and its speaker IDs are consistent
+    across the entire file (so we trust them directly).
+    """
+    job_id = job.job_id
+
+    soniox_key = (
+        db.get_setting("soniox_api_key")
+        or os.environ.get("SONIOX_API_KEY", "")
+    )
+    if not soniox_key:
+        raise RuntimeError(
+            "Soniox API key chưa được cấu hình. Vào Settings → Soniox API Key."
+        )
+    hints_raw = db.get_setting("soniox_language_hints") or "vi"
+    hints = [h.strip() for h in hints_raw.split(",") if h.strip()] or ["vi"]
+    log.info("[pipeline] STT provider: soniox (single-file, diarization=ON)")
+
+    await registry.update(
+        job_id,
+        status=JobStatus.TRANSCRIBING,
+        progress=P_TRANSCRIBE_START,
+        message="Đang gửi audio đến Soniox",
+    )
+
+    # Soniox SDK polling runs in a worker thread; bridge progress back to
+    # the asyncio loop via run_coroutine_threadsafe so SSE listeners see
+    # the bar move.
+    loop = asyncio.get_running_loop()
+    cancel_event = job.cancel_event
+
+    def _progress_cb(p: float) -> None:
+        # Cooperative cancel: raise from the polling thread so the SDK
+        # call unwinds and the pipeline can mark itself cancelled.
+        if cancel_event.is_set():
+            raise RuntimeError("Cancelled")
+        mapped = P_TRANSCRIBE_START + p * (P_TRANSCRIBE_END - P_TRANSCRIBE_START)
+        msg = "Đang phiên âm (Soniox)" if p < 0.95 else "Đang xử lý kết quả"
+        try:
+            asyncio.run_coroutine_threadsafe(
+                registry.update(job_id, progress=mapped, message=msg),
+                loop,
+            )
+        except Exception:
+            pass
+
+    segments = await asyncio.to_thread(
+        transcribe_soniox_file, str(wav_path), soniox_key, hints,
+        progress_cb=_progress_cb,
+    )
+
+    await registry.update(
+        job_id,
+        status=JobStatus.FINALIZING,
+        progress=P_FINALIZE,
+        message="Phân loại người nói",
+    )
+
+    if not segments:
+        log.warning("[pipeline] Soniox returned no segments")
+        return []
+
+    # Build chunk_results + speaker_map directly from Soniox segments.
+    # Speaker IDs from Soniox are 1-based strings ("1", "2") — convert to
+    # 0-based ints to match Nvidia path output.
+    chunk_results: list[dict] = []
+    speaker_map: dict[int, int] = {}
+    for i, seg in enumerate(segments):
+        chunk_results.append({
+            "idx": i,
+            "text": seg["text"],
+            "embedding": None,
+            "start_ms": int(seg["start_ms"]),
+            "end_ms": int(seg["end_ms"]),
+        })
+        raw = str(seg.get("speaker") or "1")
+        try:
+            sp_id = max(0, int(raw) - 1)
+        except (ValueError, TypeError):
+            sp_id = 0
+        speaker_map[i] = sp_id
+
+    return _build_transcript_parts(chunk_results, speaker_map)
+
+
+async def _run_nvidia_chunked_pipeline(
+    job: JobState, meeting: dict, meeting_id: int, wav_path: Path, tmp_root: Path,
+) -> list[dict]:
+    """Existing chunked pipeline — VAD split → parallel STT → CAM++ → cluster.
+
+    Used for Nvidia Riva because: (a) Riva has per-call duration caps, (b) we
+    get parallel STT speedup, (c) per-chunk persist gives perfect resume.
+    """
+    job_id = job.job_id
+
+    # ── VAD-aware splitting (or restore plan from DB if resuming) ─────────
+    await registry.update(
+        job_id, progress=P_SPLIT, message="Phát hiện đoạn nói"
+    )
+    chunks_dir = tmp_root / "chunks"
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_chunks = {c["chunk_idx"]: c for c in db.get_upload_chunks(meeting_id)}
+    if saved_chunks:
+        # Resume mode: reuse the previously computed plan so chunk boundaries
+        # stay consistent with already-saved transcripts.
+        log.info(
+            "[pipeline] resuming meeting %s: %d chunks already in DB",
+            meeting_id, len(saved_chunks),
+        )
+        chunks = _chunks_from_db_plan(saved_chunks, wav_path, chunks_dir)
+    else:
+        chunks = await asyncio.to_thread(split_into_chunks, wav_path, chunks_dir)
+        if not chunks:
+            raise ValueError("Không phát hiện được giọng nói trong file")
+        # Persist the plan so a future resume can use the same boundaries.
+        db.upsert_chunk_plan(
+            meeting_id,
+            [(c.idx, c.start_ms, c.end_ms) for c in chunks],
+        )
+
+    await registry.update(job_id, total_chunks=len(chunks))
+    if _is_cancelled(job):
+        return []
+
+    # Re-extract WAV files for chunks that don't have STT text saved yet
+    # (saved chunks have their text/embedding in DB — no need to redo).
+    pending_chunks = [
+        c for c in chunks
+        if not (saved_chunks.get(c.idx) and saved_chunks[c.idx].get("text"))
+    ]
+    if saved_chunks:
+        # Materialize the pending chunks' WAV files on disk (extract from
+        # normalized.wav using the stored boundaries).
+        await asyncio.to_thread(_extract_pending_chunk_files, wav_path, pending_chunks)
+
+    # ── Parallel STT + embedding (only for chunks that need it) ───────────
+    await registry.update(
+        job_id,
+        status=JobStatus.TRANSCRIBING,
+        progress=P_TRANSCRIBE_START,
+        message=(
+            f"Phiên âm {len(saved_chunks)}/{len(chunks)} (resume)"
+            if saved_chunks
+            else f"Phiên âm ({len(chunks)} chunks)"
+        ),
+    )
+    new_results = await _process_chunks_parallel(
+        job, pending_chunks, meeting_id=meeting_id, total_chunks=len(chunks),
+        already_done=sum(1 for sc in saved_chunks.values() if sc.get("text")),
+    )
+    if _is_cancelled(job):
+        return []
+
+    # Merge saved + newly processed results into chunk_results
+    chunk_results = _merge_saved_and_new_results(saved_chunks, new_results, chunks)
+
+    # ── Global speaker clustering ──────────────────────────────────────────
+    await registry.update(
+        job_id,
+        status=JobStatus.FINALIZING,
+        progress=P_FINALIZE,
+        message="Phân loại người nói",
+    )
+    embeddings = [
+        (r["idx"], r["embedding"]) for r in chunk_results if r["embedding"] is not None
+    ]
+    speaker_map = await asyncio.to_thread(cluster_speakers, embeddings)
+    if _is_cancelled(job):
+        return []
+
+    return _build_transcript_parts(chunk_results, speaker_map)
 
 
 # ─── Sub-stages ────────────────────────────────────────────────────────────
@@ -368,16 +489,41 @@ async def _process_chunks_parallel(
     if not chunks:
         return []
 
-    nvidia_key = (
-        db.get_setting("nvidia_api_key")
-        or os.environ.get("NVIDIA_API_KEY", "")
-    )
-    if not nvidia_key:
-        raise RuntimeError(
-            "Nvidia API key chưa được cấu hình. Vào Settings → Nvidia API Key."
+    # ── STT provider routing ────────────────────────────────────────────
+    # Earlier this hardcoded Nvidia and ignored the user's Settings choice
+    # — uploading on a Soniox-configured app still ran Riva, producing
+    # "[stt:nvidia-stream-batch] Parakeet …" in the log no matter what.
+    stt_provider = (db.get_setting("stt_provider") or "nvidia").strip().lower()
+    if stt_provider not in ("nvidia", "soniox"):
+        stt_provider = "nvidia"
+
+    if stt_provider == "nvidia":
+        nvidia_key = (
+            db.get_setting("nvidia_api_key")
+            or os.environ.get("NVIDIA_API_KEY", "")
         )
-    stt_lang = db.get_setting("stt_language") or "vi"
-    riva_lang = get_language_code(stt_lang)
+        if not nvidia_key:
+            raise RuntimeError(
+                "Nvidia API key chưa được cấu hình. Vào Settings → Nvidia API Key."
+            )
+        stt_lang = db.get_setting("stt_language") or "vi"
+        riva_lang = get_language_code(stt_lang)
+        soniox_key = ""
+        soniox_hints: list[str] = []
+    else:
+        soniox_key = (
+            db.get_setting("soniox_api_key")
+            or os.environ.get("SONIOX_API_KEY", "")
+        )
+        if not soniox_key:
+            raise RuntimeError(
+                "Soniox API key chưa được cấu hình. Vào Settings → Soniox API Key."
+            )
+        hints_raw = db.get_setting("soniox_language_hints") or "vi"
+        soniox_hints = [h.strip() for h in hints_raw.split(",") if h.strip()] or ["vi"]
+        nvidia_key = ""
+        riva_lang = ""
+    log.info("[pipeline] STT provider: %s", stt_provider)
 
     diarizer = None
     try:
@@ -395,10 +541,17 @@ async def _process_chunks_parallel(
             if _is_cancelled(job):
                 return
 
-            # Streaming gRPC (offline_recognize is unavailable for vi/zh on Riva Cloud).
-            stt_task = asyncio.to_thread(
-                transcribe_nvidia_streaming, str(chunk.path), nvidia_key, riva_lang
-            )
+            # Dispatch to the configured provider. Nvidia uses streaming gRPC
+            # (offline_recognize unavailable for vi/zh). Soniox uses the
+            # async file API (stt-async-v4) with auto-cleanup.
+            if stt_provider == "nvidia":
+                stt_task = asyncio.to_thread(
+                    transcribe_nvidia_streaming, str(chunk.path), nvidia_key, riva_lang
+                )
+            else:
+                stt_task = asyncio.to_thread(
+                    transcribe_soniox_file, str(chunk.path), soniox_key, soniox_hints
+                )
             emb_task = (
                 asyncio.to_thread(extract_embedding, diarizer, chunk.path)
                 if diarizer is not None

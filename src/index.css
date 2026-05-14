@@ -272,6 +272,14 @@ body.electron-app .sub-tabs {
   -webkit-backdrop-filter: blur(12px);
 }
 
+/* macOS overlay title bar: the traffic lights sit at the top-left of the
+   window content area (no separate OS chrome). Reserve ~78px on the left so
+   our brand doesn't get covered. Only on macOS — Win/Linux keep normal
+   chrome. */
+.app--macos .topnav {
+  padding-left: 84px;
+}
+
 .topnav-left {
   display: flex;
   align-items: center;
@@ -2137,51 +2145,70 @@ body.electron-app .sub-tabs {
   }
 }
 
-/* ── Unified Test Button ── */
+/* ── Unified Test Button ──
+   Was full-width + gradient + huge shadow — way too loud for a
+   diagnostic action. Right-aligned, plain button now, matches the
+   density of the rest of the panel. */
 .settings-test-section {
   /* Override the 2-col grid for this section — single column, compact */
-  display: block;
-  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  flex-wrap: wrap;
 }
 
 .settings-test-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--indigo-500), var(--indigo-600));
-  color: white;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--indigo-500);
+  border-radius: var(--radius-full);
+  background: var(--white);
+  color: var(--indigo-600);
   font-family: var(--font);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 200ms var(--ease);
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+  transition: background 150ms ease, color 150ms ease;
+  flex-shrink: 0;
 }
 
 .settings-test-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.08);
 }
 
 .settings-test-btn:active:not(:disabled) {
-  transform: translateY(0);
+  background: rgba(99, 102, 241, 0.16);
 }
 
 .settings-test-btn:disabled {
-  opacity: 0.7;
+  opacity: 0.55;
   cursor: wait;
+}
+
+.settings-test-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.settings-test-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #64748b);
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .settings-test-results {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 6px;
+  /* Inside the flex-wrap settings-test-section, results span the full row
+     so they appear UNDER the right-aligned button rather than next to it. */
+  flex-basis: 100%;
 }
 
 .settings-test-result-row {
@@ -2341,8 +2368,8 @@ body.electron-app .sub-tabs {
 .settings-panel-footer {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px 28px 20px;
+  gap: 8px;
+  padding: 8px 16px 10px;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
   background: rgba(255, 255, 255, 0.9);
@@ -2352,7 +2379,7 @@ body.electron-app .sub-tabs {
 
 .settings-footer-actions {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
 }

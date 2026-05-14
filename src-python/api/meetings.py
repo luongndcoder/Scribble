@@ -89,7 +89,7 @@ async def delete_meeting(meeting_id: int):
 
 
 @router.get("/meetings/{meeting_id}/audio")
-async def download_meeting_audio(meeting_id: int, format: str = "wav"):
+async def download_meeting_audio(meeting_id: int, format: str = "mp3"):
     m = db.get_meeting(meeting_id)
     audio_path = (m.get("audio_path") or "") if m else ""
     source_path = Path(audio_path) if audio_path else None
@@ -110,9 +110,9 @@ async def download_meeting_audio(meeting_id: int, format: str = "wav"):
     if source_path is None or not source_path.exists() or not source_path.is_file():
         return JSONResponse({"error": "Audio not found"}, status_code=404)
 
-    export_format = (format or "wav").strip().lower()
-    if export_format not in {"wav", "mp4"}:
-        return JSONResponse({"error": "format must be wav or mp4"}, status_code=400)
+    export_format = (format or "mp3").strip().lower()
+    if export_format not in {"wav", "mp3", "mp4"}:
+        return JSONResponse({"error": "format must be wav, mp3, or mp4"}, status_code=400)
 
     export_path = source_path
     actual_ext = source_path.suffix.lower().lstrip(".")
