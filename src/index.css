@@ -4422,6 +4422,10 @@ body.electron-app .draft-recovery-banner {
   color: var(--indigo-500, #6366f1);
   text-decoration: underline;
   text-decoration-color: rgba(99, 102, 241, 0.4);
+  cursor: pointer;
+}
+.update-modal-notes .md-link:hover {
+  text-decoration-color: var(--indigo-500, #6366f1);
 }
 
 .update-modal-progress {

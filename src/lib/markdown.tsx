@@ -1,6 +1,21 @@
 import { Fragment, ReactNode } from 'react';
 
 /**
+ * Open an external URL via the Tauri shell plugin (system browser). Imported
+ * lazily so the renderer still runs in plain browser dev (`pnpm dev`) — the
+ * plugin module throws at import time outside a Tauri shell.
+ */
+function openExternal(url: string) {
+    if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+        import('@tauri-apps/plugin-shell')
+            .then(({ open }) => open(url))
+            .catch((e) => console.warn('[markdown] shell.open failed:', e));
+    } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+    }
+}
+
+/**
  * Minimal markdown-to-React renderer scoped specifically to GitHub Release
  * notes. We pull in zero dependencies (react-markdown + rehype + remark is
  * ~60kB gzipped — overkill for a single surface).
@@ -10,9 +25,10 @@ import { Fragment, ReactNode } from 'react';
  *   - / *        → bullet list items (consecutive lines collapsed into <ul>)
  *   **bold**     → <strong>
  *   `code`       → <code>
- *   [text](url)  → external <a> (rendered as plain text — opening links
- *                  from a Tauri webview needs the shell plugin; we don't
- *                  want to wire that in just for release notes)
+ *   [text](url)  → clickable link via @tauri-apps/plugin-shell open() —
+ *                  the webview doesn't open URLs natively because we run
+ *                  inside Tauri's <a target=_blank> sandbox; routing
+ *                  through the shell plugin pops the system browser.
  *
  * Why not parse emoji shortcodes :rocket:? GitHub release bodies already
  * carry literal UTF-8 emoji glyphs (🚀, 📝, ...). They round-trip fine.
@@ -60,8 +76,20 @@ function renderInline(text: string, keyPrefix: string): ReactNode {
         } else if (earliestKind === 'code') {
             out.push(<code key={k}>{earliestMatch[1]}</code>);
         } else {
-            // Render link as literal text — see file header for rationale.
-            out.push(<span key={k} className="md-link">{earliestMatch[1]}</span>);
+            // Clickable link. We use button-styled <a> + onClick rather than
+            // href because Tauri's <a target=_blank> doesn't pop the system
+            // browser by default — we have to route through the shell plugin.
+            const url = earliestMatch[2];
+            out.push(
+                <a
+                    key={k}
+                    href={url}
+                    className="md-link"
+                    onClick={(e) => { e.preventDefault(); openExternal(url); }}
+                >
+                    {earliestMatch[1]}
+                </a>,
+            );
         }
 
         remaining = remaining.slice(earliestIdx + earliestMatch[0].length);
