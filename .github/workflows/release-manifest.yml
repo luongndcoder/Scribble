@@ -65,8 +65,13 @@ jobs:
 
           MAX_WAIT=2700   # 45 minutes — generous for Windows/macOS PyInstaller
           ELAPSED=0
+          COUNT=0
           while [ $ELAPSED -lt $MAX_WAIT ]; do
-            ASSETS=$(gh release view "$TAG" --json assets -q '.assets[].name')
+            # `gh release view` fails (exit 1) when the release doesn't exist
+            # yet — race condition: this workflow runs at the same time as the
+            # 3 builds, and the first build hasn't reached its "Ensure release
+            # exists" step yet. Swallow the error and treat as "no assets yet".
+            ASSETS=$(gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null || true)
             HAS_WIN=$(echo "$ASSETS" | grep -Fx "$WIN_SIG" || true)
             HAS_MAC=$(echo "$ASSETS" | grep -Fx "$MAC_SIG" || true)
             HAS_LIN=$(echo "$ASSETS" | grep -Fx "$LIN_SIG" || true)
