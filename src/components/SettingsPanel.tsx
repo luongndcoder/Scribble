@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
+import { useUpdaterStore } from '../stores/updaterStore';
+import { checkForUpdates } from '../lib/updater';
 import { getSettings, saveSettings, diagnose, fetchLLMModels } from '../lib/api';
 import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import { t } from '../i18n';
@@ -29,8 +31,62 @@ export function SettingsPanel() {
     const [showNvidiaKey, setShowNvidiaKey] = useState(false);
     const [showSonioxKey, setShowSonioxKey] = useState(false);
     const [showLlmKey, setShowLlmKey] = useState(false);
+    const [appVersion, setAppVersion] = useState('');
+
+    // Updater controls — read from the dedicated updater store so the Settings
+    // panel can both kick a manual check and reflect the result inline.
+    const {
+        status: updaterStatus,
+        available: updaterAvailable,
+        autoCheck: updaterAutoCheck,
+        setAutoCheck: setUpdaterAutoCheck,
+        setModalOpen: setUpdateModalOpen,
+        setSkippedVersion: setUpdaterSkippedVersion,
+        skippedVersion: updaterSkippedVersion,
+        error: updaterError,
+    } = useUpdaterStore();
 
     useEffect(() => { loadSettings(); }, []);
+
+    // Resolve app version once for the "Updates" section.
+    useEffect(() => {
+        if (window.__TAURI_INTERNALS__) {
+            import('@tauri-apps/api/app')
+                .then(({ getVersion }) => getVersion().then(setAppVersion).catch(() => {}))
+                .catch(() => {});
+        }
+    }, []);
+
+    const handleCheckUpdate = async () => {
+        await checkForUpdates({ manual: true });
+        // If an update was discovered, jump straight to the modal — the user
+        // explicitly asked, so we shouldn't make them hunt for the banner.
+        const s = useUpdaterStore.getState();
+        if (s.available && s.status === 'available') {
+            setUpdateModalOpen(true);
+        }
+    };
+
+    const updateStatusLabel = (() => {
+        if (updaterStatus === 'checking') {
+            return { msg: lang === 'vi' ? 'Đang kiểm tra…' : 'Checking…', kind: '' };
+        }
+        if (updaterStatus === 'up-to-date') {
+            return { msg: lang === 'vi' ? '✓ Bạn đang dùng bản mới nhất' : "✓ You're on the latest version", kind: 'success' };
+        }
+        if (updaterStatus === 'available' && updaterAvailable) {
+            return {
+                msg: lang === 'vi'
+                    ? `Có bản ${updaterAvailable.version} — bấm "Xem chi tiết" để cập nhật`
+                    : `Version ${updaterAvailable.version} available — click "View details" to install`,
+                kind: 'success' as const,
+            };
+        }
+        if (updaterError) {
+            return { msg: updaterError, kind: 'error' as const };
+        }
+        return null;
+    })();
 
     const loadSettings = async () => {
         try {
@@ -479,6 +535,110 @@ export function SettingsPanel() {
                                         </span>
                                     </div>
                                 )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ── Updates section (spans both grid cols) ──
+                        Surfaces app version + manual "check for updates" so
+                        the user isn't reliant on the 30-min auto-poll, and can
+                        toggle the auto-poll off if they prefer staying pinned. */}
+                    <div className="settings-section span-full">
+                        <div className="settings-section-header">
+                            <div className="settings-section-title">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" x2="12" y1="15" y2="3" />
+                                </svg>
+                                <span>{lang === 'vi' ? 'Cập nhật ứng dụng' : 'App Updates'}</span>
+                            </div>
+                        </div>
+
+                        <div className="settings-update-row">
+                            <div>
+                                <div className="label">
+                                    {lang === 'vi' ? 'Phiên bản hiện tại' : 'Current version'}
+                                </div>
+                                <div className="sub">
+                                    {appVersion ? `v${appVersion}` : (lang === 'vi' ? 'Không xác định' : 'Unknown')}
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                                <button
+                                    className="settings-update-check-btn"
+                                    onClick={handleCheckUpdate}
+                                    disabled={updaterStatus === 'checking' || updaterStatus === 'downloading'}
+                                >
+                                    {updaterStatus === 'checking'
+                                        ? (lang === 'vi' ? 'Đang kiểm tra…' : 'Checking…')
+                                        : updaterStatus === 'available' && updaterAvailable
+                                            ? (lang === 'vi' ? 'Xem chi tiết' : 'View details')
+                                            : (lang === 'vi' ? 'Kiểm tra cập nhật' : 'Check for updates')}
+                                </button>
+                                {/* If we already have an update available, the
+                                    button does double-duty: clicking opens the
+                                    modal (handleCheckUpdate re-checks then
+                                    opens). Otherwise it triggers a fresh check. */}
+                                {updaterStatus === 'available' && updaterAvailable && (
+                                    <button
+                                        className="settings-update-check-btn"
+                                        style={{ borderColor: 'var(--gray-300, #cbd5e1)', color: 'var(--text-secondary, #64748b)' }}
+                                        onClick={() => setUpdateModalOpen(true)}
+                                    >
+                                        {lang === 'vi' ? 'Mở chi tiết' : 'Open details'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {updateStatusLabel && (
+                            <div className={`settings-update-status ${updateStatusLabel.kind}`}>
+                                {updateStatusLabel.msg}
+                            </div>
+                        )}
+
+                        <div className="settings-update-row" style={{ marginTop: 8 }}>
+                            <div>
+                                <div className="label">
+                                    {lang === 'vi' ? 'Tự động kiểm tra' : 'Auto-check'}
+                                </div>
+                                <div className="sub">
+                                    {lang === 'vi'
+                                        ? 'Kiểm tra khi mở app và mỗi 30 phút sau đó.'
+                                        : 'Check at startup and every 30 minutes.'}
+                                </div>
+                            </div>
+                            <label className="toggle" title={lang === 'vi' ? 'Bật/tắt tự động kiểm tra' : 'Toggle auto-check'}>
+                                <input
+                                    type="checkbox"
+                                    checked={updaterAutoCheck}
+                                    onChange={(e) => setUpdaterAutoCheck(e.target.checked)}
+                                />
+                                <span className="toggle-slider" />
+                            </label>
+                        </div>
+
+                        {updaterSkippedVersion && (
+                            <div className="settings-update-row" style={{ marginTop: 8 }}>
+                                <div>
+                                    <div className="label">
+                                        {lang === 'vi'
+                                            ? `Đã bỏ qua bản ${updaterSkippedVersion}`
+                                            : `Skipped version ${updaterSkippedVersion}`}
+                                    </div>
+                                    <div className="sub">
+                                        {lang === 'vi'
+                                            ? 'Bấm để xóa và nhận lại thông báo về bản này.'
+                                            : 'Clear to receive notifications about this version again.'}
+                                    </div>
+                                </div>
+                                <button
+                                    className="settings-update-check-btn"
+                                    onClick={() => setUpdaterSkippedVersion('')}
+                                >
+                                    {lang === 'vi' ? 'Xóa bỏ qua' : 'Clear skip'}
+                                </button>
                             </div>
                         )}
                     </div>

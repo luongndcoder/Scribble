@@ -86,6 +86,13 @@ jobs:
 
       - name: Build Tauri NSIS installer
         shell: bash
+        # TAURI_SIGNING_PRIVATE_KEY (set in GH Secrets) makes `tauri build` emit
+        # a `.sig` file next to the NSIS installer — required by the updater on
+        # the client side. If the secret isn't set yet, the build still
+        # succeeds but produces no signature (auto-update won't verify).
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build -b nsis --target x86_64-pc-windows-msvc
 
       - name: Resolve version + installer
@@ -108,11 +115,29 @@ jobs:
           cp "$INSTALLER" "$FILENAME"
           echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
           echo "✅ Built: $FILENAME"
+          # Tauri auto-signs the installer when TAURI_SIGNING_PRIVATE_KEY is set
+          # — emits a `.sig` next to the .exe. We copy it alongside the renamed
+          # installer so the manifest job downstream can find it.
+          SIG_SRC="${INSTALLER}.sig"
+          if [ -f "$SIG_SRC" ]; then
+            cp "$SIG_SRC" "${FILENAME}.sig"
+            echo "sig_filename=${FILENAME}.sig" >> "$GITHUB_OUTPUT"
+            echo "✅ Signature: ${FILENAME}.sig"
+          else
+            echo "⚠️  No signature found at $SIG_SRC — auto-update will fail until TAURI_SIGNING_PRIVATE_KEY is set in repo secrets"
+          fi
 
       - name: Upload to Release (tag push only)
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
-        run: gh release upload "${{ steps.version.outputs.tag }}" "${{ steps.version.outputs.filename }}" --clobber
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          gh release upload "$TAG" "${{ steps.version.outputs.filename }}" --clobber
+          # Signature is optional — skip silently if missing (e.g. secret not
+          # configured yet). The manifest job will detect and skip Windows.
+          if [ -f "${{ steps.version.outputs.filename }}.sig" ]; then
+            gh release upload "$TAG" "${{ steps.version.outputs.filename }}.sig" --clobber
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -121,5 +146,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: scribble-windows-installer
-          path: ${{ steps.version.outputs.filename }}
+          path: |
+            ${{ steps.version.outputs.filename }}
+            ${{ steps.version.outputs.filename }}.sig
           retention-days: 30
+          if-no-files-found: warn

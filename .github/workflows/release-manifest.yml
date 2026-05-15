@@ -1,0 +1,190 @@
+name: Release Manifest
+
+# Generates latest.json for tauri-plugin-updater after all three platform
+# builds (build.yml, build-linux.yml, build-macos.yml) have uploaded their
+# signed artifacts to the release. Runs on the same `v*` tag push but with
+# a longer wait window — polls the release every 30s for up to 45 min until
+# all expected .sig files are present, then downloads, reads signature bodies,
+# constructs latest.json, and uploads it.
+#
+# Without this file at <release>/latest.json, the Tauri updater endpoint
+# returns 404 and the client never sees an update available.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build manifest for (e.g. v1.2.0). Defaults to latest release.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve target tag
+        id: resolve
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG=$(gh release view --json tagName -q .tagName)
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"          >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"  >> "$GITHUB_OUTPUT"
+          echo "Target: $TAG (version $VERSION)"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for signed artifacts
+        # Each platform's build workflow uploads its artifact + .sig
+        # independently. We poll the release until ALL platforms have either
+        # (a) a .sig file present, or (b) it's been long enough that we
+        # consider that platform "unsignable on this release" (e.g. secret
+        # not configured) and skip it. The manifest is still generated for
+        # whatever platforms did sign — partial coverage is better than none.
+        id: wait
+        run: |
+          TAG="${{ steps.resolve.outputs.tag }}"
+          VERSION="${{ steps.resolve.outputs.version }}"
+
+          # Expected updater artifacts. Note: deb is NOT an updater target —
+          # Tauri's Linux updater only supports AppImage.
+          WIN_SIG="Scribble_${VERSION}_x64-setup.exe.sig"
+          MAC_SIG="Scribble_${VERSION}_aarch64.app.tar.gz.sig"
+          LIN_SIG="Scribble_${VERSION}_amd64.AppImage.sig"
+
+          MAX_WAIT=2700   # 45 minutes — generous for Windows/macOS PyInstaller
+          ELAPSED=0
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            ASSETS=$(gh release view "$TAG" --json assets -q '.assets[].name')
+            HAS_WIN=$(echo "$ASSETS" | grep -Fx "$WIN_SIG" || true)
+            HAS_MAC=$(echo "$ASSETS" | grep -Fx "$MAC_SIG" || true)
+            HAS_LIN=$(echo "$ASSETS" | grep -Fx "$LIN_SIG" || true)
+
+            COUNT=0
+            [ -n "$HAS_WIN" ] && COUNT=$((COUNT + 1))
+            [ -n "$HAS_MAC" ] && COUNT=$((COUNT + 1))
+            [ -n "$HAS_LIN" ] && COUNT=$((COUNT + 1))
+
+            echo "[$ELAPSED s] signatures present: win=$([ -n "$HAS_WIN" ] && echo y || echo n) mac=$([ -n "$HAS_MAC" ] && echo y || echo n) lin=$([ -n "$HAS_LIN" ] && echo y || echo n)"
+
+            if [ $COUNT -eq 3 ]; then
+              echo "✅ All 3 platforms signed"
+              break
+            fi
+            sleep 30
+            ELAPSED=$((ELAPSED + 30))
+          done
+
+          if [ $COUNT -eq 0 ]; then
+            echo "❌ No platform signed within $MAX_WAIT s — aborting (check TAURI_SIGNING_PRIVATE_KEY secret)"
+            exit 1
+          fi
+          if [ $COUNT -lt 3 ]; then
+            echo "⚠️  Only $COUNT/3 platforms signed — generating partial manifest"
+          fi
+
+          echo "has_win=$([ -n "$HAS_WIN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "has_mac=$([ -n "$HAS_MAC" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "has_lin=$([ -n "$HAS_LIN" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download signatures + build manifest
+        run: |
+          TAG="${{ steps.resolve.outputs.tag }}"
+          VERSION="${{ steps.resolve.outputs.version }}"
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+
+          mkdir -p sigs && cd sigs
+
+          # Fetch release body (notes) to embed — markdown is fine,
+          # client-side UpdateChecker renders it.
+          NOTES=$(gh release view "$TAG" --json body -q .body)
+          # Strip CRLF and trim trailing whitespace
+          NOTES=$(echo "$NOTES" | tr -d '\r' | sed -e 's/[[:space:]]*$//')
+
+          PUB_DATE=$(gh release view "$TAG" --json publishedAt -q .publishedAt)
+          if [ -z "$PUB_DATE" ] || [ "$PUB_DATE" = "null" ]; then
+            PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          fi
+
+          # Use Python to build the JSON (safer than bash string concat with
+          # newlines/quotes in NOTES — sed/jq escaping gets gnarly fast).
+          python3 <<PYEOF
+          import json, os, subprocess, sys
+
+          tag = "${TAG}"
+          version = "${VERSION}"
+          base_url = "${BASE_URL}"
+          notes = """${NOTES}"""
+          pub_date = "${PUB_DATE}"
+
+          has_win = ${{ steps.wait.outputs.has_win }}
+          has_mac = ${{ steps.wait.outputs.has_mac }}
+          has_lin = ${{ steps.wait.outputs.has_lin }}
+
+          def fetch_sig(name):
+              """Download a .sig file from the release and return its text body."""
+              path = name
+              subprocess.run(
+                  ["gh", "release", "download", tag, "-p", name, "-O", path, "--clobber"],
+                  check=True,
+              )
+              with open(path, "r") as f:
+                  return f.read().strip()
+
+          platforms = {}
+
+          if has_win:
+              sig = fetch_sig(f"Scribble_{version}_x64-setup.exe.sig")
+              platforms["windows-x86_64"] = {
+                  "signature": sig,
+                  "url": f"{base_url}/Scribble_{version}_x64-setup.exe",
+              }
+          if has_mac:
+              sig = fetch_sig(f"Scribble_{version}_aarch64.app.tar.gz.sig")
+              platforms["darwin-aarch64"] = {
+                  "signature": sig,
+                  "url": f"{base_url}/Scribble_{version}_aarch64.app.tar.gz",
+              }
+          if has_lin:
+              sig = fetch_sig(f"Scribble_{version}_amd64.AppImage.sig")
+              platforms["linux-x86_64"] = {
+                  "signature": sig,
+                  "url": f"{base_url}/Scribble_{version}_amd64.AppImage",
+              }
+
+          manifest = {
+              "version": tag,
+              "notes": notes,
+              "pub_date": pub_date,
+              "platforms": platforms,
+          }
+
+          with open("../latest.json", "w") as f:
+              json.dump(manifest, f, indent=2, ensure_ascii=False)
+          print("✅ Manifest written. Platforms:", list(platforms.keys()))
+          PYEOF
+
+          cd ..
+          cat latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload manifest to release
+        run: |
+          gh release upload "${{ steps.resolve.outputs.tag }}" latest.json --clobber
+          echo "✅ latest.json uploaded to ${{ steps.resolve.outputs.tag }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

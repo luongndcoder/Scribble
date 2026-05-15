@@ -4259,10 +4259,233 @@ body.electron-app .draft-recovery-banner {
 .update-progress-bar { height: 4px; border-radius: 2px; background: var(--indigo-500, #6366f1); flex: 1; transition: width 0.3s; }
 .update-progress span { font-size: 11px; color: var(--text-secondary); min-width: 30px; }
 
+.update-notes-hint { font-size: 11px; color: var(--text-secondary, #64748b); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @keyframes slideDown {
   from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+
+/* ─── Update Modal (full release notes + install progress) ──────────── */
+.update-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+  padding: 24px;
+  animation: fadeIn 0.18s ease;
+}
+
+.update-modal {
+  background: var(--bg, #fff);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.08);
+  width: 100%;
+  max-width: 560px;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: updateModalIn 0.2s ease;
+}
+
+@keyframes updateModalIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.update-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--gray-200, #e2e8f0);
+}
+
+.update-modal-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: var(--indigo-500, #6366f1);
+}
+
+.update-modal-title h3 {
+  margin: 0;
+  font-size: 17px;
+  color: var(--text, #0f172a);
+  font-weight: 700;
+}
+
+.update-modal-date {
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
+.update-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #64748b);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  margin: -4px 0 0;
+  border-radius: 6px;
+}
+.update-modal-close:hover { background: var(--gray-100, #f1f5f9); color: var(--text, #0f172a); }
+
+.update-modal-body {
+  padding: 14px 20px 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.update-modal-body h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.update-modal-notes {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--gray-50, #f8fafc);
+  border: 1px solid var(--gray-200, #e2e8f0);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text, #0f172a);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.update-modal-progress {
+  padding: 12px 20px;
+  border-top: 1px solid var(--gray-200, #e2e8f0);
+}
+
+.update-modal-progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--gray-200, #e2e8f0);
+  overflow: hidden;
+}
+
+.update-modal-progress-fill {
+  height: 100%;
+  background: var(--indigo-500, #6366f1);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.update-modal-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  font-variant-numeric: tabular-nums;
+}
+
+.update-modal-error {
+  margin: 0 20px 4px;
+  padding: 10px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.update-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--gray-200, #e2e8f0);
+}
+
+.update-modal-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.update-modal-btn.primary {
+  background: var(--indigo-500, #6366f1);
+  color: #fff;
+}
+.update-modal-btn.primary:hover { background: var(--indigo-600, #4f46e5); }
+
+.update-modal-btn.ghost {
+  background: transparent;
+  color: var(--text-secondary, #64748b);
+  border-color: var(--gray-200, #e2e8f0);
+}
+.update-modal-btn.ghost:hover { background: var(--gray-50, #f8fafc); color: var(--text, #0f172a); }
+
+/* ─── Settings: Update controls ──────────────────────────────────────── */
+.settings-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-200, #e2e8f0);
+  border-radius: 8px;
+  background: var(--gray-50, #f8fafc);
+}
+.settings-update-row .label {
+  font-size: 13px;
+  color: var(--text, #0f172a);
+  font-weight: 500;
+}
+.settings-update-row .sub {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  margin-top: 2px;
+}
+.settings-update-check-btn {
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--bg, #fff);
+  border: 1px solid var(--indigo-500, #6366f1);
+  color: var(--indigo-500, #6366f1);
+  transition: background 0.15s, color 0.15s;
+}
+.settings-update-check-btn:hover:not(:disabled) {
+  background: var(--indigo-500, #6366f1);
+  color: #fff;
+}
+.settings-update-check-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.settings-update-status {
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
+  margin-top: 6px;
+}
+.settings-update-status.success { color: #16a34a; }
+.settings-update-status.error   { color: #dc2626; }
+
 /* ─── Upload Audio Modal ─────────────────────────────────────────────── */
 
 .upload-modal-overlay {
