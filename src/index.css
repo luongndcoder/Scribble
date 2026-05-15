@@ -519,6 +519,40 @@ body.electron-app .sub-tabs {
   padding: 16px 24px 12px;
 }
 
+/* ─── Meeting List: sticky header + search ───
+   Without this, scrolling the meeting list slides the title + search box
+   off-screen — the user lost their "Cuộc họp mới" / Upload buttons + search
+   field together with the cards. Switch the list view to a flex column with
+   the grid as the only scrolling region. Detail view (`.detail-view`) is
+   excluded because it already has its own internal layout. */
+.tab-content:has(> .view.active:not(.detail-view)) {
+  overflow: hidden;
+}
+
+.view.active:not(.detail-view) {
+  display: flex;
+  flex-direction: column;
+  padding: 24px 24px 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.view.active:not(.detail-view) > .pane-header,
+.view.active:not(.detail-view) > .meetings-toolbar {
+  flex-shrink: 0;
+}
+
+.view.active:not(.detail-view) > .meetings-grid {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  /* Right-side padding makes room for the scrollbar so cards don't get
+     clipped by it. Left padding matches the header. */
+  padding-right: 4px;
+  margin-right: -4px;
+  padding-bottom: 24px;
+}
+
 /* ─── Detail Header (Back button) ─── */
 .detail-header {
   display: flex;
