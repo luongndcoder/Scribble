@@ -40,6 +40,13 @@ tmp_ret = collect_all('onnxruntime')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('soniox')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# Soniox SDK uses `from websockets.sync.client import connect` for realtime
+# STT. Plain `hiddenimports=['websockets']` only pulled the speedups C ext —
+# the .py submodules (sync/, client/, etc.) were dropped, causing realtime
+# Soniox to fail with ModuleNotFoundError silent-caught by main.py. The
+# Soniox file-upload path didn't hit this (uses httpx, not websockets).
+tmp_ret = collect_all('websockets')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 # ── Aggressive excludes ──
 # These are transitive deps pulled in by collect_all('riva') and other packages.
