@@ -127,6 +127,23 @@ jobs:
             echo "⚠️  No signature found at $SIG_SRC — auto-update will fail until TAURI_SIGNING_PRIVATE_KEY is set in repo secrets"
           fi
 
+      - name: Ensure release exists
+        # `gh release upload` requires the release to already exist. We don't
+        # gate the workflow on a manual pre-step — instead, the first of the
+        # 3 parallel platform builds wins the race and creates the draft;
+        # the rest fall through to a no-op `gh release view`. Race-safe
+        # because gh returns non-zero on duplicate create, which we swallow.
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --draft --title "$TAG" \
+              --notes "Auto-created by CI. Update notes before publishing." || \
+            true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload to Release (tag push only)
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash

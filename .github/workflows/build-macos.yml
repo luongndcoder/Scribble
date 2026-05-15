@@ -108,6 +108,18 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Ensure release exists
+        # First of the 3 parallel platform builds wins the race + creates the
+        # draft; the rest no-op. See build.yml for the rationale.
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --draft --title "$TAG" \
+              --notes "Auto-created by CI. Update notes before publishing." || \
+            true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload to Release
         run: |
           VERSION="${{ steps.version.outputs.version }}"
