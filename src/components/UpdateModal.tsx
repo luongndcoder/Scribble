@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useUpdaterStore } from '../stores/updaterStore';
 import { downloadAndInstall, formatMB, estimateETA, formatETA } from '../lib/updater';
+import { Markdown } from '../lib/markdown';
 
 /**
  * Full release-notes modal. Opens from the banner's "View" button or from
@@ -85,11 +86,13 @@ export function UpdateModal() {
 
                 <div className="update-modal-body">
                     <h4>{lang === 'vi' ? 'Có gì mới' : "What's new"}</h4>
-                    {/* Pre-wrap preserves the GitHub release body's line breaks
-                        and bullet markers (* / -) without dragging in a full
-                        markdown parser. Most release notes are flat lists, so
-                        this looks fine. */}
-                    <pre className="update-modal-notes">{available.notes || (lang === 'vi' ? 'Không có ghi chú.' : 'No release notes.')}</pre>
+                    {/* Use our minimal markdown renderer (lib/markdown.tsx).
+                        Falls back to plain text if release notes are absent. */}
+                    <div className="update-modal-notes">
+                        {available.notes
+                            ? <Markdown>{available.notes}</Markdown>
+                            : <p className="md-p">{lang === 'vi' ? 'Không có ghi chú.' : 'No release notes.'}</p>}
+                    </div>
                 </div>
 
                 {installing && (

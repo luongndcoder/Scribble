@@ -5,7 +5,7 @@ import { MeetingList } from './components/MeetingList';
 import { MeetingDetail } from './components/MeetingDetail';
 import { RecordingBar } from './components/RecordingBar';
 import { SettingsPanel } from './components/SettingsPanel';
-import { ToastProvider, useToast } from './components/Toast';
+import { ToastProvider } from './components/Toast';
 import { UpdateChecker } from './components/UpdateChecker';
 import { StartupStatusBar } from './components/StartupStatusBar';
 import { SIDECAR_HTTP_BASES } from './lib/sidecar';
@@ -22,7 +22,6 @@ const IS_MACOS = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navi
 
 function AppInner() {
   const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline } = useAppStore();
-  const { showToast } = useToast();
   const [backendStatus, setBackendStatusLocal] = useState<'online' | 'offline'>('offline');
   // Mirror local backend state into the global store so unrelated components
   // (MeetingList action buttons, RecordingBar) can gate themselves without
@@ -121,10 +120,10 @@ function AppInner() {
       setStartupStep(3);
       setBackendStatus('online');
       window.dispatchEvent(new Event('backend-online'));
-      if (!hasBeenOnline.current) {
-        hasBeenOnline.current = true;
-        showToast(lang === 'vi' ? '✓ Hệ thống đã sẵn sàng' : '✓ System ready', 'success');
-      }
+      // Drop the "✓ Hệ thống đã sẵn sàng" toast — the topnav status chip
+      // already flips from "Đang khởi động" to "✓ Sẵn sàng" and the bottom
+      // startup strip disappears, so the toast was a third redundant cue.
+      hasBeenOnline.current = true;
 
       // ── Ongoing health check (slow poll) ──
       while (active) {
