@@ -119,51 +119,62 @@ jobs:
             PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           fi
 
-          # Use Python to build the JSON (safer than bash string concat with
-          # newlines/quotes in NOTES — sed/jq escaping gets gnarly fast).
-          python3 <<PYEOF
-          import json, os, subprocess, sys
+          # Pass values through env vars instead of shell substitution into
+          # the Python source — previous version did `has_win = ${{ ... }}`
+          # which expanded to `has_win = true`, a Python NameError. Env vars
+          # also dodge quoting hazards in NOTES (release body markdown can
+          # contain quotes/backticks/triple-quotes).
+          export MANIFEST_TAG="$TAG"
+          export MANIFEST_VERSION="$VERSION"
+          export MANIFEST_BASE_URL="$BASE_URL"
+          export MANIFEST_NOTES="$NOTES"
+          export MANIFEST_PUB_DATE="$PUB_DATE"
 
-          tag = "${TAG}"
-          version = "${VERSION}"
-          base_url = "${BASE_URL}"
-          notes = """${NOTES}"""
-          pub_date = "${PUB_DATE}"
+          python3 - <<'PYEOF'
+          import json, os, subprocess
 
-          has_win = ${{ steps.wait.outputs.has_win }}
-          has_mac = ${{ steps.wait.outputs.has_mac }}
-          has_lin = ${{ steps.wait.outputs.has_lin }}
+          tag       = os.environ["MANIFEST_TAG"]
+          version   = os.environ["MANIFEST_VERSION"]
+          base_url  = os.environ["MANIFEST_BASE_URL"]
+          notes     = os.environ.get("MANIFEST_NOTES", "")
+          pub_date  = os.environ["MANIFEST_PUB_DATE"]
 
-          def fetch_sig(name):
-              """Download a .sig file from the release and return its text body."""
-              path = name
-              subprocess.run(
-                  ["gh", "release", "download", tag, "-p", name, "-O", path, "--clobber"],
-                  check=True,
-              )
-              with open(path, "r") as f:
+          def try_fetch_sig(name):
+              """Download a .sig from the release; return contents, or None
+              if it doesn't exist (allows partial manifests)."""
+              try:
+                  subprocess.run(
+                      ["gh", "release", "download", tag, "-p", name, "-O", name, "--clobber"],
+                      check=True, capture_output=True,
+                  )
+              except subprocess.CalledProcessError:
+                  return None
+              with open(name, "r") as f:
                   return f.read().strip()
 
           platforms = {}
 
-          if has_win:
-              sig = fetch_sig(f"Scribble_{version}_x64-setup.exe.sig")
+          win_sig = try_fetch_sig(f"Scribble_{version}_x64-setup.exe.sig")
+          if win_sig:
               platforms["windows-x86_64"] = {
-                  "signature": sig,
+                  "signature": win_sig,
                   "url": f"{base_url}/Scribble_{version}_x64-setup.exe",
               }
-          if has_mac:
-              sig = fetch_sig(f"Scribble_{version}_aarch64.app.tar.gz.sig")
+          mac_sig = try_fetch_sig(f"Scribble_{version}_aarch64.app.tar.gz.sig")
+          if mac_sig:
               platforms["darwin-aarch64"] = {
-                  "signature": sig,
+                  "signature": mac_sig,
                   "url": f"{base_url}/Scribble_{version}_aarch64.app.tar.gz",
               }
-          if has_lin:
-              sig = fetch_sig(f"Scribble_{version}_amd64.AppImage.sig")
+          lin_sig = try_fetch_sig(f"Scribble_{version}_amd64.AppImage.sig")
+          if lin_sig:
               platforms["linux-x86_64"] = {
-                  "signature": sig,
+                  "signature": lin_sig,
                   "url": f"{base_url}/Scribble_{version}_amd64.AppImage",
               }
+
+          if not platforms:
+              raise SystemExit("❌ No .sig file could be downloaded — aborting")
 
           manifest = {
               "version": tag,
