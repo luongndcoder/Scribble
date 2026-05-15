@@ -126,25 +126,62 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
+          # Import with -A so codesign can access the private key without
+          # password prompts. The temp keychain is destroyed at job end so the
+          # "any app" grant is scoped to this build.
           security import "$CERT_PATH" -k "$KEYCHAIN_PATH" \
-            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -A \
             -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productsign
 
+          # Belt-and-suspenders: also set the partition list so newer macOS
+          # versions don't prompt despite the -A flag.
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null || true
 
           # Prepend our keychain to the search list so codesign sees it
           security list-keychain -d user -s "$KEYCHAIN_PATH" \
             $(security list-keychains -d user | sed -e 's/^[[:space:]]*//' -e 's/"//g')
 
-          # Find the identity name (the SHA1-prefixed cert name) and surface it
+          # Diagnostic dump — useful when the .p12 turns out to contain only
+          # a public cert (no private key), or the cert lacks codesigning
+          # extensions. Each form below filters more leniently than the last.
+          echo "=== Keychain diagnostics ==="
+          echo "--- find-identity (all, even invalid) ---"
+          security find-identity "$KEYCHAIN_PATH" || true
+          echo "--- find-identity -v (valid: has private key + not expired) ---"
+          security find-identity -v "$KEYCHAIN_PATH" || true
+          echo "--- find-identity -v -p codesigning (passes codesigning policy) ---"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+          echo "--- find-certificate -a (all certs in keychain) ---"
+          security find-certificate -a "$KEYCHAIN_PATH" | grep -E '"labl"<blob>=' | head -5 || true
+          echo "==========================="
+
+          # Prefer codesigning-policy identities, but self-signed certs often
+          # fail that filter even though codesign itself accepts them. Fall
+          # back to any valid identity, then to any identity at all.
           IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
             | grep -E '^[[:space:]]*[0-9]+\)' | head -1 \
             | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
 
           if [ -z "$IDENTITY" ]; then
-            echo "::error::Imported cert but couldn't find a code-signing identity in the keychain"
-            security find-identity -v "$KEYCHAIN_PATH"
+            echo "::warning::No identity matched codesigning policy — falling back to any valid identity"
+            IDENTITY=$(security find-identity -v "$KEYCHAIN_PATH" \
+              | grep -E '^[[:space:]]*[0-9]+\)' | head -1 \
+              | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
+          fi
+
+          if [ -z "$IDENTITY" ]; then
+            echo "::warning::No valid identity found — falling back to any identity (cert may not have private key)"
+            IDENTITY=$(security find-identity "$KEYCHAIN_PATH" \
+              | grep -E '^[[:space:]]*[0-9]+\)' | head -1 \
+              | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
+          fi
+
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No code-signing identity found in keychain after import."
+            echo "::error::The .p12 file probably doesn't include the private key."
+            echo "::error::In Keychain Access → My Certificates, right-click the cert (NOT just"
+            echo "::error::the certificate sub-entry) → Export as .p12. Re-upload as secret."
             exit 1
           fi
 
