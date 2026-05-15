@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useAppStore } from './stores/appStore';
 import { MeetingList } from './components/MeetingList';
 import { MeetingDetail } from './components/MeetingDetail';
@@ -19,6 +20,36 @@ const SIDECAR_BASES = SIDECAR_HTTP_BASES;
  *  can reserve room. We use platform from navigator — Tauri exposes the host
  *  OS via the standard UA on macOS. */
 const IS_MACOS = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
+
+/** Manual implementation of window dragging from the topnav.
+ *
+ *  `data-tauri-drag-region` is supposed to handle this declaratively, but on
+ *  some Tauri 2 + macOS Overlay-titlebar combos the attribute is silently
+ *  ignored. Calling `getCurrentWindow().startDragging()` from a mousedown
+ *  handler is Tauri's recommended fallback and works reliably.
+ *
+ *  We skip the drag when the click lands on an interactive element (button,
+ *  link, input) so their onClick handlers still fire. Double-click on the
+ *  topnav background triggers `toggleMaximize()` — mirrors native title-bar UX. */
+async function handleTopnavMouseDown(e: React.MouseEvent<HTMLElement>) {
+  if (e.button !== 0) return;
+
+  const target = e.target as HTMLElement | null;
+  if (target?.closest('button, a, input, select, textarea, [data-no-drag]')) return;
+
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return;
+
+  try {
+    const win = getCurrentWindow();
+    if (e.detail === 2) {
+      await win.toggleMaximize();
+    } else {
+      await win.startDragging();
+    }
+  } catch (err) {
+    console.warn('[topnav] startDragging failed:', err);
+  }
+}
 
 function AppInner() {
   const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline } = useAppStore();
@@ -161,12 +192,11 @@ function AppInner() {
                 settings) while sidecar warms up. Buttons that need the
                 backend disable themselves via the `disabled={isOffline}`
                 flag below, plus the .app--offline class dims them via CSS. */}
-            {/* Top Navigation — `data-tauri-drag-region` makes the whole
-                bar grab-to-drag. Interactive elements inside (buttons, chip)
-                still receive their own clicks because they have onClick
-                handlers; the no-drag CSS rule in index.css forces them out
-                of the drag region explicitly. Mirrors macOS title-bar UX. */}
-            <header className="topnav" data-tauri-drag-region>
+            {/* Top Navigation — onMouseDown calls Tauri's startDragging()
+                directly (data-tauri-drag-region alone was unreliable on
+                macOS overlay-titlebar). The handler bails out when the
+                click target is a button/link, so onClick still fires. */}
+            <header className="topnav" data-tauri-drag-region onMouseDown={handleTopnavMouseDown}>
               <div className="topnav-left" data-tauri-drag-region>
                 <span className="brand" data-tauri-drag-region>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
