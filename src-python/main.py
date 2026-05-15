@@ -10,6 +10,30 @@ import sys
 import os
 multiprocessing.freeze_support()
 
+# ── SSL CA bundle fix for PyInstaller frozen apps ──
+# Python's stdlib `ssl` module looks for CAs in compile-time hardcoded paths
+# (e.g. /System/Library/OpenSSL on macOS) that don't exist when the app runs
+# from a PyInstaller bundle. Without a working CA bundle, every TLS
+# handshake fails with CERTIFICATE_VERIFY_FAILED — including websockets.sync
+# used by Soniox realtime. httpx/requests are immune because they bundle
+# certifi themselves; the stdlib doesn't.
+#
+# Set SSL_CERT_FILE + SSL_CERT_DIR + REQUESTS_CA_BUNDLE before anything that
+# might already cache an SSL context (uvicorn, websockets, etc.). The
+# `setdefault` calls are friendly: if the OS or operator has already pointed
+# us at a working bundle, we don't override.
+if getattr(sys, "frozen", False):
+    try:
+        import certifi
+        _ca = certifi.where()
+        os.environ.setdefault("SSL_CERT_FILE", _ca)
+        os.environ.setdefault("SSL_CERT_DIR", os.path.dirname(_ca))
+        os.environ.setdefault("REQUESTS_CA_BUNDLE", _ca)
+    except Exception:
+        # Better to keep booting (the user might still use Nvidia STT, which
+        # talks gRPC over its own TLS stack) than crash the whole sidecar.
+        pass
+
 import asyncio
 import json
 import tempfile

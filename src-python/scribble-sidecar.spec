@@ -47,6 +47,12 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 # Soniox file-upload path didn't hit this (uses httpx, not websockets).
 tmp_ret = collect_all('websockets')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# certifi ships the CA bundle (cacert.pem) that httpx/requests use by
+# default. The stdlib `ssl` module DOESN'T auto-load it — without an
+# explicit SSL_CERT_FILE env (set at the top of main.py), websockets.sync
+# fails CERTIFICATE_VERIFY_FAILED on TLS handshake to wss://stt-rt.soniox.com.
+tmp_ret = collect_all('certifi')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 # ── Aggressive excludes ──
 # These are transitive deps pulled in by collect_all('riva') and other packages.
