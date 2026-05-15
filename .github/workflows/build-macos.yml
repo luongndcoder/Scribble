@@ -1,10 +1,21 @@
 name: Build macOS
 
 # Builds Scribble for macOS on every `v*` tag push (universal: aarch64 DMG +
-# .app.tar.gz updater artifact). Uses ad-hoc code-signing on CI (Gatekeeper
-# users will need to right-click → Open the first time). For a notarized
-# release, build locally with the user's Developer ID — that flow still
-# works and produces identical DMG output.
+# .app.tar.gz updater artifact). Code-signing strategy:
+#
+# - If MACOS_CERTIFICATE_P12 + MACOS_CERTIFICATE_PASSWORD secrets are set,
+#   the cert is imported into a temp keychain and used as signingIdentity.
+#   This keeps the same designated-requirement across releases, so macOS
+#   TCC (Privacy → Microphone, Screen Recording, etc.) does NOT prompt the
+#   user again after each auto-update. See docs/auto-update.md.
+#
+# - If those secrets are absent, falls back to ad-hoc signing (`-`).
+#   The app still runs, but TCC will treat every new build as a brand-new
+#   app and re-prompt for mic / system audio permissions on every update.
+#
+# Either way the .app.tar.gz updater artifact is signed with the minisign
+# keypair (TAURI_SIGNING_PRIVATE_KEY) — that's separate from macOS
+# codesigning and is what the Tauri updater verifies before installing.
 
 on:
   push:
@@ -87,19 +98,73 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Build Tauri (ad-hoc signed)
-        # Override signingIdentity to "-" (ad-hoc) — the local config uses
-        # "Scribble Dev" which only exists on the user's Mac. Ad-hoc signing
-        # produces a runnable .app; Gatekeeper users right-click → Open once
-        # to bypass the unsigned warning. For notarized releases, build locally.
-        #
-        # TAURI_SIGNING_PRIVATE_KEY signs the .app.tar.gz updater artifact
-        # (separate from Gatekeeper). Required for auto-update to work.
+      - name: Import code-signing certificate (if available)
+        # When MACOS_CERTIFICATE_P12 is set, imports it into a temp keychain
+        # and exports the matching identity name for the next step. When the
+        # secret is empty, outputs identity="-" so the build falls back to
+        # ad-hoc signing. See docs/auto-update.md for setup instructions.
+        id: signing
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE_P12" ]; then
+            echo "identity=-" >> "$GITHUB_OUTPUT"
+            echo "::warning::No MACOS_CERTIFICATE_P12 secret — falling back to ad-hoc signing."
+            echo "::warning::macOS TCC permissions (mic, screen recording, etc.) will reset on every update."
+            echo "::warning::See docs/auto-update.md to fix this."
+            exit 0
+          fi
+
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/scribble-build.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productsign
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+
+          # Prepend our keychain to the search list so codesign sees it
+          security list-keychain -d user -s "$KEYCHAIN_PATH" \
+            $(security list-keychains -d user | sed -e 's/^[[:space:]]*//' -e 's/"//g')
+
+          # Find the identity name (the SHA1-prefixed cert name) and surface it
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep -E '^[[:space:]]*[0-9]+\)' | head -1 \
+            | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
+
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::Imported cert but couldn't find a code-signing identity in the keychain"
+            security find-identity -v "$KEYCHAIN_PATH"
+            exit 1
+          fi
+
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "::notice::Code-signing identity loaded: $IDENTITY"
+
+          rm "$CERT_PATH"
+
+      - name: Build Tauri
+        # signingIdentity is either the cert imported above (TCC-stable) or
+        # "-" (ad-hoc fallback). TAURI_SIGNING_PRIVATE_KEY signs the .app.tar.gz
+        # updater artifact (separate from Gatekeeper) — required for auto-update.
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          npx tauri build --target aarch64-apple-darwin --config '{"bundle":{"macOS":{"signingIdentity":"-"}}}'
+          IDENTITY='${{ steps.signing.outputs.identity }}'
+          echo "Building with signingIdentity: $IDENTITY"
+          npx tauri build --target aarch64-apple-darwin \
+            --config "{\"bundle\":{\"macOS\":{\"signingIdentity\":\"$IDENTITY\"}}}"
 
       - name: Get version from tag
         id: version
