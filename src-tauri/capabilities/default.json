@@ -14,6 +14,7 @@
     "shell:allow-execute",
     "shell:allow-kill",
     "shell:allow-stdin-write",
+    "shell:allow-open",
     {
       "identifier": "shell:allow-execute",
       "allow": [

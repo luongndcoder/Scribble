@@ -161,10 +161,14 @@ function AppInner() {
                 settings) while sidecar warms up. Buttons that need the
                 backend disable themselves via the `disabled={isOffline}`
                 flag below, plus the .app--offline class dims them via CSS. */}
-            {/* Top Navigation */}
-            <header className="topnav">
-              <div className="topnav-left">
-                <span className="brand">
+            {/* Top Navigation — `data-tauri-drag-region` makes the whole
+                bar grab-to-drag. Interactive elements inside (buttons, chip)
+                still receive their own clicks because they have onClick
+                handlers; the no-drag CSS rule in index.css forces them out
+                of the drag region explicitly. Mirrors macOS title-bar UX. */}
+            <header className="topnav" data-tauri-drag-region>
+              <div className="topnav-left" data-tauri-drag-region>
+                <span className="brand" data-tauri-drag-region>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
                     strokeLinecap="round" strokeLinejoin="round" className="brand-icon">
                     <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
@@ -175,11 +179,12 @@ function AppInner() {
                   {appVersion && <span className="app-version">v{appVersion}</span>}
                 </span>
               </div>
-              <div className="topnav-right">
+              <div className="topnav-right" data-tauri-drag-region>
                 <div
                   className={`backend-status-chip ${backendStatus}`}
                   title={backendLabel}
                   aria-live="polite"
+                  data-tauri-drag-region
                 >
                   <span className={`status-dot ${backendStatus === 'online' ? 'online' : 'offline'}`} />
                   <span>{backendLabel}</span>

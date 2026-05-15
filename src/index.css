@@ -270,6 +270,24 @@ body.electron-app .sub-tabs {
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  /* Make the topbar a window-drag handle (Tauri webview honors the same
+     CSS Electron uses). user-select: none stops the brand/version text from
+     being highlighted when the user click-drags to move the window. */
+  -webkit-app-region: drag;
+  app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+/* Interactive elements inside the topnav must opt OUT of the drag region —
+   otherwise their onClick handlers never fire (the drag swallows the click).
+   The status chip stays draggable: it has no click handler, just a tooltip. */
+.topnav button,
+.topnav .lang-toggle,
+.topnav .icon-btn {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 /* macOS overlay title bar: the traffic lights sit at the top-left of the
