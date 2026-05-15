@@ -120,10 +120,10 @@ jobs:
           fi
 
           # Pass values through env vars instead of shell substitution into
-          # the Python source — previous version did `has_win = ${{ ... }}`
-          # which expanded to `has_win = true`, a Python NameError. Env vars
-          # also dodge quoting hazards in NOTES (release body markdown can
-          # contain quotes/backticks/triple-quotes).
+          # the Python source — previous version interpolated GHA outputs
+          # directly, which expanded to `has_win = true` (Python NameError,
+          # since Python uses True). Env vars also dodge quoting hazards
+          # in NOTES (release body markdown can contain quotes / backticks).
           export MANIFEST_TAG="$TAG"
           export MANIFEST_VERSION="$VERSION"
           export MANIFEST_BASE_URL="$BASE_URL"
