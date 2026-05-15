@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Scribble",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "identifier": "com.scribble.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -32,12 +32,13 @@
       "endpoints": [
         "https://github.com/luongndcoder/Scribble/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYwNkY1NjE4QTJEQjQ5QgpSV1NidEMyS1lmVUdEek5UK1BVMlBTUmpEM1lYeTZiNTg0aGxwdm5qSkdiR3hoK0ptKzNiUjQ3Two="
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk1NEE5RjRDOEQ2OTU2RTgKUldUb1ZtbU5USjlLbFgyV2FFMVhFcmVLMHlvcUtHUWV5WUpDcVlCN2RXaFB3U29TZFFUQ280MFkK"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

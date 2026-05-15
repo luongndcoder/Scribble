@@ -1,4 +1,10 @@
-name: Build Linux
+name: Build macOS
+
+# Builds Scribble for macOS on every `v*` tag push (universal: aarch64 DMG +
+# .app.tar.gz updater artifact). Uses ad-hoc code-signing on CI (Gatekeeper
+# users will need to right-click → Open the first time). For a notarized
+# release, build locally with the user's Developer ID — that flow still
+# works and produces identical DMG output.
 
 on:
   push:
@@ -9,22 +15,10 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
-    runs-on: ubuntu-22.04
+  build-macos:
+    runs-on: macos-14    # M-series runner — produces aarch64 (Apple Silicon)
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            ffmpeg
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -43,15 +37,20 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
+
+      - name: Install ffmpeg
+        run: brew install ffmpeg
 
       - name: Install Python dependencies
         working-directory: src-python
         run: uv pip install --system -r requirements.txt
 
-      - name: Download ONNX model
+      - name: Download ONNX diarization model
         working-directory: src-python/models
         run: |
           if [ ! -f voxceleb_CAM++.onnx ]; then
@@ -65,15 +64,17 @@ jobs:
       - name: Copy sidecar + compress
         run: |
           mkdir -p src-tauri/binaries
-          # Strip unnecessary files
+          # Strip unnecessary files (mirror Linux/Windows workflow)
           rm -rf src-python/dist/scribble-sidecar/_internal/grpc_tools 2>/dev/null || true
           find src-python/dist/scribble-sidecar/_internal -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
           find src-python/dist/scribble-sidecar/_internal -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
           find src-python/dist/scribble-sidecar/_internal -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
           # Compress
           tar -czf src-tauri/binaries/sidecar-dist.tar.gz -C src-python/dist scribble-sidecar
-          # Create launcher shim
-          cat > src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu << 'SHEOF'
+          # Launcher shim — Tauri externalBin requires a binary named
+          # scribble-sidecar-<target-triple>. We point it at the unpacked dist
+          # tarball at runtime (Tauri ships sidecar-dist.tar.gz as a resource).
+          cat > src-tauri/binaries/scribble-sidecar-aarch64-apple-darwin << 'SHEOF'
           #!/bin/bash
           DIR="$(cd "$(dirname "$0")" && pwd)"
           for candidate in "$DIR/sidecar-dist/scribble-sidecar" "$DIR/../Resources/sidecar-dist/scribble-sidecar"; do
@@ -81,19 +82,24 @@ jobs:
           done
           exit 1
           SHEOF
-          chmod +x src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu
+          chmod +x src-tauri/binaries/scribble-sidecar-aarch64-apple-darwin
 
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Build Tauri
-        # Signing env vars trigger `.sig` generation for the AppImage. Updater
-        # uses AppImage on Linux (deb has no manifest entry). If secret unset,
-        # build still works but produces no signature → auto-update offline.
+      - name: Build Tauri (ad-hoc signed)
+        # Override signingIdentity to "-" (ad-hoc) — the local config uses
+        # "Scribble Dev" which only exists on the user's Mac. Ad-hoc signing
+        # produces a runnable .app; Gatekeeper users right-click → Open once
+        # to bypass the unsigned warning. For notarized releases, build locally.
+        #
+        # TAURI_SIGNING_PRIVATE_KEY signs the .app.tar.gz updater artifact
+        # (separate from Gatekeeper). Required for auto-update to work.
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build
+        run: |
+          npx tauri build --target aarch64-apple-darwin --config '{"bundle":{"macOS":{"signingIdentity":"-"}}}'
 
       - name: Get version from tag
         id: version
@@ -107,35 +113,36 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
 
-          APPIMAGE=$(find src-tauri/target -name "*.AppImage" | head -1)
-          if [ -n "$APPIMAGE" ]; then
-            FILENAME="Scribble_${VERSION}_amd64.AppImage"
-            cp "$APPIMAGE" "$FILENAME"
+          # DMG — first-time install asset
+          DMG=$(find src-tauri/target/aarch64-apple-darwin -name "*.dmg" | head -1)
+          if [ -n "$DMG" ]; then
+            FILENAME="Scribble_${VERSION}_aarch64.dmg"
+            cp "$DMG" "$FILENAME"
             gh release upload "$TAG" "$FILENAME" --clobber
             echo "✅ Uploaded: $FILENAME"
-            # Tauri emits AppImage.sig next to AppImage when signing key is set.
-            # If absent (secret not configured), skip — manifest job will
-            # detect missing signature and omit Linux from the manifest.
-            APPIMAGE_SIG="${APPIMAGE}.sig"
-            if [ -f "$APPIMAGE_SIG" ]; then
-              cp "$APPIMAGE_SIG" "${FILENAME}.sig"
+          fi
+
+          # app.tar.gz + .sig — updater artifacts (this is what the auto-updater
+          # downloads + applies in-place, NOT the DMG)
+          TARBALL=$(find src-tauri/target/aarch64-apple-darwin -name "*.app.tar.gz" | head -1)
+          if [ -n "$TARBALL" ]; then
+            FILENAME="Scribble_${VERSION}_aarch64.app.tar.gz"
+            cp "$TARBALL" "$FILENAME"
+            gh release upload "$TAG" "$FILENAME" --clobber
+            echo "✅ Uploaded: $FILENAME"
+
+            TARBALL_SIG="${TARBALL}.sig"
+            if [ -f "$TARBALL_SIG" ]; then
+              cp "$TARBALL_SIG" "${FILENAME}.sig"
               gh release upload "$TAG" "${FILENAME}.sig" --clobber
               echo "✅ Uploaded: ${FILENAME}.sig"
             else
-              echo "⚠️  No signature for AppImage — Linux auto-update disabled"
+              echo "⚠️  No signature — macOS auto-update disabled until TAURI_SIGNING_PRIVATE_KEY is set"
             fi
           fi
 
-          DEB=$(find src-tauri/target -name "*.deb" | head -1)
-          if [ -n "$DEB" ]; then
-            FILENAME="scribble_${VERSION}_amd64.deb"
-            cp "$DEB" "$FILENAME"
-            gh release upload "$TAG" "$FILENAME" --clobber
-            echo "✅ Uploaded: $FILENAME"
-          fi
-
-          if [ -z "$APPIMAGE" ] && [ -z "$DEB" ]; then
-            echo "❌ No Linux bundle found"
+          if [ -z "$DMG" ] && [ -z "$TARBALL" ]; then
+            echo "❌ No macOS bundle found"
             exit 1
           fi
         env:
