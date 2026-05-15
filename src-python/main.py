@@ -593,7 +593,14 @@ async def soniox_stream_ws(websocket: WebSocket):
     try:
         await loop.run_in_executor(None, streamer.start)
     except Exception as e:
-        await websocket.send_json({"error": str(e)})
+        # Previously this was silent — the client got `{error: "..."}` over the
+        # WebSocket but the server log showed nothing, making realtime Soniox
+        # failures impossible to diagnose. Log with full traceback now.
+        log.error("[ws:soniox-stream] streamer.start failed: %s", e, exc_info=True)
+        try:
+            await websocket.send_json({"error": str(e)})
+        except Exception:
+            pass
         await websocket.close()
         return
 
