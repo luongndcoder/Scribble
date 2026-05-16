@@ -276,10 +276,16 @@
                 <h2><span data-i18n="dl.title1">Sẵn sàng để </span><span class="gradient-text" data-i18n="dl.title2">thay đổi
 cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                 <p data-i18n="dl.sub">Miễn phí và mã nguồn mở. Có sẵn cho macOS và Windows.</p>
+                <p class="dl-version" data-fill="version-line" style="margin-top:8px;font-size:14px;color:var(--muted,#64748b)">
+                    <span data-i18n="dl.latest">Phiên bản mới nhất:</span>
+                    <a id="dl-version-link" href="https://github.com/luongndcoder/Scribble/releases/latest" target="_blank" rel="noopener" style="font-weight:600;color:inherit;text-decoration:underline">
+                        <span data-fill="version">latest</span>
+                    </a>
+                </p>
             </div>
             <div class="dl-grid">
-                <a href="https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.2.0_aarch64.dmg"
-                    class="dl-card" id="dl-macos">
+                <a href="https://github.com/luongndcoder/Scribble/releases/latest"
+                    class="dl-card" id="dl-macos" data-os="macos" data-asset-pattern="aarch64\.dmg$">
                     <div class="dl-top">
                         <svg class="dl-os-icon" width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
                             <path
@@ -291,7 +297,7 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         </div>
                     </div>
                     <div class="dl-bottom">
-                        <span class="dl-filename">Scribble_1.2.0.dmg</span>
+                        <span class="dl-filename" data-fill="filename">Scribble.dmg</span>
                         <span class="dl-btn">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -302,8 +308,8 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         </span>
                     </div>
                 </a>
-                <a href="https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.2.0_x64-setup.exe"
-                    class="dl-card" id="dl-windows">
+                <a href="https://github.com/luongndcoder/Scribble/releases/latest"
+                    class="dl-card" id="dl-windows" data-os="windows" data-asset-pattern="x64-setup\.exe$">
                     <div class="dl-top">
                         <svg class="dl-os-icon" width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
                             <path
@@ -315,7 +321,7 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         </div>
                     </div>
                     <div class="dl-bottom">
-                        <span class="dl-filename">Scribble_1.2.0.exe</span>
+                        <span class="dl-filename" data-fill="filename">Scribble.exe</span>
                         <span class="dl-btn">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -326,8 +332,8 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         </span>
                     </div>
                 </a>
-                <a href="https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.2.0_amd64.AppImage"
-                    class="dl-card" id="dl-linux">
+                <a href="https://github.com/luongndcoder/Scribble/releases/latest"
+                    class="dl-card" id="dl-linux" data-os="linux" data-asset-pattern="amd64\.AppImage$">
                     <div class="dl-top">
                         <svg class="dl-os-icon" width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
                             <path
@@ -339,7 +345,7 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         </div>
                     </div>
                     <div class="dl-bottom">
-                        <span class="dl-filename">Scribble_1.2.0.AppImage</span>
+                        <span class="dl-filename" data-fill="filename">Scribble.AppImage</span>
                         <span class="dl-btn">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1069,6 +1075,105 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
     </script>
 
     <script src="i18n.js"></script>
+
+    <!-- Hydrate download cards from GitHub Releases API.
+         Keeps the landing page in sync with the latest Scribble release
+         without any per-release commit — just open the page after a new
+         tag is published and the links + filenames + sizes update.
+         Results are cached in localStorage for 10 min so we don't hit
+         GitHub's 60 req/hr unauthenticated rate limit on every page view.
+         Falls back silently to the static `releases/latest` href set in
+         the HTML if the API request errors or the cache is empty. -->
+    <script>
+    (function () {
+      const REPO = 'luongndcoder/Scribble';
+      const CACHE_KEY = 'scribble:latest-release:v1';
+      const CACHE_TTL_MS = 10 * 60 * 1000;
+
+      function readCache() {
+        try {
+          const raw = localStorage.getItem(CACHE_KEY);
+          if (!raw) return null;
+          const { ts, data } = JSON.parse(raw);
+          if (Date.now() - ts > CACHE_TTL_MS) return null;
+          return data;
+        } catch { return null; }
+      }
+
+      function writeCache(data) {
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+        } catch { /* private mode, quota, etc — ignore */ }
+      }
+
+      async function fetchLatest() {
+        const cached = readCache();
+        if (cached) return cached;
+        const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+          headers: { 'Accept': 'application/vnd.github+json' },
+        });
+        if (!res.ok) throw new Error(`GitHub API HTTP ${res.status}`);
+        const json = await res.json();
+        const data = {
+          tag: json.tag_name,
+          assets: (json.assets || []).map(a => ({
+            name: a.name, size: a.size, url: a.browser_download_url,
+          })),
+        };
+        writeCache(data);
+        return data;
+      }
+
+      function formatSize(bytes) {
+        if (!bytes) return '';
+        const mb = bytes / (1024 * 1024);
+        if (mb < 1) return Math.round(bytes / 1024) + ' KB';
+        if (mb < 100) return mb.toFixed(1) + ' MB';
+        return Math.round(mb) + ' MB';
+      }
+
+      function applyCard(card, asset) {
+        if (!asset) return;
+        card.href = asset.url;
+        const fname = card.querySelector('[data-fill="filename"]');
+        if (fname) fname.textContent = asset.name;
+        const size = card.querySelector('[data-fill="size"]');
+        if (size) size.textContent = formatSize(asset.size);
+      }
+
+      async function hydrate() {
+        try {
+          const { tag, assets } = await fetchLatest();
+
+          // Version label near the section title.
+          document.querySelectorAll('[data-fill="version"]').forEach(el => {
+            el.textContent = tag || 'latest';
+          });
+
+          // Each download card carries a regex in data-asset-pattern that
+          // matches the suffix of the desired filename (e.g. `aarch64\.dmg$`).
+          // We pick the first asset whose name matches.
+          document.querySelectorAll('[data-asset-pattern]').forEach(card => {
+            const pattern = card.getAttribute('data-asset-pattern');
+            if (!pattern) return;
+            const rx = new RegExp(pattern);
+            const asset = assets.find(a => rx.test(a.name));
+            applyCard(card, asset);
+          });
+        } catch (e) {
+          // Fail silent — the static `releases/latest` href in the HTML
+          // always lands the user on the release page, which still works.
+          console.warn('[landing] release hydrate failed:', e);
+        }
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', hydrate);
+      } else {
+        hydrate();
+      }
+    })();
+    </script>
 </body>
 
 </html>
