@@ -109,3 +109,30 @@ jobs:
           # and push — rare but possible if two releases publish very close
           # together).
           git push origin main || (git pull --rebase origin main && git push origin main)
+
+      - name: Trigger Vercel deploy
+        # Vercel's git auto-deploy is unreliable in this project (saw 4+
+        # main pushes go undeployed). Use a Deploy Hook for an explicit
+        # rebuild we can audit in CI logs. Set the VERCEL_DEPLOY_HOOK secret
+        # to a URL created in Vercel Dashboard → Settings → Git → Deploy Hooks
+        # (branch: main). Step no-ops when the secret is absent.
+        #
+        # Fires when:
+        #  - bump created a real commit (changed == 'true'), OR
+        #  - workflow was manually dispatched (recovery from a stale deploy)
+        if: steps.bump.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$VERCEL_DEPLOY_HOOK" ]; then
+            echo "::warning::VERCEL_DEPLOY_HOOK secret not set — landing will rely on Vercel git auto-deploy (which may be flaky)"
+            exit 0
+          fi
+          RESP=$(curl -fsS -X POST "$VERCEL_DEPLOY_HOOK" -o /tmp/vercel-resp.json -w "%{http_code}")
+          if [ "$RESP" != "201" ] && [ "$RESP" != "200" ]; then
+            echo "::error::Vercel deploy hook returned HTTP $RESP"
+            cat /tmp/vercel-resp.json
+            exit 1
+          fi
+          echo "::notice::Vercel deploy triggered (HTTP $RESP)"
+          cat /tmp/vercel-resp.json | head -3
