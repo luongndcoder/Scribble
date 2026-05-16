@@ -143,6 +143,19 @@ After step 4, every running client will detect the update within their next
 30-minute auto-check cycle (or immediately if the user hits "Check for updates"
 in Settings).
 
+### Landing page
+
+**No action needed.** The landing page (`landing/index.html`, deployed by
+Vercel on every push to `main`) hydrates its three download cards from
+`https://api.github.com/repos/luongndcoder/Scribble/releases/latest` on
+page load. As soon as you publish a release as Latest (step 4), the
+landing's download URLs + filenames + sizes automatically point at the
+new release on next page load.
+
+Cache lives in the visitor's localStorage for 10 min. Power-users
+visiting right after a release publish either won't see the new version
+until cache expiry, or can hard-refresh.
+
 ---
 
 ## Validating that auto-update works
