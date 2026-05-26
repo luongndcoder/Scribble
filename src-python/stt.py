@@ -763,11 +763,19 @@ class SonioxStreamingSTT:
     def results(self):
         """Blocking generator that yields transcript results from Soniox.
 
-        Uses chunk_id-based replace-in-place strategy:
-        - Accumulates final tokens globally
-        - Each event: yields (final + non-final) text with same chunk_id
-        - Frontend replaceLastPartText updates in-place -> smooth real-time
-        - Speaker change -> new chunk_id -> new transcript block
+        Per-token streaming with proper speaker-change handling:
+        - Process each token sequentially; current_speaker updates IMMEDIATELY
+          when a final token from a new speaker arrives (the previous version
+          only updated current_speaker at end-of-event, so tokens mid-event
+          from a different speaker got mis-attributed to the last speaker).
+        - On speaker change, flush the accumulated segment (yielding its full
+          text under the OLD speaker) and start a fresh chunk_id for the new
+          one. Frontend `sameChunk` then produces a new transcript block.
+        - Each segment carries its own `start_ms` / `end_ms` (from the actual
+          Soniox token offsets) so the UI shows accurate time ranges instead
+          of falling back to the recording-timer's current second.
+        - Each event also re-yields the in-progress segment so non-final
+          tokens flow into the UI live (frontend `replaceLastPartText`).
         """
         if not self._session:
             return
@@ -778,8 +786,13 @@ class SonioxStreamingSTT:
         # Running accumulator of ALL final token texts for current segment
         accumulated_final = []
         accumulated_translation = []  # Translation tokens for current segment
-        current_speaker = 0
+        # Use a sentinel so the FIRST final token can initialize without
+        # triggering a spurious "speaker change" flush against an empty buffer.
+        current_speaker = -1
         current_chunk_id = f"soniox-{int(time.time() * 1000)}-{uuid4().hex[:6]}"
+        # Segment time range (in ms, relative to Soniox stream start)
+        segment_start_ms = None
+        segment_end_ms = None
 
         event_count = 0
         try:
@@ -810,12 +823,11 @@ class SonioxStreamingSTT:
                 if not event.tokens:
                     continue
 
-                # Separate final and non-final tokens from this event
-                new_final = []
                 non_final = []
-                new_translation = []  # Translation tokens from this event
-                non_final_translation = []  # Non-final translation tokens
-                final_speaker = None  # Track speaker from final tokens only
+                non_final_translation = []
+                # Track the latest end_ms across non-final tokens so the live
+                # display reflects the running edge of the segment.
+                latest_non_final_end_ms = None
 
                 for token in event.tokens:
                     speaker_id = int(getattr(token, "speaker", 0) or 0)
@@ -827,18 +839,36 @@ class SonioxStreamingSTT:
                     translation_status = getattr(token, "translation_status", "none") or "none"
                     if translation_status == "translation":
                         if token.is_final:
-                            new_translation.append(token_text)
+                            accumulated_translation.append(token_text)
                         else:
                             non_final_translation.append(token_text)
                         continue
 
                     # STT tokens (translation_status: "none" or "original")
+                    tok_start = getattr(token, "start_ms", None)
+                    tok_end = getattr(token, "end_ms", None)
+                    if tok_start is not None:
+                        tok_start = int(tok_start)
+                    if tok_end is not None:
+                        tok_end = int(tok_end)
+
                     if token.is_final:
-                        # Speaker changed — flush current segment, start new
-                        if accumulated_final and speaker_id != current_speaker:
+                        # First-ever final token: just adopt its speaker.
+                        if current_speaker == -1:
+                            current_speaker = speaker_id
+
+                        # Speaker change INSIDE the event: flush whatever's
+                        # been accumulated under the OLD speaker before we
+                        # touch the new token. Without this, tokens from S1
+                        # and S2 within the same event used to collapse onto
+                        # whichever speaker happened to be last.
+                        elif speaker_id != current_speaker and accumulated_final:
                             full_text = "".join(accumulated_final).strip()
                             if full_text:
-                                log.info("[stt:soniox-stream] Speaker change: S%d -> S%d, flushing: '%s...'", current_speaker+1, speaker_id+1, full_text[:50])
+                                log.info(
+                                    "[stt:soniox-stream] Speaker change mid-event: S%d -> S%d, flushing: '%s...'",
+                                    current_speaker + 1, speaker_id + 1, full_text[:50],
+                                )
                                 result = {
                                     "text": full_text,
                                     "is_final": True,
@@ -846,26 +876,39 @@ class SonioxStreamingSTT:
                                     "speaker": f"Speaker {current_speaker + 1}",
                                     "speaker_id": current_speaker,
                                 }
-                                # Attach accumulated translation
+                                if segment_start_ms is not None:
+                                    result["start_ms"] = segment_start_ms
+                                if segment_end_ms is not None:
+                                    result["end_ms"] = segment_end_ms
                                 tl_text = "".join(accumulated_translation).strip()
                                 if tl_text:
                                     result["translation"] = tl_text
                                 yield result
-                            # Start new segment
+
+                            # Reset for the new speaker's segment
                             accumulated_final = []
                             accumulated_translation = []
+                            segment_start_ms = None
+                            segment_end_ms = None
                             current_chunk_id = f"soniox-{int(time.time() * 1000)}-{uuid4().hex[:6]}"
+                            current_speaker = speaker_id
 
-                        new_final.append(token_text)
-                        final_speaker = speaker_id
+                        # Update current_speaker even when no flush happened
+                        # (e.g. token's speaker_id matches the existing one,
+                        # or we just initialized from -1)
+                        current_speaker = speaker_id
+
+                        # Track segment time range from the actual token offsets
+                        if tok_start is not None and segment_start_ms is None:
+                            segment_start_ms = tok_start
+                        if tok_end is not None:
+                            segment_end_ms = tok_end
+
+                        accumulated_final.append(token_text)
                     else:
                         non_final.append(token_text)
-
-                # Add new tokens to accumulators
-                accumulated_final.extend(new_final)
-                accumulated_translation.extend(new_translation)
-                if final_speaker is not None:
-                    current_speaker = final_speaker
+                        if tok_end is not None:
+                            latest_non_final_end_ms = tok_end
 
                 # Build display text: all final so far + current non-final
                 display_text = "".join(accumulated_final + non_final).strip()
@@ -875,14 +918,30 @@ class SonioxStreamingSTT:
                 # Build translation text
                 translation_text = "".join(accumulated_translation + non_final_translation).strip()
 
+                # Resolve display end_ms: prefer the live non-final token's
+                # offset so the time range grows in real time while the user
+                # is still speaking. Fall back to the latest final token's
+                # end_ms otherwise.
+                display_end_ms = (
+                    latest_non_final_end_ms if latest_non_final_end_ms is not None
+                    else segment_end_ms
+                )
+
                 # Yield with same chunk_id -> frontend replaceLastPartText
+                speaker_label = (
+                    f"Speaker {current_speaker + 1}" if current_speaker >= 0 else "Speaker 1"
+                )
                 result = {
                     "text": display_text,
                     "is_final": True,
                     "chunk_id": current_chunk_id,
-                    "speaker": f"Speaker {current_speaker + 1}",
-                    "speaker_id": current_speaker,
+                    "speaker": speaker_label,
+                    "speaker_id": max(0, current_speaker),
                 }
+                if segment_start_ms is not None:
+                    result["start_ms"] = segment_start_ms
+                if display_end_ms is not None:
+                    result["end_ms"] = display_end_ms
                 # Only include translation when it has actually changed (reduce frontend re-renders)
                 if translation_text:
                     result["translation"] = translation_text
@@ -892,13 +951,20 @@ class SonioxStreamingSTT:
             if accumulated_final:
                 full_text = "".join(accumulated_final).strip()
                 if full_text:
+                    speaker_label = (
+                        f"Speaker {current_speaker + 1}" if current_speaker >= 0 else "Speaker 1"
+                    )
                     result = {
                         "text": full_text,
                         "is_final": True,
                         "chunk_id": current_chunk_id,
-                        "speaker": f"Speaker {current_speaker + 1}",
-                        "speaker_id": current_speaker,
+                        "speaker": speaker_label,
+                        "speaker_id": max(0, current_speaker),
                     }
+                    if segment_start_ms is not None:
+                        result["start_ms"] = segment_start_ms
+                    if segment_end_ms is not None:
+                        result["end_ms"] = segment_end_ms
                     tl_text = "".join(accumulated_translation).strip()
                     if tl_text:
                         result["translation"] = tl_text
