@@ -25,6 +25,10 @@ export interface SttWsMessage {
     append?: boolean;
     error?: string;
     segments?: SttSegment[];
+    /** Soniox token-level offsets (ms from stream start). Present on
+     *  real-time STT events when the upstream tokens carry timestamps. */
+    start_ms?: number;
+    end_ms?: number;
 }
 
 export interface DiagnoseResult {

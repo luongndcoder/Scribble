@@ -194,6 +194,17 @@ function handleFinalTranscript(data: SttWsMessage, text: string, ts: string, sta
     useAppStore.getState().setInterimText("");
     useAppStore.getState().setInterimSpeaker(speaker, speakerId);
 
+    // Prefer the backend's token-level offsets (Soniox sends start_ms / end_ms
+    // per segment, which is the truth). Fall back to the recording timer for
+    // STT sources that don't provide ms offsets, with a 3-second look-back on
+    // segment start to roughly match the spoken phrase boundary.
+    const startSec = data.start_ms != null
+        ? Math.floor(data.start_ms / 1000)
+        : Math.max(0, state.seconds - 3);
+    const endSec = data.end_ms != null
+        ? Math.floor(data.end_ms / 1000)
+        : state.seconds;
+
     const lastPart = state.transcriptParts[state.transcriptParts.length - 1];
     const lastChunkIds = new Set<string>();
     if (lastPart?.chunkId) lastChunkIds.add(lastPart.chunkId);
@@ -204,10 +215,10 @@ function handleFinalTranscript(data: SttWsMessage, text: string, ts: string, sta
     const sameSpeaker = Boolean(lastPart) && Number(lastPart.speakerId) === Number(speakerId);
 
     if (sameChunk) {
-        useAppStore.getState().replaceLastPartText(text, String(state.seconds), chunkId || undefined);
+        useAppStore.getState().replaceLastPartText(text, String(endSec), chunkId || undefined);
     } else if (sameSpeaker) {
         // Don't clear interimTranslation here — accumulated translation will update via handleTranslationEvent
-        useAppStore.getState().appendToLastPart(text, String(state.seconds), chunkId || undefined);
+        useAppStore.getState().appendToLastPart(text, String(endSec), chunkId || undefined);
     } else {
         // New speaker — commit pending translation
         const prevTranslation = useAppStore.getState().interimTranslation;
@@ -221,8 +232,8 @@ function handleFinalTranscript(data: SttWsMessage, text: string, ts: string, sta
             speakerId,
             chunkId: chunkId || undefined,
             chunkIds: chunkId ? [chunkId] : undefined,
-            startTime: String(Math.max(0, state.seconds - 3)),
-            endTime: String(state.seconds),
+            startTime: String(startSec),
+            endTime: String(endSec),
             timestamp: ts,
             translation: "",
         });
