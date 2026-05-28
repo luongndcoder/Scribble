@@ -61,9 +61,19 @@ export function attachSocketHandlers(
         try {
             const data = JSON.parse(event.data);
             if (data.error) {
-                console.error("[stt-ws]", data.error);
+                // Surface the actual message (Soniox sends error: true + text: "..."),
+                // not the boolean flag, so the user sees what went wrong.
+                const msg = (typeof data.error === "string" ? data.error : "") || data.text || "STT error";
+                console.error("[stt-ws]", msg);
                 setIsTranscribing(false);
-                useAppStore.getState().setInterimText("");
+                useAppStore.getState().setInterimText(`⚠ ${msg}`);
+                return;
+            }
+            // Backend reconnect heartbeat (Soniox auto-reconnect after server
+            // closed the WS due to its ~1h session-duration cap). Show as
+            // interim status; do NOT add to transcriptParts.
+            if (data.info || data.type === "info") {
+                useAppStore.getState().setInterimText(`🔄 ${data.text || "Reconnecting..."}`);
                 return;
             }
             if (data.type === "speaker_correction" && data.chunk_id) {

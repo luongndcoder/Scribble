@@ -677,6 +677,12 @@ class SonioxStreamingSTT:
     - receive_events() runs on the calling thread (results generator)
     """
 
+    # Soniox stt-rt-v4 has a server-side session duration cap (default ~1h
+    # depending on plan). When the cap fires, the server closes the WS and our
+    # event iterator just exits silently. We auto-reconnect up to this many
+    # times before surfacing a hard error to the user.
+    MAX_RECONNECT_ATTEMPTS = 8
+
     def __init__(self, api_key: str, language_hints: list[str] | None = None, translate_lang: str = ""):
         self._api_key = api_key
         self._language_hints = language_hints or ["vi"]
@@ -685,10 +691,19 @@ class SonioxStreamingSTT:
         self._session = None
         self._client = None
         self._audio_queue = None
+        # Cumulative ms of audio processed across ALL completed sessions in
+        # this stream. Added to every yielded start_ms / end_ms so the timeline
+        # the frontend sees stays continuous across auto-reconnects.
+        self._cumulative_offset_ms = 0
         log.info("[stt:soniox-stream] language_hints=%s, translate_lang='%s'", self._language_hints, translate_lang)
 
     def _audio_iter(self):
-        """Yield audio chunks from the queue as an iterator (for send_bytes)."""
+        """Yield audio chunks from the queue as an iterator (for send_bytes).
+
+        Each call returns a FRESH generator — when a session reconnects we
+        start a new audio thread bound to a new generator. The old generator
+        is GC'd after its thread dies.
+        """
         import queue
         while not self._stopped:
             try:
@@ -699,17 +714,17 @@ class SonioxStreamingSTT:
             except queue.Empty:
                 continue
 
-    def start(self):
-        """Initialize Soniox client and open a real-time session."""
-        import queue
-        from soniox import SonioxClient
+    def _open_session(self):
+        """Open a Soniox real-time session and start a fresh audio thread.
+
+        Idempotent w.r.t. the audio queue — the queue is created once in
+        start() and reused across reconnects so frames already buffered from
+        the frontend during a server-side close get drained into the new WS
+        instead of dropped.
+        """
         from soniox.types import RealtimeSTTConfig, TranslationConfig
         from soniox.utils import start_audio_thread
 
-        self._audio_queue = queue.Queue(maxsize=500)
-        self._stopped = False
-
-        self._client = SonioxClient(api_key=self._api_key)
         config = RealtimeSTTConfig(
             model="stt-rt-v4",
             audio_format="pcm_s16le",
@@ -719,23 +734,45 @@ class SonioxStreamingSTT:
             enable_speaker_diarization=True,
             language_hints=self._language_hints,
         )
-
-        # Enable Soniox native real-time translation
         if self._translate_lang:
             config.translation = TranslationConfig(
                 type="one_way",
                 target_language=self._translate_lang,
             )
-            log.info("[stt:soniox-stream] Translation enabled: one_way -> %s", self._translate_lang)
 
         self._session = self._client.realtime.stt.connect(config=config)
         self._session.__enter__()
-        log.info("[stt:soniox-stream] Session opened")
-
-        # Use SDK's official start_audio_thread with our queue-based iterator
-        # finish=False so it doesn't send FINISH when the iterator ends
+        # Start a NEW audio thread per session — previous one died when the
+        # old WS closed (send_byte_chunk raised SonioxRealtimeError). A fresh
+        # thread re-reads from the same queue so buffered audio is preserved.
         start_audio_thread(self._session, self._audio_iter())
-        log.info("[stt:soniox-stream] Audio thread started")
+
+    def _close_session(self):
+        """Best-effort close of the current Soniox session."""
+        if self._session is None:
+            return
+        try:
+            self._session.__exit__(None, None, None)
+        except Exception:
+            pass
+        self._session = None
+
+    def start(self):
+        """Initialize Soniox client and open the first real-time session."""
+        import queue
+        from soniox import SonioxClient
+
+        self._audio_queue = queue.Queue(maxsize=500)
+        self._stopped = False
+        self._cumulative_offset_ms = 0
+
+        self._client = SonioxClient(api_key=self._api_key)
+
+        if self._translate_lang:
+            log.info("[stt:soniox-stream] Translation enabled: one_way -> %s", self._translate_lang)
+
+        self._open_session()
+        log.info("[stt:soniox-stream] Session opened (audio thread started)")
 
     def feed_audio(self, pcm_bytes: bytes):
         """Enqueue raw PCM audio for sending to Soniox (thread-safe)."""
@@ -763,7 +800,8 @@ class SonioxStreamingSTT:
     def results(self):
         """Blocking generator that yields transcript results from Soniox.
 
-        Per-token streaming with proper speaker-change handling:
+        Per-token streaming with proper speaker-change handling AND
+        automatic session reconnect for long meetings:
         - Process each token sequentially; current_speaker updates IMMEDIATELY
           when a final token from a new speaker arrives (the previous version
           only updated current_speaker at end-of-event, so tokens mid-event
@@ -772,10 +810,17 @@ class SonioxStreamingSTT:
           text under the OLD speaker) and start a fresh chunk_id for the new
           one. Frontend `sameChunk` then produces a new transcript block.
         - Each segment carries its own `start_ms` / `end_ms` (from the actual
-          Soniox token offsets) so the UI shows accurate time ranges instead
-          of falling back to the recording-timer's current second.
+          Soniox token offsets, plus the cumulative offset across reconnects)
+          so the UI shows accurate time ranges instead of falling back to the
+          recording-timer's current second.
         - Each event also re-yields the in-progress segment so non-final
           tokens flow into the UI live (frontend `replaceLastPartText`).
+        - When Soniox's server-side session-duration cap fires (default ~1h
+          per plan), the WS closes silently. We detect this, flush whatever
+          was accumulated under the old session, emit an `info` heartbeat so
+          the frontend knows we're reconnecting, then open a fresh session
+          and continue. `_cumulative_offset_ms` is incremented by the prior
+          session's processed-audio length so the timeline stays continuous.
         """
         if not self._session:
             return
@@ -783,31 +828,193 @@ class SonioxStreamingSTT:
         import time
         from uuid import uuid4
 
-        # Running accumulator of ALL final token texts for current segment
-        accumulated_final = []
-        accumulated_translation = []  # Translation tokens for current segment
-        # Use a sentinel so the FIRST final token can initialize without
-        # triggering a spurious "speaker change" flush against an empty buffer.
-        current_speaker = -1
-        current_chunk_id = f"soniox-{int(time.time() * 1000)}-{uuid4().hex[:6]}"
-        # Segment time range (in ms, relative to Soniox stream start)
-        segment_start_ms = None
-        segment_end_ms = None
+        reconnect_attempts = 0
+        # Outer loop = one iteration per Soniox session (we auto-reconnect on
+        # server-side close as long as the user hasn't stopped recording).
+        while not self._stopped:
+            # Per-session state — reset on every (re)connect.
+            accumulated_final = []
+            accumulated_translation = []
+            current_speaker = -1
+            current_chunk_id = f"soniox-{int(time.time() * 1000)}-{uuid4().hex[:6]}"
+            segment_start_ms = None
+            segment_end_ms = None
+            # Highest `total_audio_proc_ms` we saw from Soniox in THIS session.
+            # When the session ends, this is added to _cumulative_offset_ms so
+            # the next session's token offsets are shifted into a continuous
+            # timeline.
+            session_max_total_ms = 0
+            event_count = 0
 
-        event_count = 0
-        try:
-            for event in self._session.receive_events():
+            try:
+                for event in self._session.receive_events():
+                    if self._stopped:
+                        return
+
+                    event_count += 1
+                    # Track furthest audio Soniox has processed so we can
+                    # correctly offset the next session if we reconnect.
+                    tot = getattr(event, 'total_audio_proc_ms', None)
+                    if tot is not None:
+                        try:
+                            session_max_total_ms = max(session_max_total_ms, int(tot))
+                        except (TypeError, ValueError):
+                            pass
+
+                    # Check for server errors (e.g. 402 balance exhausted,
+                    # auth failure). These are TERMINAL — don't reconnect.
+                    err_code = getattr(event, 'error_code', None)
+                    if err_code:
+                        error_msg = f"Soniox error {err_code}: {getattr(event, 'error_message', '')}"
+                        log.warning("[stt:soniox-stream] %s", error_msg)
+                        yield {
+                            "text": error_msg,
+                            "is_final": True,
+                            "speaker": "System",
+                            "speaker_id": -1,
+                            "error": True,
+                        }
+                        return
+
+                    n_tokens = len(event.tokens) if event.tokens else 0
+                    finished = getattr(event, 'finished', False)
+                    if event_count <= 5 or event_count % 50 == 0:
+                        log.debug("[stt:soniox-stream] event#%d tokens=%d finished=%s", event_count, n_tokens, finished)
+
+                    if not event.tokens:
+                        continue
+
+                    non_final = []
+                    non_final_translation = []
+                    # Track the latest end_ms across non-final tokens so the
+                    # live display reflects the running edge of the segment.
+                    latest_non_final_end_ms = None
+
+                    for token in event.tokens:
+                        speaker_id = int(getattr(token, "speaker", 0) or 0)
+                        token_text = str(token.text) if token.text is not None else ""
+                        if token_text in ("<end>", ""):
+                            continue
+
+                        # Separate translation tokens from STT tokens
+                        translation_status = getattr(token, "translation_status", "none") or "none"
+                        if translation_status == "translation":
+                            if token.is_final:
+                                accumulated_translation.append(token_text)
+                            else:
+                                non_final_translation.append(token_text)
+                            continue
+
+                        # STT tokens (translation_status: "none" or "original")
+                        tok_start = getattr(token, "start_ms", None)
+                        tok_end = getattr(token, "end_ms", None)
+                        if tok_start is not None:
+                            tok_start = int(tok_start)
+                        if tok_end is not None:
+                            tok_end = int(tok_end)
+
+                        if token.is_final:
+                            # First-ever final token: just adopt its speaker.
+                            if current_speaker == -1:
+                                current_speaker = speaker_id
+
+                            # Speaker change INSIDE the event: flush whatever's
+                            # been accumulated under the OLD speaker before we
+                            # touch the new token. Without this, tokens from
+                            # S1 and S2 within the same event used to collapse
+                            # onto whichever speaker happened to be last.
+                            elif speaker_id != current_speaker and accumulated_final:
+                                full_text = "".join(accumulated_final).strip()
+                                if full_text:
+                                    log.info(
+                                        "[stt:soniox-stream] Speaker change mid-event: S%d -> S%d, flushing: '%s...'",
+                                        current_speaker + 1, speaker_id + 1, full_text[:50],
+                                    )
+                                    result = self._build_segment_result(
+                                        full_text, current_chunk_id, current_speaker,
+                                        segment_start_ms, segment_end_ms,
+                                        accumulated_translation,
+                                    )
+                                    yield result
+
+                                # Reset for the new speaker's segment
+                                accumulated_final = []
+                                accumulated_translation = []
+                                segment_start_ms = None
+                                segment_end_ms = None
+                                current_chunk_id = f"soniox-{int(time.time() * 1000)}-{uuid4().hex[:6]}"
+                                current_speaker = speaker_id
+
+                            # Update current_speaker even when no flush
+                            # happened (token's speaker_id matches existing,
+                            # or we just initialized from -1).
+                            current_speaker = speaker_id
+
+                            # Track segment time range from actual token offsets
+                            if tok_start is not None and segment_start_ms is None:
+                                segment_start_ms = tok_start
+                            if tok_end is not None:
+                                segment_end_ms = tok_end
+
+                            accumulated_final.append(token_text)
+                        else:
+                            non_final.append(token_text)
+                            if tok_end is not None:
+                                latest_non_final_end_ms = tok_end
+
+                    # Build display text: all final so far + current non-final
+                    display_text = "".join(accumulated_final + non_final).strip()
+                    if not display_text:
+                        continue
+
+                    translation_text = "".join(accumulated_translation + non_final_translation).strip()
+
+                    # Resolve display end_ms: prefer the live non-final token's
+                    # offset so the time range grows in real time while the
+                    # user is still speaking. Fall back to the latest final
+                    # token's end_ms otherwise.
+                    display_end_ms = (
+                        latest_non_final_end_ms if latest_non_final_end_ms is not None
+                        else segment_end_ms
+                    )
+
+                    # Yield with same chunk_id -> frontend replaceLastPartText
+                    yield self._build_segment_result(
+                        display_text, current_chunk_id, current_speaker,
+                        segment_start_ms, display_end_ms,
+                        accumulated_translation, extra_translation=non_final_translation,
+                    )
+
+                # Inner for-loop ended naturally — server closed the WS.
+                # Flush whatever was still accumulating under this session
+                # BEFORE we decide to reconnect (so partial text isn't lost).
+                if accumulated_final:
+                    full_text = "".join(accumulated_final).strip()
+                    if full_text:
+                        yield self._build_segment_result(
+                            full_text, current_chunk_id, current_speaker,
+                            segment_start_ms, segment_end_ms,
+                            accumulated_translation,
+                        )
+
+                # Session is over. Reconnect or terminate?
                 if self._stopped:
                     return
 
-                event_count += 1
-                # Check for server errors (e.g. 402 balance exhausted)
-                err_code = getattr(event, 'error_code', None)
-                if err_code:
-                    error_msg = f"Soniox error {err_code}: {getattr(event, 'error_message', '')}"
-                    log.warning("[stt:soniox-stream] %s", error_msg)
+                # Soniox closed the WS unexpectedly (likely session-duration
+                # cap, occasionally network blip). Auto-reconnect with the
+                # cumulative time offset so the timeline stays continuous.
+                reconnect_attempts += 1
+                if reconnect_attempts > self.MAX_RECONNECT_ATTEMPTS:
+                    log.error(
+                        "[stt:soniox-stream] Exceeded %d reconnect attempts, giving up",
+                        self.MAX_RECONNECT_ATTEMPTS,
+                    )
                     yield {
-                        "text": error_msg,
+                        "text": (
+                            f"Soniox reconnect failed sau {self.MAX_RECONNECT_ATTEMPTS} lần. "
+                            "Vui lòng dừng và bắt đầu ghi âm lại."
+                        ),
                         "is_final": True,
                         "speaker": "System",
                         "speaker_id": -1,
@@ -815,166 +1022,107 @@ class SonioxStreamingSTT:
                     }
                     return
 
-                n_tokens = len(event.tokens) if event.tokens else 0
-                finished = getattr(event, 'finished', False)
-                if event_count <= 5 or event_count % 50 == 0:
-                    log.debug("[stt:soniox-stream] event#%d tokens=%d finished=%s", event_count, n_tokens, finished)
-
-                if not event.tokens:
-                    continue
-
-                non_final = []
-                non_final_translation = []
-                # Track the latest end_ms across non-final tokens so the live
-                # display reflects the running edge of the segment.
-                latest_non_final_end_ms = None
-
-                for token in event.tokens:
-                    speaker_id = int(getattr(token, "speaker", 0) or 0)
-                    token_text = str(token.text) if token.text is not None else ""
-                    if token_text in ("<end>", ""):
-                        continue
-
-                    # Separate translation tokens from STT tokens
-                    translation_status = getattr(token, "translation_status", "none") or "none"
-                    if translation_status == "translation":
-                        if token.is_final:
-                            accumulated_translation.append(token_text)
-                        else:
-                            non_final_translation.append(token_text)
-                        continue
-
-                    # STT tokens (translation_status: "none" or "original")
-                    tok_start = getattr(token, "start_ms", None)
-                    tok_end = getattr(token, "end_ms", None)
-                    if tok_start is not None:
-                        tok_start = int(tok_start)
-                    if tok_end is not None:
-                        tok_end = int(tok_end)
-
-                    if token.is_final:
-                        # First-ever final token: just adopt its speaker.
-                        if current_speaker == -1:
-                            current_speaker = speaker_id
-
-                        # Speaker change INSIDE the event: flush whatever's
-                        # been accumulated under the OLD speaker before we
-                        # touch the new token. Without this, tokens from S1
-                        # and S2 within the same event used to collapse onto
-                        # whichever speaker happened to be last.
-                        elif speaker_id != current_speaker and accumulated_final:
-                            full_text = "".join(accumulated_final).strip()
-                            if full_text:
-                                log.info(
-                                    "[stt:soniox-stream] Speaker change mid-event: S%d -> S%d, flushing: '%s...'",
-                                    current_speaker + 1, speaker_id + 1, full_text[:50],
-                                )
-                                result = {
-                                    "text": full_text,
-                                    "is_final": True,
-                                    "chunk_id": current_chunk_id,
-                                    "speaker": f"Speaker {current_speaker + 1}",
-                                    "speaker_id": current_speaker,
-                                }
-                                if segment_start_ms is not None:
-                                    result["start_ms"] = segment_start_ms
-                                if segment_end_ms is not None:
-                                    result["end_ms"] = segment_end_ms
-                                tl_text = "".join(accumulated_translation).strip()
-                                if tl_text:
-                                    result["translation"] = tl_text
-                                yield result
-
-                            # Reset for the new speaker's segment
-                            accumulated_final = []
-                            accumulated_translation = []
-                            segment_start_ms = None
-                            segment_end_ms = None
-                            current_chunk_id = f"soniox-{int(time.time() * 1000)}-{uuid4().hex[:6]}"
-                            current_speaker = speaker_id
-
-                        # Update current_speaker even when no flush happened
-                        # (e.g. token's speaker_id matches the existing one,
-                        # or we just initialized from -1)
-                        current_speaker = speaker_id
-
-                        # Track segment time range from the actual token offsets
-                        if tok_start is not None and segment_start_ms is None:
-                            segment_start_ms = tok_start
-                        if tok_end is not None:
-                            segment_end_ms = tok_end
-
-                        accumulated_final.append(token_text)
-                    else:
-                        non_final.append(token_text)
-                        if tok_end is not None:
-                            latest_non_final_end_ms = tok_end
-
-                # Build display text: all final so far + current non-final
-                display_text = "".join(accumulated_final + non_final).strip()
-                if not display_text:
-                    continue
-
-                # Build translation text
-                translation_text = "".join(accumulated_translation + non_final_translation).strip()
-
-                # Resolve display end_ms: prefer the live non-final token's
-                # offset so the time range grows in real time while the user
-                # is still speaking. Fall back to the latest final token's
-                # end_ms otherwise.
-                display_end_ms = (
-                    latest_non_final_end_ms if latest_non_final_end_ms is not None
-                    else segment_end_ms
+                self._cumulative_offset_ms += session_max_total_ms
+                log.warning(
+                    "[stt:soniox-stream] Session closed by server after %d ms processed (cumulative=%.1f min). Reconnecting (%d/%d)...",
+                    session_max_total_ms,
+                    self._cumulative_offset_ms / 60000.0,
+                    reconnect_attempts,
+                    self.MAX_RECONNECT_ATTEMPTS,
                 )
 
-                # Yield with same chunk_id -> frontend replaceLastPartText
-                speaker_label = (
-                    f"Speaker {current_speaker + 1}" if current_speaker >= 0 else "Speaker 1"
-                )
-                result = {
-                    "text": display_text,
-                    "is_final": True,
-                    "chunk_id": current_chunk_id,
-                    "speaker": speaker_label,
-                    "speaker_id": max(0, current_speaker),
+                # Heartbeat to the frontend so the UI can show "reconnecting"
+                # state instead of looking frozen.
+                yield {
+                    "type": "info",
+                    "text": "Soniox session reconnecting...",
+                    "is_final": False,
+                    "speaker": "System",
+                    "speaker_id": -1,
+                    "info": True,
                 }
-                if segment_start_ms is not None:
-                    result["start_ms"] = segment_start_ms
-                if display_end_ms is not None:
-                    result["end_ms"] = display_end_ms
-                # Only include translation when it has actually changed (reduce frontend re-renders)
-                if translation_text:
-                    result["translation"] = translation_text
-                yield result
 
-            # Stream ended — flush remaining
-            if accumulated_final:
-                full_text = "".join(accumulated_final).strip()
-                if full_text:
-                    speaker_label = (
-                        f"Speaker {current_speaker + 1}" if current_speaker >= 0 else "Speaker 1"
-                    )
-                    result = {
-                        "text": full_text,
+                self._close_session()
+                # Exponential backoff capped at 5s — usually reconnects on
+                # the first try because the server-side close is intentional.
+                backoff = min(0.5 * (2 ** (reconnect_attempts - 1)), 5.0)
+                time.sleep(backoff)
+
+                if self._stopped:
+                    return
+
+                try:
+                    self._open_session()
+                    log.info("[stt:soniox-stream] Reconnected successfully (attempt %d)", reconnect_attempts)
+                except Exception as reopen_exc:
+                    log.error("[stt:soniox-stream] Reopen failed (attempt %d): %s", reconnect_attempts, reopen_exc, exc_info=True)
+                    # Loop continues — next iteration of outer while will
+                    # call receive_events() on a None session and fall
+                    # through to the reconnect path again until we hit cap.
+                    self._session = None
+                    continue
+
+            except Exception as e:
+                if self._stopped:
+                    return
+                log.error("[stt:soniox-stream] Unexpected error in event loop: %s", e, exc_info=True)
+                # Treat as a closed session — try to reconnect rather than
+                # leaving the stream dead.
+                reconnect_attempts += 1
+                if reconnect_attempts > self.MAX_RECONNECT_ATTEMPTS:
+                    yield {
+                        "text": f"Soniox error after {self.MAX_RECONNECT_ATTEMPTS} retries: {e}",
                         "is_final": True,
-                        "chunk_id": current_chunk_id,
-                        "speaker": speaker_label,
-                        "speaker_id": max(0, current_speaker),
+                        "speaker": "System",
+                        "speaker_id": -1,
+                        "error": True,
                     }
-                    if segment_start_ms is not None:
-                        result["start_ms"] = segment_start_ms
-                    if segment_end_ms is not None:
-                        result["end_ms"] = segment_end_ms
-                    tl_text = "".join(accumulated_translation).strip()
-                    if tl_text:
-                        result["translation"] = tl_text
-                    yield result
+                    return
+                self._cumulative_offset_ms += session_max_total_ms
+                self._close_session()
+                time.sleep(min(0.5 * (2 ** (reconnect_attempts - 1)), 5.0))
+                if self._stopped:
+                    return
+                try:
+                    self._open_session()
+                except Exception:
+                    self._session = None
+                    continue
 
-        except Exception as e:
-            if self._stopped:
-                return
-            import traceback
-            log.error("[stt:soniox-stream] Error: %s", e, exc_info=True)
+    def _build_segment_result(
+        self,
+        text: str,
+        chunk_id: str,
+        speaker_id: int,
+        start_ms,
+        end_ms,
+        accumulated_translation: list,
+        extra_translation: list | None = None,
+    ) -> dict:
+        """Pack a segment into the WS payload shape, applying the cumulative
+        cross-session time offset so timestamps remain continuous after a
+        reconnect."""
+        speaker_label = (
+            f"Speaker {speaker_id + 1}" if speaker_id >= 0 else "Speaker 1"
+        )
+        result = {
+            "text": text,
+            "is_final": True,
+            "chunk_id": chunk_id,
+            "speaker": speaker_label,
+            "speaker_id": max(0, speaker_id),
+        }
+        if start_ms is not None:
+            result["start_ms"] = int(start_ms) + self._cumulative_offset_ms
+        if end_ms is not None:
+            result["end_ms"] = int(end_ms) + self._cumulative_offset_ms
+        tl_parts = list(accumulated_translation)
+        if extra_translation:
+            tl_parts = tl_parts + list(extra_translation)
+        tl_text = "".join(tl_parts).strip()
+        if tl_text:
+            result["translation"] = tl_text
+        return result
 
 
 def filter_hallucinations(text: str) -> str:

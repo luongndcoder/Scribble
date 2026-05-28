@@ -23,7 +23,14 @@ export interface SttWsMessage {
     chunk_id?: string;
     translation?: string;
     append?: boolean;
-    error?: string;
+    /** When the backend hits a terminal STT error (billing, auth, etc.) it
+     *  may send either `error: "<message string>"` (legacy shape) or
+     *  `error: true` alongside `text: "..."` (Soniox path). Accept both. */
+    error?: string | boolean;
+    /** Non-terminal status heartbeat from backend (e.g. Soniox auto-reconnect
+     *  after a session-duration cap). Render as interim banner, NOT as a
+     *  transcript part. */
+    info?: boolean;
     segments?: SttSegment[];
     /** Soniox token-level offsets (ms from stream start). Present on
      *  real-time STT events when the upstream tokens carry timestamps. */

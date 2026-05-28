@@ -1147,6 +1147,29 @@ body.electron-app .sub-tabs {
   transition: background 150ms var(--ease);
 }
 
+/* Load-more button shown above the visible transcript window when there
+   are older parts hidden (typical for 4h+ sessions). Keeps the DOM small
+   so a long recording doesn't lag the render. */
+.transcript-load-more {
+  align-self: center;
+  margin: 8px 0 12px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px dashed rgba(99, 102, 241, 0.3);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 150ms var(--ease), color 150ms var(--ease), border-color 150ms var(--ease);
+}
+
+.transcript-load-more:hover {
+  background: rgba(99, 102, 241, 0.16);
+  color: var(--text);
+  border-color: rgba(99, 102, 241, 0.55);
+}
+
 .transcript-item:hover {
   background: rgba(0, 0, 0, 0.02);
 }

@@ -446,6 +446,51 @@ export function MeetingDetail() {
     const [editingMinutes, setEditingMinutes] = useState(false);
     const minutesEditRef = useRef<HTMLDivElement>(null);
 
+    // ── Load-more pagination ─────────────────────────────────────────────
+    // Long sessions (4h+) can produce 500+ transcript parts. Rendering them
+    // all at once tanks the DOM. We render only the tail by default; the
+    // user clicks "Load older" to reveal more. The store still holds the
+    // full array → export / copy / minutes-generation see EVERYTHING. This
+    // is purely a render-layer optimization.
+    const TRANSCRIPT_PAGE_SIZE = 200;
+    const [visibleCount, setVisibleCount] = useState<number>(TRANSCRIPT_PAGE_SIZE);
+    // When switching meetings, reset the window so we don't show 200 parts
+    // of the previous meeting on the new one.
+    const prevMeetingKeyRef = useRef<string | number | null>(null);
+    useEffect(() => {
+        const key = currentMeetingId || draftId || null;
+        if (prevMeetingKeyRef.current !== key) {
+            prevMeetingKeyRef.current = key;
+            setVisibleCount(TRANSCRIPT_PAGE_SIZE);
+        }
+    }, [currentMeetingId, draftId]);
+
+    // Visible slice: always include the most recent N parts so live
+    // transcription stays visible. Absolute index = transcriptParts.length
+    // - visibleParts.length + visibleIdx. Used for callbacks that mutate
+    // the full array (edit speaker, delete, edit text).
+    const hasOlderParts = transcriptParts.length > visibleCount;
+    const visibleParts = useMemo(
+        () => (hasOlderParts ? transcriptParts.slice(-visibleCount) : transcriptParts),
+        [transcriptParts, visibleCount, hasOlderParts],
+    );
+    const visibleStartIdx = transcriptParts.length - visibleParts.length;
+    const handleLoadOlder = () => {
+        // Preserve scroll position so the user stays anchored at the part
+        // they were reading instead of jumping when older content prepends.
+        const el = transcriptRef.current;
+        const prevScrollHeight = el?.scrollHeight ?? 0;
+        const prevScrollTop = el?.scrollTop ?? 0;
+        setVisibleCount((n) => n + TRANSCRIPT_PAGE_SIZE);
+        // After render, restore so visual position relative to previously
+        // visible items doesn't change.
+        requestAnimationFrame(() => {
+            if (!el) return;
+            const delta = el.scrollHeight - prevScrollHeight;
+            el.scrollTop = prevScrollTop + delta;
+        });
+    };
+
     const persistTranscriptParts = async (parts: TranscriptPart[]) => {
         const meetingId = currentMeetingId || draftId;
         if (!meetingId) return;
@@ -688,9 +733,16 @@ export function MeetingDetail() {
         };
     }, [viewingMeetingId, recording, setTranscriptParts]);
 
-    // Auto-scroll
+    // Auto-scroll: only when the user is near the bottom (so we don't yank
+    // them away while they're reading older parts after "Load older"). 80px
+    // tolerance = roughly one transcript row.
     useEffect(() => {
-        transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
+        const el = transcriptRef.current;
+        if (!el) return;
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (distanceFromBottom < 80) {
+            el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        }
     }, [transcriptParts, isTranscribing]);
 
 
@@ -856,15 +908,31 @@ export function MeetingDetail() {
                     </div>
                 ) : (
                     <div className={`transcript-list ${translationEnabled ? 'with-translation' : ''}`} ref={transcriptRef}>
-                        {transcriptParts.map((part, i) => {
+                        {hasOlderParts && (
+                            <button
+                                className="transcript-load-more"
+                                onClick={handleLoadOlder}
+                                aria-label={lang === 'vi' ? 'Tải thêm transcript cũ hơn' : 'Load older transcript'}
+                            >
+                                {lang === 'vi'
+                                    ? `↑ Tải thêm ${Math.min(TRANSCRIPT_PAGE_SIZE, visibleStartIdx)} đoạn cũ hơn (đang ẩn ${visibleStartIdx} / tổng ${transcriptParts.length})`
+                                    : `↑ Load ${Math.min(TRANSCRIPT_PAGE_SIZE, visibleStartIdx)} older parts (${visibleStartIdx} hidden of ${transcriptParts.length} total)`}
+                            </button>
+                        )}
+                        {visibleParts.map((part, visibleIdx) => {
+                            // Absolute index in the full transcriptParts array — used
+                            // for callbacks that mutate the full store (edit / delete /
+                            // speaker rename). `visibleIdx` alone would mis-target items
+                            // whenever `hasOlderParts` is true.
+                            const absoluteIdx = visibleStartIdx + visibleIdx;
                             const speakerColor = SPEAKER_COLORS[part.speakerId % SPEAKER_COLORS.length];
-                            const isLive = i === transcriptParts.length - 1 && recording;
+                            const isLive = absoluteIdx === transcriptParts.length - 1 && recording;
                             return (
-                                <div className={`transcript-item ${isLive ? 'live' : ''}`} key={i}>
+                                <div className={`transcript-item ${isLive ? 'live' : ''}`} key={part.chunkId || `t-${absoluteIdx}`}>
                                     <div className="transcript-actions">
                                         <button
                                             className="transcript-action-btn"
-                                            onClick={() => startEditSpeaker(part.speakerId, i)}
+                                            onClick={() => startEditSpeaker(part.speakerId, absoluteIdx)}
                                             title={lang === 'vi' ? 'Đổi tên speaker (áp dụng toàn bộ)' : 'Rename speaker (apply all)'}
                                             aria-label={lang === 'vi' ? 'Đổi tên speaker' : 'Rename speaker'}
                                         >
@@ -875,7 +943,7 @@ export function MeetingDetail() {
                                         </button>
                                         <button
                                             className="transcript-action-btn t-delete-btn"
-                                            onClick={() => deleteTranscriptAt(i)}
+                                            onClick={() => deleteTranscriptAt(absoluteIdx)}
                                             title={lang === 'vi' ? 'Xóa đoạn này' : 'Delete this item'}
                                             aria-label={lang === 'vi' ? 'Xóa đoạn này' : 'Delete this item'}
                                         >
@@ -887,7 +955,7 @@ export function MeetingDetail() {
                                         </button>
                                     </div>
                                     <div className="transcript-time">
-                                        {editingSpeakerId === part.speakerId && editingSpeakerAnchorIdx === i ? (
+                                        {editingSpeakerId === part.speakerId && editingSpeakerAnchorIdx === absoluteIdx ? (
                                             <div className="speaker-edit-wrap">
                                                 <input
                                                     className="speaker-edit-input"
@@ -916,7 +984,7 @@ export function MeetingDetail() {
                                         liveTranslationRef={liveTranslationRef}
                                         onSave={(newText) => {
                                             const next = transcriptParts.map((p, j) =>
-                                                j === i ? { ...p, text: newText, translation: '' } : p
+                                                j === absoluteIdx ? { ...p, text: newText, translation: '' } : p
                                             );
                                             void applyTranscriptUpdate(next);
                                         }}
