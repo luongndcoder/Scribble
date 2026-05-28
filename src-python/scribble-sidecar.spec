@@ -53,6 +53,13 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 # fails CERTIFICATE_VERIFY_FAILED on TLS handshake to wss://stt-rt.soniox.com.
 tmp_ret = collect_all('certifi')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# imageio-ffmpeg bundles a static ffmpeg binary in its wheel. collect_all
+# pulls the binary file in as `datas`; at runtime find_ffmpeg() calls
+# imageio_ffmpeg.get_ffmpeg_exe() to resolve the absolute path inside the
+# PyInstaller _MEIPASS / dist directory. Zero manual setup — no more
+# "brew install ffmpeg" prerequisite for end users.
+tmp_ret = collect_all('imageio_ffmpeg')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 # ── Aggressive excludes ──
 # These are transitive deps pulled in by collect_all('riva') and other packages.

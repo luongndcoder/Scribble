@@ -16,6 +16,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
+import { getSettings } from '../lib/api';
 import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import {
     cancelAudioUpload,
@@ -32,6 +33,42 @@ import {
 } from '../lib/upload-audio';
 import { CustomSelect } from './CustomSelect';
 import { useToast } from './Toast';
+
+/**
+ * Verify the user has configured an API key for the currently selected STT
+ * provider BEFORE we start a long upload. Without this, a user who only set
+ * up STT-A but flipped the provider to STT-B would burn a multi-minute
+ * upload + transcribe attempt only to see "API key missing" at the end.
+ *
+ * Masked keys (e.g. "xxxx***xxxx") from the GET /settings response also
+ * count as "configured" — the real key sits encrypted in the DB.
+ */
+async function checkSttProviderConfigured(): Promise<{
+    ok: boolean;
+    provider: string;
+    missing: 'nvidia' | 'soniox' | null;
+}> {
+    try {
+        const settings = await getSettings();
+        const provider = (settings.stt_provider || 'nvidia').toLowerCase();
+        const isConfigured = (raw: string | undefined) => {
+            const v = (raw || '').trim();
+            if (!v) return false;
+            // Masked from backend = key exists encrypted; consider configured.
+            if (v.includes('***')) return true;
+            return true;
+        };
+        const nvidiaOk = isConfigured(settings.nvidia_api_key);
+        const sonioxOk = isConfigured(settings.soniox_api_key);
+        if (provider === 'soniox' && !sonioxOk) return { ok: false, provider, missing: 'soniox' };
+        if (provider !== 'soniox' && !nvidiaOk) return { ok: false, provider, missing: 'nvidia' };
+        return { ok: true, provider, missing: null };
+    } catch {
+        // Backend unreachable — surface as a generic readiness error upstream;
+        // we don't want to block in the false-positive direction here.
+        return { ok: true, provider: 'nvidia', missing: null };
+    }
+}
 
 type Step = 'pick' | 'uploading' | 'pipeline' | 'done' | 'error' | 'duplicate';
 
@@ -147,6 +184,9 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
               transcript: 'Bản phiên âm trực tiếp',
               done: 'Hoàn thành',
               doneDesc: 'Biên bản đã sẵn sàng.',
+              doneTranscriptOnly: 'Transcript đã lưu',
+              doneTranscriptOnlyDesc: 'Tóm tắt AI chưa chạy vì bạn chưa cấu hình AI API Key. Bạn vẫn có thể mở cuộc họp để xem & export transcript. Vào Cài đặt → AI để bật tóm tắt tự động cho lần sau.',
+              doneTranscriptOnlyFailed: 'Bước tạo biên bản tự động lỗi nhưng transcript đã được lưu. Bạn có thể mở cuộc họp để xem & export.',
               openMeeting: 'Mở cuộc họp',
               error: 'Có lỗi xảy ra',
               tryAgain: 'Thử lại',
@@ -177,6 +217,9 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
               transcript: 'Live transcript',
               done: 'All done',
               doneDesc: 'Minutes are ready.',
+              doneTranscriptOnly: 'Transcript saved',
+              doneTranscriptOnlyDesc: 'AI summary was skipped because no AI API key is configured. You can still open the meeting to view & export the transcript. Open Settings → AI to enable auto-summarize next time.',
+              doneTranscriptOnlyFailed: 'Auto-summarize failed but your transcript was saved. Open the meeting to view & export.',
               openMeeting: 'Open meeting',
               error: 'Something went wrong',
               tryAgain: 'Try again',
@@ -207,6 +250,24 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
 
     const handleStart = async () => {
         if (!filePath) return;
+
+        // Pre-flight: refuse to start the upload when the selected STT
+        // provider has no API key. Without this the user burns minutes on
+        // upload + normalize + then gets a RuntimeError from the sidecar
+        // at the very last second.
+        const sttCheck = await checkSttProviderConfigured();
+        if (!sttCheck.ok) {
+            const providerName = sttCheck.missing === 'soniox' ? 'Soniox' : 'Nvidia';
+            showToast(
+                lang === 'vi'
+                    ? `Chưa cấu hình ${providerName} API Key. Vào Cài đặt để cấu hình trước khi upload.`
+                    : `${providerName} API Key not configured. Open Settings to set it before uploading.`,
+                'error',
+            );
+            useAppStore.getState().setSettingsOpen(true);
+            return;
+        }
+
         cancelledRef.current = false;
         setStep('uploading');
         setBytesSent(0);
@@ -253,6 +314,18 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                         if (dupId !== null) {
                             setDuplicateMeetingId(dupId);
                             setStep('duplicate');
+                            return;
+                        }
+                        // Recovery path: backend committed the transcript
+                        // BEFORE the crash (e.g., summarize step errored
+                        // out). Don't punish the user — let them open the
+                        // meeting and recover the work they paid for in
+                        // STT credits + wait time. Surface the error as
+                        // an inline note on the "done" screen instead of
+                        // a hard error wall.
+                        if (state.transcript_saved && state.meeting_id) {
+                            setReadyMeetingId(state.meeting_id);
+                            setStep('done');
                             return;
                         }
                         setErrorMessage(state.error || tr.error);
@@ -475,26 +548,58 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                 )}
 
                 {/* ── Step: DONE ─────────────────────────────────────── */}
-                {step === 'done' && readyMeetingId !== null && (
-                    <div className="upload-modal-body upload-modal-done">
-                        <div className="upload-done-icon">
-                            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M20 6 9 17l-5-5" />
-                            </svg>
-                        </div>
-                        <h3 className="upload-modal-stage-title">{tr.done}</h3>
-                        <p className="upload-modal-stage-desc">{tr.doneDesc}</p>
-                        <div className="upload-modal-actions">
-                            <button className="action-btn" onClick={onClose}>{tr.close}</button>
-                            <button
-                                className="action-btn primary"
-                                onClick={() => handleOpenReady(readyMeetingId)}
+                {step === 'done' && readyMeetingId !== null && (() => {
+                    // Three sub-states:
+                    //   - full success (transcript + summary)
+                    //   - summary skipped (LLM key missing) — show friendly hint
+                    //   - summary failed but transcript saved (came in via the
+                    //     failed-with-transcript_saved recovery path)
+                    const summarySkipped = jobState?.summary_skipped === true;
+                    const cameFromFailed = jobState?.status === 'failed';
+                    let title = tr.done;
+                    let desc = tr.doneDesc;
+                    let warn = false;
+                    if (cameFromFailed) {
+                        title = tr.doneTranscriptOnly;
+                        desc = tr.doneTranscriptOnlyFailed;
+                        warn = true;
+                    } else if (summarySkipped) {
+                        title = tr.doneTranscriptOnly;
+                        desc = tr.doneTranscriptOnlyDesc;
+                        warn = true;
+                    }
+                    return (
+                        <div className="upload-modal-body upload-modal-done">
+                            <div
+                                className="upload-done-icon"
+                                style={warn ? { background: '#fef3c7', color: '#b45309' } : undefined}
                             >
-                                {tr.openMeeting}
-                            </button>
+                                {warn ? (
+                                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M12 2 2 22h20L12 2Z" />
+                                        <line x1="12" x2="12" y1="9" y2="14" />
+                                        <circle cx="12" cy="17" r="0.5" />
+                                    </svg>
+                                ) : (
+                                    <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M20 6 9 17l-5-5" />
+                                    </svg>
+                                )}
+                            </div>
+                            <h3 className="upload-modal-stage-title">{title}</h3>
+                            <p className="upload-modal-stage-desc">{desc}</p>
+                            <div className="upload-modal-actions">
+                                <button className="action-btn" onClick={onClose}>{tr.close}</button>
+                                <button
+                                    className="action-btn primary"
+                                    onClick={() => handleOpenReady(readyMeetingId)}
+                                >
+                                    {tr.openMeeting}
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
 
                 {/* ── Step: DUPLICATE ────────────────────────────────── */}
                 {step === 'duplicate' && duplicateMeetingId !== null && (

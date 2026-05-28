@@ -12,22 +12,70 @@ from logger import get_logger
 log = get_logger(__name__)
 
 
+_FFMPEG_CACHE: str | None = None
+
+
 def find_ffmpeg() -> str:
-    """Find ffmpeg binary, searching common locations on macOS/Linux/Windows."""
+    """Resolve an ffmpeg binary path, preferring the bundled one.
+
+    Resolution order (first hit wins):
+      1. imageio-ffmpeg's bundled static binary — ships in the Python wheel
+         and is picked up by PyInstaller via `collect_all('imageio_ffmpeg')`.
+         This is the path end users hit in a packaged install (no homebrew /
+         choco required — zero manual setup).
+      2. ffmpeg sitting next to the sidecar executable — Windows CI copies
+         the build-host's ffmpeg.exe here as a legacy fallback.
+      3. System PATH (`shutil.which`).
+      4. Common per-OS install locations (Homebrew prefix, ProgramFiles,
+         Scoop, etc.) for dev environments that have ffmpeg installed but
+         not in the inherited PATH (Tauri-launched apps on macOS get a
+         stripped PATH that excludes /opt/homebrew/bin).
+
+    Cached after first lookup so we don't subprocess-spawn ffmpeg dozens of
+    times for the import-resolution side effect on every audio call.
+    """
+    global _FFMPEG_CACHE
+    if _FFMPEG_CACHE and os.path.isfile(_FFMPEG_CACHE):
+        return _FFMPEG_CACHE
+
     import shutil
     import sys as _sys
 
-    found = shutil.which("ffmpeg")
-    if found:
-        return found
+    # 1. Prefer the bundled static binary from imageio-ffmpeg. This is the
+    # path that makes the app actually self-contained for end users.
+    try:
+        import imageio_ffmpeg
+        bundled = imageio_ffmpeg.get_ffmpeg_exe()
+        if bundled and os.path.isfile(bundled):
+            # Defensive: ensure exec bit (PyInstaller _MEIPASS preserves it
+            # but the static-binary may land in a tarball-extracted dir
+            # without +x on Linux).
+            if not _sys.platform == "win32":
+                try:
+                    os.chmod(bundled, 0o755)
+                except OSError:
+                    pass
+            _FFMPEG_CACHE = bundled
+            log.info("[ffmpeg] Using bundled imageio-ffmpeg binary: %s", bundled)
+            return bundled
+    except Exception as e:
+        log.warning("[ffmpeg] imageio-ffmpeg not available, falling back to system search: %s", e)
 
-    # Check next to the running sidecar executable (PyInstaller bundle)
+    # 2. Next to the sidecar executable (CI bundling path for Windows).
     exe_dir = Path(_sys.executable).parent
     for name in ("ffmpeg.exe", "ffmpeg"):
         candidate = exe_dir / name
         if candidate.is_file():
-            return str(candidate)
+            _FFMPEG_CACHE = str(candidate)
+            return _FFMPEG_CACHE
 
+    # 3. System PATH.
+    found = shutil.which("ffmpeg")
+    if found:
+        _FFMPEG_CACHE = found
+        return found
+
+    # 4. Common install locations (dev fallback).
     if _sys.platform == "win32":
         win_candidates = [
             Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "ffmpeg" / "bin" / "ffmpeg.exe",
@@ -40,18 +88,25 @@ def find_ffmpeg() -> str:
         for c in win_candidates:
             try:
                 if c.is_file():
-                    return str(c)
+                    _FFMPEG_CACHE = str(c)
+                    return _FFMPEG_CACHE
             except Exception:
                 pass
         raise FileNotFoundError(
-            "ffmpeg not found. Install via: choco install ffmpeg  OR  "
-            "scoop install ffmpeg  OR  download from https://ffmpeg.org"
+            "ffmpeg binary not found in the app bundle (this should never happen — "
+            "imageio-ffmpeg ships it with the sidecar). Reinstall Scribble from "
+            "https://scribble-rho.vercel.app or contact support."
         )
     else:
         for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]:
             if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                _FFMPEG_CACHE = candidate
                 return candidate
-        raise FileNotFoundError("ffmpeg not found. Install via: brew install ffmpeg")
+        raise FileNotFoundError(
+            "ffmpeg binary not found in the app bundle (this should never happen — "
+            "imageio-ffmpeg ships it with the sidecar). Reinstall Scribble from "
+            "https://scribble-rho.vercel.app or contact support."
+        )
 
 
 def transcode_audio_for_export(source: Path, fmt: str) -> Path:

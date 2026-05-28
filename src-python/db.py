@@ -397,12 +397,28 @@ class Database:
         conn.commit()
 
     def find_meeting_by_hash(self, file_hash: str) -> int | None:
-        """Idempotency lookup for uploaded files. Returns meeting_id if exists, else None."""
+        """Idempotency lookup for uploaded files. Returns meeting_id if a
+        PREVIOUS SUCCESSFUL upload of the same file exists.
+
+        Only matches meetings that produced an actual transcript — failed /
+        empty uploads from earlier attempts must NOT block a re-upload. This
+        is belt-and-suspenders alongside the pipeline's failure-cleanup
+        (which deletes empty meeting rows when no transcript was saved);
+        we keep the filter here so users upgrading from older versions
+        aren't blocked by leftover empty rows in their existing DB.
+        """
         if not file_hash:
             return None
         conn = self._conn()
         row = conn.execute(
-            "SELECT id FROM meetings WHERE file_hash = ? LIMIT 1",
+            """
+            SELECT id FROM meetings
+            WHERE file_hash = ?
+              AND transcript IS NOT NULL
+              AND TRIM(transcript) NOT IN ('', '[]')
+            ORDER BY id DESC
+            LIMIT 1
+            """,
             (file_hash,),
         ).fetchone()
         return row["id"] if row else None

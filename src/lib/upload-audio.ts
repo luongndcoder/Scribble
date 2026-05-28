@@ -48,6 +48,15 @@ export interface JobState {
   error: string | null;
   total_chunks: number;
   processed_chunks: number;
+  /** Backend sets this true once the transcript JSON has been written to
+   *  DB. Even if `status === 'failed'` afterwards, the meeting is still
+   *  openable — the UI offers "Open meeting" alongside try-again. */
+  transcript_saved?: boolean;
+  /** Backend sets this true when the auto-summarize step was intentionally
+   *  skipped (no LLM key) or failed silently. Job still ends in 'done';
+   *  modal shows a friendly "configure AI key" hint instead of an error. */
+  summary_skipped?: boolean;
+  summary_skip_reason?: string;
   created_at: number;
   updated_at: number;
 }

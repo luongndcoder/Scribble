@@ -11,4 +11,10 @@ requests
 soniox>=2.0.0
 python-docx>=1.1.2
 onnxruntime>=1.17.0
+# imageio-ffmpeg ships a static ffmpeg binary inside its wheel — auto-bundled
+# by PyInstaller via collect_all() in the spec. Eliminates the "brew install
+# ffmpeg" / "choco install ffmpeg" prerequisite for end users (zero manual
+# setup). ffprobe is NOT included; we parse "Duration:" from ffmpeg stderr
+# instead (see _ffprobe_duration in upload_pipeline.py).
+imageio-ffmpeg>=0.5.1
 pyinstaller>=6.0

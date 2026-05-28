@@ -54,8 +54,10 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Install ffmpeg
-        run: brew install ffmpeg
+      # ffmpeg is bundled via imageio-ffmpeg's Python wheel (v1.2.11+), so the
+      # build runner doesn't need brew install ffmpeg anymore. The wheel ships
+      # a static macOS-aarch64 binary that PyInstaller picks up via
+      # collect_all('imageio_ffmpeg'). See src-python/services/audio.py.
 
       - name: Install Python dependencies
         working-directory: src-python

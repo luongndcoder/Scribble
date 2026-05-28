@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -125,15 +126,93 @@ async def run_pipeline(job_id: str) -> None:
     try:
         await _execute(job, meeting, source_path, tmp_root)
     except asyncio.CancelledError:
-        await registry.update(
-            job_id, status=JobStatus.CANCELLED, error="Cancelled"
+        # Same cleanup logic as the failure path: if nothing was saved yet,
+        # delete the empty meeting + audio so it doesn't clutter the list
+        # AND doesn't poison the duplicate-detect lookup for the user's
+        # next upload attempt of the same file.
+        meeting_now = db.get_meeting(job.meeting_id) or {}
+        has_partial_transcript = bool(
+            (meeting_now.get("transcript") or "").strip().strip("[]")
         )
-        db.update_meeting(job.meeting_id, status="cancelled")
+        await registry.update(
+            job_id,
+            status=JobStatus.CANCELLED,
+            error="Cancelled",
+            transcript_saved=has_partial_transcript,
+        )
+        if has_partial_transcript:
+            db.update_meeting(job.meeting_id, status="cancelled")
+        else:
+            audio_path_raw = meeting_now.get("audio_path") or ""
+            if audio_path_raw:
+                try:
+                    Path(audio_path_raw).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            try:
+                db.delete_meeting(job.meeting_id)
+            except Exception:
+                pass
         raise
     except Exception as exc:
         log.exception("[pipeline] failed job=%s", job_id)
-        await registry.update(job_id, status=JobStatus.FAILED, error=str(exc))
-        db.update_meeting(job.meeting_id, status="failed")
+        # Three outcomes here, depending on how far we got before crashing:
+        #
+        # (a) Some transcript already committed (per-chunk persist or final
+        #     pass landed) → KEEP the meeting as 'saved'. The job state
+        #     reports FAILED so the modal shows error UI, but transcript_saved
+        #     tells the frontend "you can still open this".
+        # (b) Nothing saved AND the file is uploaded → DELETE the meeting
+        #     row + audio file. Don't leave a useless empty row cluttering
+        #     the meeting list — and more importantly, don't leave its
+        #     file_hash in the DB to mis-trigger duplicate detection on the
+        #     user's next upload of the same file.
+        #
+        # (b) is the bug fix for "upload fails → empty meeting created →
+        #     re-upload says duplicate" reported in v1.2.11.
+        meeting_now = db.get_meeting(job.meeting_id) or {}
+        has_partial_transcript = bool(
+            (meeting_now.get("transcript") or "").strip().strip("[]")
+        )
+        await registry.update(
+            job_id,
+            status=JobStatus.FAILED,
+            error=str(exc),
+            transcript_saved=has_partial_transcript,
+        )
+        if has_partial_transcript:
+            # Path (a): keep the partial — don't overwrite status='saved'.
+            pass
+        else:
+            # Path (b): rollback the empty meeting + its audio file. This
+            # MUST happen before the SSE handler emits the failure event so
+            # the frontend can't race-navigate to a meeting that we're
+            # about to delete.
+            audio_path_raw = meeting_now.get("audio_path") or ""
+            if audio_path_raw:
+                try:
+                    Path(audio_path_raw).unlink(missing_ok=True)
+                except Exception as cleanup_exc:
+                    log.warning(
+                        "[pipeline] failed to unlink audio %s: %s",
+                        audio_path_raw, cleanup_exc,
+                    )
+            try:
+                db.delete_meeting(job.meeting_id)
+                log.info(
+                    "[pipeline] deleted empty failed meeting %s (no transcript saved)",
+                    job.meeting_id,
+                )
+            except Exception as del_exc:
+                log.warning(
+                    "[pipeline] failed to delete empty meeting %s: %s",
+                    job.meeting_id, del_exc,
+                )
+                # Best-effort fallback so it doesn't show as a fresh draft.
+                try:
+                    db.update_meeting(job.meeting_id, status="failed")
+                except Exception:
+                    pass
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
 
@@ -193,6 +272,10 @@ async def _execute(
     # ── Build transcript + persist (final pass) ────────────────────────────
     transcript_json = json.dumps(transcript_parts, ensure_ascii=False)
     db.update_meeting(meeting_id, transcript=transcript_json, status="saved")
+    # Flag the transcript as committed so the UI knows the meeting is openable
+    # even if downstream summarize step fails. This is the safety net that
+    # prevents "STT thành công cốc" when LLM key is missing.
+    await registry.update(job_id, transcript_saved=True)
     if _is_cancelled(job):
         return
 
@@ -205,23 +288,74 @@ async def _execute(
         message="Hoàn tất phiên âm — chuẩn bị biên bản",
     )
 
-    # ── Auto-summarize (best-effort) ───────────────────────────────────────
-    await registry.update(
-        job_id,
-        progress=P_SUMMARIZE,
-        message="Đang tạo biên bản (có thể mất vài phút)",
-    )
-    summary_md = await asyncio.to_thread(
-        _summarize_blocking, transcript_parts, meeting.get("language") or "vi", meeting_id,
-    )
-    if summary_md:
-        db.update_meeting(meeting_id, summary=summary_md)
+    # ── Auto-summarize (best-effort, NEVER fails the job) ──────────────────
+    # The user often configures STT only (no LLM key). In that case we must
+    # NOT throw away the transcript. Behavior matrix:
+    #   - LLM key present + summary succeeds → save summary, DONE
+    #   - LLM key present + summary fails    → log, DONE with summary_skipped
+    #   - LLM key absent                      → skip step entirely, DONE
+    #                                            with summary_skipped + reason
+    # In every case the job ends in DONE so the upload modal can navigate
+    # the user to their (saved) transcript.
+    llm_key = (db.get_setting("llm_api_key") or os.environ.get("LLM_API_KEY", "")).strip()
+    if not llm_key:
+        log.info("[pipeline] LLM key not configured — skipping auto-summarize")
+        await registry.update(
+            job_id,
+            progress=P_SUMMARIZE,
+            message="Bỏ qua biên bản (chưa cấu hình AI key)",
+            summary_skipped=True,
+            summary_skip_reason="llm_api_key_missing",
+        )
+    else:
+        await registry.update(
+            job_id,
+            progress=P_SUMMARIZE,
+            message="Đang tạo biên bản (có thể mất vài phút)",
+        )
+        try:
+            summary_md = await asyncio.to_thread(
+                _summarize_blocking, transcript_parts,
+                meeting.get("language") or "vi", meeting_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Belt + suspenders: _summarize_blocking already returns "" on
+            # error, but if anything unexpected leaks through we MUST NOT
+            # let it propagate up and fail the job (and trash the transcript
+            # the user just paid for in time + STT credits).
+            log.exception("[pipeline] summarize step crashed — treating as skipped")
+            summary_md = ""
+            await registry.update(
+                job_id,
+                summary_skipped=True,
+                summary_skip_reason=f"summarize_error: {exc}",
+            )
+
+        if summary_md:
+            db.update_meeting(meeting_id, summary=summary_md)
+        elif not registry.get(job_id) or not registry.get(job_id).summary_skipped:
+            # _summarize_blocking returned empty without raising — means
+            # the SSE stream yielded an error event (e.g. LLM 401, network
+            # blip). Mark as skipped so the UI shows the right message.
+            log.warning("[pipeline] summarize returned empty — marking skipped")
+            await registry.update(
+                job_id,
+                summary_skipped=True,
+                summary_skip_reason="summarize_empty",
+            )
+
+    final_message = "Hoàn thành"
+    job_state = registry.get(job_id)
+    if job_state and job_state.summary_skipped:
+        final_message = "Hoàn thành (transcript đã lưu, chưa tạo biên bản)"
 
     await registry.update(
         job_id,
         status=JobStatus.DONE,
         progress=1.0,
-        message="Hoàn thành",
+        message=final_message,
     )
 
 
@@ -409,31 +543,78 @@ async def _run_nvidia_chunked_pipeline(
 
 
 def _ffprobe_duration(path: Path) -> float:
+    """Probe audio/video duration in seconds.
+
+    Used to live off a separate ffprobe binary. Since v1.2.11 we ship ffmpeg
+    via imageio-ffmpeg's wheel (zero manual setup for end users) — but
+    imageio-ffmpeg does NOT include ffprobe. We parse the "Duration:" line
+    that ffmpeg writes to stderr while reading metadata, then terminate
+    early so we don't actually decode the whole 4-hour file just for a
+    duration probe.
+    """
     ffmpeg = find_ffmpeg()
-    # Derive ffprobe path from ffmpeg (same package on every platform).
-    ffprobe = ffmpeg.replace("ffmpeg.exe", "ffprobe.exe").replace("ffmpeg", "ffprobe")
+    # Trigger ffmpeg in "read metadata then decode to null" mode. ffmpeg
+    # emits the Duration line right after it parses the container header,
+    # so we kill the process as soon as we see it (typically <100ms).
     cmd = [
-        ffprobe,
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        str(path),
+        ffmpeg,
+        "-hide_banner",
+        "-i", str(path),
+        "-f", "null",
+        "-",
     ]
-    kwargs: dict = {"capture_output": True, "timeout": 30}
+    popen_kwargs: dict = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "errors": "replace",
+    }
     if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
     try:
-        result = subprocess.run(cmd, **kwargs)
+        proc = subprocess.Popen(cmd, **popen_kwargs)
     except FileNotFoundError:
-        raise RuntimeError(f"ffprobe not found alongside ffmpeg ({ffmpeg})")
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"ffprobe failed: {result.stderr.decode(errors='replace')[:200]}"
-        )
-    return float(result.stdout.decode().strip() or "0")
+        raise RuntimeError(f"ffmpeg binary missing or unreadable: {ffmpeg}")
+
+    duration_seconds: float | None = None
+    collected_err: list[str] = []
+    duration_pattern = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+
+    try:
+        assert proc.stderr is not None
+        # 30s hard ceiling on metadata read — should normally finish in ms.
+        start = time.monotonic()
+        for line in proc.stderr:
+            collected_err.append(line)
+            m = duration_pattern.search(line)
+            if m:
+                h, m_, s = m.groups()
+                try:
+                    duration_seconds = int(h) * 3600 + int(m_) * 60 + float(s)
+                except (TypeError, ValueError):
+                    duration_seconds = None
+                break
+            if time.monotonic() - start > 30:
+                break
+    finally:
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    if duration_seconds is None or duration_seconds <= 0:
+        # Show the user the actual ffmpeg complaint instead of a generic
+        # error. ffmpeg's error lines are usually self-explanatory ("Invalid
+        # data found", "moov atom not found", etc.).
+        snippet = "".join(collected_err)[-400:]
+        raise RuntimeError(f"Could not read audio duration: {snippet.strip() or 'unknown error'}")
+
+    return duration_seconds
 
 
 def _normalize_to_wav(source: Path, target: Path) -> None:

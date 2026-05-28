@@ -40,6 +40,16 @@ class JobState:
     error: str | None = None
     total_chunks: int = 0
     processed_chunks: int = 0
+    # Set when the LLM summarize step is intentionally skipped (no API key)
+    # or fails — the pipeline still ends in DONE with a saved transcript.
+    # Frontend uses this to show a friendly "transcript saved, configure LLM
+    # to enable auto-minutes" message instead of an error.
+    summary_skipped: bool = False
+    summary_skip_reason: str = ""
+    # True once the transcript JSON has been written to DB. Lets the UI
+    # offer "Open meeting" even if the job later ends in FAILED — so users
+    # never lose their transcript work even when a downstream step crashes.
+    transcript_saved: bool = False
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -56,6 +66,9 @@ class JobState:
             "error": self.error,
             "total_chunks": self.total_chunks,
             "processed_chunks": self.processed_chunks,
+            "summary_skipped": self.summary_skipped,
+            "summary_skip_reason": self.summary_skip_reason,
+            "transcript_saved": self.transcript_saved,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

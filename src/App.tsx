@@ -26,12 +26,20 @@ const IS_MACOS = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navi
  *  `data-tauri-drag-region` is supposed to handle this declaratively, but on
  *  some Tauri 2 + macOS Overlay-titlebar combos the attribute is silently
  *  ignored. Calling `getCurrentWindow().startDragging()` from a mousedown
- *  handler is Tauri's recommended fallback and works reliably.
+ *  handler is Tauri's recommended fallback.
+ *
+ *  IMPORTANT: `startDragging()` requires the `core:window:allow-start-dragging`
+ *  capability — NOT included in `core:default`. If the capability is missing
+ *  the call rejects silently. See `src-tauri/capabilities/default.json`.
  *
  *  We skip the drag when the click lands on an interactive element (button,
  *  link, input) so their onClick handlers still fire. Double-click on the
- *  topnav background triggers `toggleMaximize()` — mirrors native title-bar UX. */
-async function handleTopnavMouseDown(e: React.MouseEvent<HTMLElement>) {
+ *  topnav background triggers `toggleMaximize()` — mirrors native title-bar UX.
+ *
+ *  Why fire-and-forget (not async/await) — when an event handler awaits, the
+ *  mousedown event loop has already moved on. Tauri's drag-start needs to be
+ *  initiated synchronously while the OS still has the mouse button held. */
+function handleTopnavMouseDown(e: React.MouseEvent<HTMLElement>) {
   if (e.button !== 0) return;
 
   const target = e.target as HTMLElement | null;
@@ -39,16 +47,21 @@ async function handleTopnavMouseDown(e: React.MouseEvent<HTMLElement>) {
 
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return;
 
-  try {
-    const win = getCurrentWindow();
-    if (e.detail === 2) {
-      await win.toggleMaximize();
-    } else {
-      await win.startDragging();
-    }
-  } catch (err) {
-    console.warn('[topnav] startDragging failed:', err);
-  }
+  // Capture the click count BEFORE we hand off to async land — React's
+  // SyntheticEvent will be pooled after this synchronous handler returns.
+  const isDoubleClick = e.detail === 2;
+
+  const win = getCurrentWindow();
+  const op = isDoubleClick ? win.toggleMaximize() : win.startDragging();
+  op.catch((err) => {
+    // Real error — surface it. Silent warn was hiding the actual symptom
+    // for users who had the capability missing in their default.json.
+    console.error(
+      `[topnav] ${isDoubleClick ? 'toggleMaximize' : 'startDragging'} failed:`,
+      err,
+      '\nIf you see "not allowed by the scope", add the matching permission to src-tauri/capabilities/default.json.',
+    );
+  });
 }
 
 function AppInner() {

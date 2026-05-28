@@ -15,6 +15,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
+        # ffmpeg removed from this list (v1.2.11+): the sidecar bundles a
+        # static ffmpeg binary via imageio-ffmpeg's wheel, so the runner
+        # doesn't need its own. See src-python/services/audio.py find_ffmpeg().
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -23,8 +26,7 @@ jobs:
             patchelf \
             libssl-dev \
             libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            ffmpeg
+            libayatana-appindicator3-dev
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

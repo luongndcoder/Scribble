@@ -37,8 +37,10 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Install ffmpeg
-        run: choco install ffmpeg -y
+      # ffmpeg is bundled via imageio-ffmpeg's Python wheel (v1.2.11+), so the
+      # build runner doesn't need choco install ffmpeg anymore. The wheel ships
+      # a static ffmpeg.exe that PyInstaller picks up via
+      # collect_all('imageio_ffmpeg'). See src-python/services/audio.py.
 
       - name: Install Python dependencies
         working-directory: src-python
@@ -73,13 +75,11 @@ jobs:
           "%~dp0sidecar-dist\scribble-sidecar.exe" %*
           WINEOF
 
-      - name: Bundle ffmpeg for Windows
-        shell: bash
-        run: |
-          FFMPEG_PATH=$(which ffmpeg || echo "")
-          if [ -n "$FFMPEG_PATH" ]; then
-            cp "$FFMPEG_PATH" src-tauri/binaries/ffmpeg.exe
-          fi
+      # "Bundle ffmpeg for Windows" step removed in v1.2.11. The file was
+      # copied into src-tauri/binaries/ffmpeg.exe but never actually shipped
+      # to end users — it wasn't listed in tauri.conf.json's externalBin or
+      # resources. ffmpeg now ships inside the sidecar tarball via
+      # imageio-ffmpeg, see src-python/services/audio.py find_ffmpeg().
 
       - name: Install frontend dependencies
         run: pnpm install
