@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { TranscriptPart, Meeting, useAppStore } from '../stores/appStore';
 import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile, retryFailedChunks } from '../lib/api';
@@ -6,6 +6,7 @@ import { subscribeJobEvents } from '../lib/upload-audio';
 import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
 import { MeetingAttachments } from './MeetingAttachments';
+import { NetworkOfflineBanner } from './NetworkOfflineBanner';
 
 const SPEAKER_COLORS = ['#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 type LegacyMinutes = {
@@ -465,50 +466,177 @@ export function MeetingDetail() {
         };
     }, []);
 
-    // ── Load-more pagination ─────────────────────────────────────────────
-    // Long sessions (4h+) can produce 500+ transcript parts. Rendering them
-    // all at once tanks the DOM. We render only the tail by default; the
-    // user clicks "Load older" to reveal more. The store still holds the
-    // full array → export / copy / minutes-generation see EVERYTHING. This
-    // is purely a render-layer optimization.
+    // ── Sliding-window pagination ────────────────────────────────────────
+    // Long sessions (4h+) can produce 500+ transcript parts. Rendering all
+    // at once tanks the DOM. v1.2.14 upgrades the v1.2.13 cursor-based
+    // pagination to a sliding window: BOTH ends slide in lockstep so the
+    // DOM never exceeds MAX_WINDOW_SIZE parts regardless of how far the
+    // user scrolls. The store still holds the full array → export, copy,
+    // minutes-generation, search see EVERYTHING. Pure render-layer cap.
+    //
+    // Cursors = chunkIds (not indices) for stability across mutations.
+    // Array indices shift when the user deletes/appends; chunkIds don't.
+    //   - `topAnchorChunkId === null`  → window flush with array start
+    //   - `bottomAnchorChunkId === null` → tail-open mode (live recording
+    //     keeps flowing parts onto the bottom; window auto-extends).
+    //
+    // Window invariants:
+    //   - `visibleEndIdx - visibleStartIdx <= MAX_WINDOW_SIZE` (DOM cap)
+    //   - When `visibleEndIdx === transcriptParts.length`, bottom anchor is
+    //     reset to null so subsequent live-appended parts stay visible.
     const TRANSCRIPT_PAGE_SIZE = 200;
-    const [visibleCount, setVisibleCount] = useState<number>(TRANSCRIPT_PAGE_SIZE);
-    // When switching meetings, reset the window so we don't show 200 parts
-    // of the previous meeting on the new one.
+    const MAX_WINDOW_SIZE = 400; // hard DOM cap — slides instead of growing
+    const SCROLL_LOAD_THRESHOLD = 120; // px from top OR bottom
+    const [topAnchorChunkId, setTopAnchorChunkId] = useState<string | null>(null);
+    const [bottomAnchorChunkId, setBottomAnchorChunkId] = useState<string | null>(null);
+
+    // Reset both anchors when switching meetings — different meeting means
+    // different transcriptParts identity, window must restart from tail.
     const prevMeetingKeyRef = useRef<string | number | null>(null);
     useEffect(() => {
         const key = currentMeetingId || draftId || null;
         if (prevMeetingKeyRef.current !== key) {
             prevMeetingKeyRef.current = key;
-            setVisibleCount(TRANSCRIPT_PAGE_SIZE);
+            setTopAnchorChunkId(null);
+            setBottomAnchorChunkId(null);
         }
     }, [currentMeetingId, draftId]);
 
-    // Visible slice: always include the most recent N parts so live
-    // transcription stays visible. Absolute index = transcriptParts.length
-    // - visibleParts.length + visibleIdx. Used for callbacks that mutate
-    // the full array (edit speaker, delete, edit text).
-    const hasOlderParts = transcriptParts.length > visibleCount;
+    // Resolve bottom anchor → end index (exclusive). null = open tail.
+    const visibleEndIdx = useMemo(() => {
+        const total = transcriptParts.length;
+        if (bottomAnchorChunkId === null) return total;
+        const idx = transcriptParts.findIndex((p) => p.chunkId === bottomAnchorChunkId);
+        return idx < 0 ? total : idx + 1;
+    }, [transcriptParts, bottomAnchorChunkId]);
+
+    // Resolve top anchor → start index. Hard-caps window at MAX_WINDOW_SIZE
+    // by clamping start ≥ end - MAX. This guards the corner case where the
+    // user pinned topAnchor with tail-open mode: live appends would
+    // otherwise grow visibleEndIdx unbounded, pushing window past the cap.
+    // Trade-off: topAnchor's "pin to this exact part" intent slowly drifts
+    // as live appends shift the cap forward — but only when the user is at
+    // tail anyway (they likely want to follow live), so acceptable.
+    const visibleStartIdx = useMemo(() => {
+        const total = transcriptParts.length;
+        let startFromAnchor: number;
+        if (topAnchorChunkId === null) {
+            if (bottomAnchorChunkId !== null) {
+                const bIdx = transcriptParts.findIndex((p) => p.chunkId === bottomAnchorChunkId);
+                startFromAnchor = bIdx >= 0
+                    ? Math.max(0, bIdx + 1 - MAX_WINDOW_SIZE)
+                    : Math.max(0, total - TRANSCRIPT_PAGE_SIZE);
+            } else {
+                startFromAnchor = Math.max(0, total - TRANSCRIPT_PAGE_SIZE);
+            }
+        } else {
+            const idx = transcriptParts.findIndex((p) => p.chunkId === topAnchorChunkId);
+            startFromAnchor = idx < 0 ? Math.max(0, total - TRANSCRIPT_PAGE_SIZE) : idx;
+        }
+        // Hard DOM cap — slides instead of growing past MAX_WINDOW_SIZE.
+        return Math.max(startFromAnchor, visibleEndIdx - MAX_WINDOW_SIZE);
+    }, [transcriptParts, topAnchorChunkId, bottomAnchorChunkId, visibleEndIdx]);
+
     const visibleParts = useMemo(
-        () => (hasOlderParts ? transcriptParts.slice(-visibleCount) : transcriptParts),
-        [transcriptParts, visibleCount, hasOlderParts],
+        () => transcriptParts.slice(visibleStartIdx, visibleEndIdx),
+        [transcriptParts, visibleStartIdx, visibleEndIdx],
     );
-    const visibleStartIdx = transcriptParts.length - visibleParts.length;
-    const handleLoadOlder = () => {
-        // Preserve scroll position so the user stays anchored at the part
-        // they were reading instead of jumping when older content prepends.
-        const el = transcriptRef.current;
-        const prevScrollHeight = el?.scrollHeight ?? 0;
-        const prevScrollTop = el?.scrollTop ?? 0;
-        setVisibleCount((n) => n + TRANSCRIPT_PAGE_SIZE);
-        // After render, restore so visual position relative to previously
-        // visible items doesn't change.
-        requestAnimationFrame(() => {
-            if (!el) return;
-            const delta = el.scrollHeight - prevScrollHeight;
-            el.scrollTop = prevScrollTop + delta;
-        });
+    const hasOlderParts = visibleStartIdx > 0;
+    const hasNewerParts = visibleEndIdx < transcriptParts.length;
+    // Tail-open mode — used by live auto-scroll to decide whether to follow
+    // new parts (yes if user is at tail) vs stay put (no if they scrolled up).
+    const isTailOpen = bottomAnchorChunkId === null;
+
+    // Capture the chunkId at the top of the viewport for scroll restoration.
+    // Walking children is cheap (window capped at MAX_WINDOW_SIZE parts).
+    const captureScrollAnchor = (el: HTMLDivElement): { chunkId: string; viewportTop: number } | null => {
+        const containerTop = el.getBoundingClientRect().top;
+        const items = el.querySelectorAll<HTMLDivElement>('[data-chunk-id]');
+        for (const item of items) {
+            const rect = item.getBoundingClientRect();
+            if (rect.bottom >= containerTop) {
+                const cid = item.dataset.chunkId;
+                if (cid) return { chunkId: cid, viewportTop: rect.top - containerTop };
+            }
+        }
+        return null;
     };
+
+    const restoreScrollAnchor = (
+        el: HTMLDivElement,
+        anchor: { chunkId: string; viewportTop: number } | null,
+    ) => {
+        if (!anchor) return;
+        const containerTop = el.getBoundingClientRect().top;
+        const node = el.querySelector<HTMLDivElement>(
+            `[data-chunk-id="${CSS.escape(anchor.chunkId)}"]`,
+        );
+        if (!node) return;
+        const newTop = node.getBoundingClientRect().top - containerTop;
+        // Push scroll by the visual delta so the anchored part stays where
+        // the user saw it. Works for both prepend (positive shift) and the
+        // bottom-trim case (top items removed → negative shift).
+        el.scrollTop += newTop - anchor.viewportTop;
+    };
+
+    // Single scroll handler — fires up-load OR down-load depending on which
+    // edge the user is near. Throttled via inflight ref so a momentum bounce
+    // doesn't trigger 2 loads in a row.
+    const loadingMoreRef = useRef(false);
+    const handleTranscriptScroll = useCallback(() => {
+        if (loadingMoreRef.current) return;
+        const el = transcriptRef.current;
+        if (!el) return;
+
+        const nearTop = el.scrollTop <= SCROLL_LOAD_THRESHOLD;
+        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        const nearBottom = distanceFromBottom <= SCROLL_LOAD_THRESHOLD;
+
+        const wantsUpLoad = nearTop && hasOlderParts;
+        const wantsDownLoad = nearBottom && hasNewerParts;
+        if (!wantsUpLoad && !wantsDownLoad) return;
+
+        loadingMoreRef.current = true;
+        const anchor = captureScrollAnchor(el);
+        const total = transcriptParts.length;
+
+        if (wantsUpLoad) {
+            // Slide window backward by one page; cap size at MAX_WINDOW_SIZE
+            // by trimming the same number of parts off the bottom. Keep
+            // tail open when newEnd === total so live appends still flow
+            // naturally — visibleStartIdx's hard cap (start ≥ end - MAX)
+            // prevents unbounded growth even in tail-open mode.
+            const newStart = Math.max(0, visibleStartIdx - TRANSCRIPT_PAGE_SIZE);
+            const newEnd = Math.min(total, newStart + MAX_WINDOW_SIZE);
+            setTopAnchorChunkId(newStart > 0 ? (transcriptParts[newStart]?.chunkId || null) : null);
+            setBottomAnchorChunkId(
+                newEnd < total ? (transcriptParts[newEnd - 1]?.chunkId || null) : null,
+            );
+        } else if (wantsDownLoad) {
+            // Slide window forward by one page; cap size at MAX_WINDOW_SIZE
+            // by trimming the same number of parts off the top. When the new
+            // window reaches the array tail, UNSET BOTH anchors to drop back
+            // into default tail-follow mode (window collapses to PAGE_SIZE,
+            // live appends auto-flow into view).
+            const newEnd = Math.min(total, visibleEndIdx + TRANSCRIPT_PAGE_SIZE);
+            const newStart = Math.max(0, newEnd - MAX_WINDOW_SIZE);
+            const reachedTail = newEnd === total;
+            setTopAnchorChunkId(
+                reachedTail || newStart === 0
+                    ? null
+                    : (transcriptParts[newStart]?.chunkId || null),
+            );
+            setBottomAnchorChunkId(
+                reachedTail ? null : (transcriptParts[newEnd - 1]?.chunkId || null),
+            );
+        }
+
+        requestAnimationFrame(() => {
+            const elNow = transcriptRef.current;
+            if (elNow) restoreScrollAnchor(elNow, anchor);
+            loadingMoreRef.current = false;
+        });
+    }, [hasOlderParts, hasNewerParts, visibleStartIdx, visibleEndIdx, transcriptParts]);
 
     const persistTranscriptParts = async (parts: TranscriptPart[]) => {
         const meetingId = currentMeetingId || draftId;
@@ -832,17 +960,18 @@ export function MeetingDetail() {
         };
     }, [viewingMeetingId, recording, setTranscriptParts]);
 
-    // Auto-scroll: only when the user is near the bottom (so we don't yank
-    // them away while they're reading older parts after "Load older"). 80px
-    // tolerance = roughly one transcript row.
+    // Auto-scroll: only when the user is near the bottom AND tail is open
+    // (so we don't yank them away while they're reading mid-transcript via
+    // the sliding window). 80px tolerance = roughly one transcript row.
     useEffect(() => {
         const el = transcriptRef.current;
         if (!el) return;
+        if (!isTailOpen) return; // user scrolled up — don't fight them
         const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
         if (distanceFromBottom < 80) {
             el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
         }
-    }, [transcriptParts, isTranscribing]);
+    }, [transcriptParts, isTranscribing, isTailOpen]);
 
 
     // Translation is now handled inline by the backend (cabin-style).
@@ -1006,7 +1135,17 @@ export function MeetingDetail() {
                         <div className="listening-sub">{paused ? (lang === 'vi' ? 'Nhấn tiếp tục để ghi âm' : 'Click resume to continue') : (lang === 'vi' ? 'Hãy nói để xem phiên dịch trực tiếp' : 'Speak to see live transcription')}</div>
                     </div>
                 ) : (
-                    <div className={`transcript-list ${translationEnabled ? 'with-translation' : ''}`} ref={transcriptRef}>
+                    <div
+                        className={`transcript-list ${translationEnabled ? 'with-translation' : ''}`}
+                        ref={transcriptRef}
+                        onScroll={handleTranscriptScroll}
+                    >
+                        {/* v1.2.14: Internet-offline banner. Self-renders only
+                            when the backend's TCP probe (1.1.1.1:443) flips to
+                            offline — e.g. wifi drops mid-retry. Visible at the
+                            top of the transcript so the user understands why
+                            the retry banner below isn't progressing. */}
+                        <NetworkOfflineBanner />
                         {/* Retry banner (v1.2.13): shown when the Soniox upload
                             pipeline left some chunks in status='failed'. Lets
                             the user one-click retry just those chunks without
@@ -1063,16 +1202,19 @@ export function MeetingDetail() {
                                 </div>
                             );
                         })()}
+                        {/* Sentinel shown at top of list when older parts
+                            are hidden. Pure status indicator — no click
+                            handler. Scrolling within SCROLL_LOAD_THRESHOLD
+                            px of this sentinel auto-loads the next page. */}
                         {hasOlderParts && (
-                            <button
-                                className="transcript-load-more"
-                                onClick={handleLoadOlder}
-                                aria-label={lang === 'vi' ? 'Tải thêm transcript cũ hơn' : 'Load older transcript'}
-                            >
-                                {lang === 'vi'
-                                    ? `↑ Tải thêm ${Math.min(TRANSCRIPT_PAGE_SIZE, visibleStartIdx)} đoạn cũ hơn (đang ẩn ${visibleStartIdx} / tổng ${transcriptParts.length})`
-                                    : `↑ Load ${Math.min(TRANSCRIPT_PAGE_SIZE, visibleStartIdx)} older parts (${visibleStartIdx} hidden of ${transcriptParts.length} total)`}
-                            </button>
+                            <div className="transcript-load-sentinel" aria-live="polite">
+                                <span className="transcript-load-sentinel-spinner" aria-hidden />
+                                <span>
+                                    {lang === 'vi'
+                                        ? `Đang ẩn ${visibleStartIdx} đoạn cũ hơn — cuộn lên để tải thêm`
+                                        : `${visibleStartIdx} older part(s) hidden — scroll up to load more`}
+                                </span>
+                            </div>
                         )}
                         {visibleParts.map((part, visibleIdx) => {
                             // Absolute index in the full transcriptParts array — used
@@ -1082,8 +1224,18 @@ export function MeetingDetail() {
                             const absoluteIdx = visibleStartIdx + visibleIdx;
                             const speakerColor = SPEAKER_COLORS[part.speakerId % SPEAKER_COLORS.length];
                             const isLive = absoluteIdx === transcriptParts.length - 1 && recording;
+                            // data-chunk-id powers the sliding-window scroll
+                            // anchor — captureScrollAnchor / restoreScrollAnchor
+                            // walk children by this attribute to keep the
+                            // user pinned at the same visible part during
+                            // window slides.
+                            const itemKey = part.chunkId || `t-${absoluteIdx}`;
                             return (
-                                <div className={`transcript-item ${isLive ? 'live' : ''}`} key={part.chunkId || `t-${absoluteIdx}`}>
+                                <div
+                                    className={`transcript-item ${isLive ? 'live' : ''}`}
+                                    key={itemKey}
+                                    data-chunk-id={itemKey}
+                                >
                                     <div className="transcript-actions">
                                         <button
                                             className="transcript-action-btn"
@@ -1147,6 +1299,20 @@ export function MeetingDetail() {
                                 </div>
                             );
                         })}
+                        {/* Bottom sentinel — surfaces when the sliding window
+                            has trimmed newer parts off the bottom (user scrolled
+                            up past MAX_WINDOW_SIZE then back). Cuộn xuống tự
+                            động slide window forward. */}
+                        {hasNewerParts && (
+                            <div className="transcript-load-sentinel" aria-live="polite">
+                                <span className="transcript-load-sentinel-spinner" aria-hidden />
+                                <span>
+                                    {lang === 'vi'
+                                        ? `Đang ẩn ${transcriptParts.length - visibleEndIdx} đoạn mới hơn — cuộn xuống để tải`
+                                        : `${transcriptParts.length - visibleEndIdx} newer part(s) hidden — scroll down to load`}
+                                </span>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

@@ -286,6 +286,42 @@ class Database:
         self._refresh_failed_chunks_count(meeting_id)
         conn.commit()
 
+    def mark_pending_chunks_failed(
+        self,
+        meeting_id: int,
+        error_message: str,
+    ) -> int:
+        """v1.2.14: Flip status=NULL (pending — never attempted, OR in-flight
+        when sidecar died) → status='failed' for resurrection on boot.
+        Returns count flipped. Used by `resurrect_stuck_meetings_on_boot`
+        so the retry banner picks them up like any other failed chunk."""
+        conn = self._conn()
+        truncated = (error_message or "")[:500]
+        cursor = conn.execute(
+            """
+            UPDATE upload_chunks
+            SET status = 'failed',
+                error_message = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE meeting_id = ? AND (status IS NULL OR status = '')
+            """,
+            (truncated, meeting_id),
+        )
+        affected = cursor.rowcount
+        self._refresh_failed_chunks_count(meeting_id)
+        conn.commit()
+        return affected
+
+    def list_stuck_uploading_meetings(self) -> list[dict]:
+        """v1.2.14: Find meetings stuck at status='uploading' — happens when
+        the sidecar dies (crash / user force-quit) mid-pipeline. Boot-time
+        recovery scans these and resurrects them per resurrection policy."""
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT * FROM meetings WHERE status = 'uploading'"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def reset_soniox_failed_chunks(self, meeting_id: int) -> int:
         """Flip all status='failed' rows back to NULL (pending) for a retry.
         Returns count of chunks reset. Called by retry endpoint before

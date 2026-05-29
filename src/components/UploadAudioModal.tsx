@@ -32,6 +32,7 @@ import {
     type UploadResult,
 } from '../lib/upload-audio';
 import { CustomSelect } from './CustomSelect';
+import { NetworkOfflineBanner } from './NetworkOfflineBanner';
 import { useToast } from './Toast';
 
 /**
@@ -480,6 +481,9 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                 {/* ── Step: UPLOADING ────────────────────────────────── */}
                 {step === 'uploading' && (
                     <div className="upload-modal-body">
+                        {/* v1.2.14: surfaces when wifi drops mid-upload so
+                            the user understands why bytes-sent has stalled. */}
+                        <NetworkOfflineBanner />
                         <div className="upload-stage-label">{tr.uploading}</div>
                         <div className="upload-progress-bar">
                             <div className="upload-progress-fill" style={{ width: `${(uploadPct * 100).toFixed(1)}%` }} />
@@ -497,6 +501,10 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                 {/* ── Step: PIPELINE ─────────────────────────────────── */}
                 {step === 'pipeline' && (
                     <div className="upload-modal-body">
+                        {/* v1.2.14: banner during Soniox/NVIDIA transcribe so
+                            user knows why chunks are pausing — the per-chunk
+                            retry loop will auto-resume when network returns. */}
+                        <NetworkOfflineBanner />
                         <div className="upload-stage-label">{tr.processing}</div>
                         <div className="upload-progress-bar">
                             <div className="upload-progress-fill" style={{ width: `${(pipelinePct * 100).toFixed(1)}%` }} />

@@ -65,7 +65,7 @@ function handleTopnavMouseDown(e: React.MouseEvent<HTMLElement>) {
 }
 
 function AppInner() {
-  const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline } = useAppStore();
+  const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline, setNetworkOnline } = useAppStore();
   const [backendStatus, setBackendStatusLocal] = useState<'online' | 'offline'>('offline');
   // Mirror local backend state into the global store so unrelated components
   // (MeetingList action buttons, RecordingBar) can gate themselves without
@@ -170,6 +170,9 @@ function AppInner() {
       hasBeenOnline.current = true;
 
       // ── Ongoing health check (slow poll) ──
+      // v1.2.14: also parses `network` field so UI can surface "Mất mạng"
+      // banner during long uploads. Sidecar can be online while internet is
+      // down (e.g. wifi drops mid-upload) — these are independent signals.
       while (active) {
         await new Promise(r => setTimeout(r, 10000));
         if (!active) break;
@@ -183,10 +186,24 @@ function AppInner() {
               setStartupStep(0);
             }
             wasOffline = !isOnline;
+
+            // Parse network reachability if backend returned it.
+            if (isOnline) {
+              try {
+                const body = await res.json();
+                if (body?.network && typeof body.network.online === 'boolean') {
+                  setNetworkOnline(body.network.online);
+                }
+              } catch {} // old backend without `network` field — leave null
+            } else {
+              // Sidecar unreachable — can't trust any cached network value.
+              setNetworkOnline(null);
+            }
           }
         } catch {
           if (active) {
             setBackendStatus('offline');
+            setNetworkOnline(null);
             wasOffline = true;
           }
         }

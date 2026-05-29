@@ -24,7 +24,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // ─── Health ───
-export const checkHealth = () => request<{ status: string }>('/health');
+export interface HealthNetwork {
+    /** TCP probe result against 1.1.1.1:443 — true = internet reachable. */
+    online: boolean;
+    /** Probe latency in ms, null when offline. */
+    latency_ms: number | null;
+    /** Age of the cached probe result in ms (for staleness debugging). */
+    age_ms: number;
+}
+export interface HealthResponse {
+    status: string;
+    version?: string;
+    /** v1.2.14: backend-side internet reachability snapshot. */
+    network?: HealthNetwork;
+}
+export const checkHealth = () => request<HealthResponse>('/health');
+/** Force a fresh network probe — use after a suspected outage, NOT in poll loops. */
+export const pingNetwork = () => request<HealthNetwork>('/ping-network');
 
 // ─── Transcription ───
 export async function transcribeDiarize(audioBlob: Blob): Promise<{

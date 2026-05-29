@@ -4,6 +4,7 @@ Diagnose API router — health-check for STT and LLM providers, diarizer status.
 
 import asyncio
 import os
+import time
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -25,9 +26,96 @@ def set_diarizer(d) -> None:
     _diarizer = d
 
 
+# ─── Network connectivity probe (v1.2.14) ──────────────────────────────────
+# Frontend polls /health every ~10s; we piggyback a lightweight TCP probe so
+# UI can show "Mất mạng" banner during long Soniox uploads instead of letting
+# the user discover it only when the upload finally fails.
+#
+# Why TCP-connect to 1.1.1.1:443 (Cloudflare):
+#   - No DNS dependency — bypasses ISP DNS hijack scenarios.
+#   - No HTTP round-trip — just SYN/ACK, ~30ms when online, ~2s timeout when down.
+#   - No payload — zero bandwidth cost across many polls.
+#
+# Cache 5s + background refresh: health endpoint must stay ~instant; first
+# call awaits once so the UI gets a real value, subsequent calls return the
+# cached snapshot and refresh asynchronously.
+_NETWORK_PROBE_HOST = "1.1.1.1"
+_NETWORK_PROBE_PORT = 443
+_NETWORK_PROBE_TIMEOUT = 2.0
+_NETWORK_CACHE_TTL = 5.0  # seconds
+
+_network_cache: dict = {
+    "online": None,        # None = never probed, True/False otherwise
+    "checked_at": 0.0,     # monotonic timestamp of last successful probe write
+    "latency_ms": None,    # last probe latency for debugging
+    "checking": False,     # in-flight guard so concurrent /health calls don't probe twice
+}
+
+
+async def _probe_network_once() -> None:
+    """Single TCP connect → 1.1.1.1:443 — writes result into _network_cache."""
+    if _network_cache["checking"]:
+        return
+    _network_cache["checking"] = True
+    started = time.monotonic()
+    try:
+        try:
+            fut = asyncio.open_connection(_NETWORK_PROBE_HOST, _NETWORK_PROBE_PORT)
+            reader, writer = await asyncio.wait_for(fut, timeout=_NETWORK_PROBE_TIMEOUT)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass  # OS may already have torn down — non-fatal
+            _network_cache["online"] = True
+            _network_cache["latency_ms"] = int((time.monotonic() - started) * 1000)
+        except (asyncio.TimeoutError, OSError) as e:
+            _network_cache["online"] = False
+            _network_cache["latency_ms"] = None
+            log.debug(f"STATUS: network probe failed host={_NETWORK_PROBE_HOST} err={type(e).__name__}")
+        _network_cache["checked_at"] = time.monotonic()
+    finally:
+        _network_cache["checking"] = False
+
+
+async def _get_network_status() -> dict:
+    """Return cached status; await first probe, refresh stale in background."""
+    now = time.monotonic()
+    age = now - _network_cache["checked_at"]
+    if _network_cache["online"] is None:
+        # First call ever — block so frontend gets a real answer immediately
+        await _probe_network_once()
+    elif age > _NETWORK_CACHE_TTL and not _network_cache["checking"]:
+        # Stale — refresh in background, return cached value now
+        asyncio.create_task(_probe_network_once())
+
+    online = _network_cache["online"]
+    return {
+        "online": bool(online) if online is not None else False,
+        "latency_ms": _network_cache["latency_ms"],
+        "age_ms": int((now - _network_cache["checked_at"]) * 1000),
+    }
+
+
 @router.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    """Lightweight health endpoint — also reports network reachability so the
+    frontend can detect offline state without burning extra polls."""
+    network = await _get_network_status()
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "network": network,
+    }
+
+
+@router.get("/ping-network")
+async def ping_network():
+    """Force a fresh network probe (bypass cache) — used when the frontend
+    explicitly wants to re-check after a suspected outage. NEVER call from
+    polling loops; use /health for that."""
+    await _probe_network_once()
+    return await _get_network_status()
 
 
 @router.get("/diarizer-status")

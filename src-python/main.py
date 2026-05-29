@@ -170,6 +170,15 @@ async def lifespan(app: FastAPI):
     lang = db.get_setting("app_language") or "vi"
     log.info(t("starting", lang))
 
+    # v1.2.14 (Fix D): resurrect meetings stuck at status='uploading' from a
+    # previous sidecar crash. Runs synchronously after db.init() so the UI
+    # never sees zombie "uploading" meetings on the meeting list.
+    try:
+        from services.upload_pipeline import resurrect_stuck_meetings_on_boot
+        resurrect_stuck_meetings_on_boot()
+    except Exception as exc:
+        log.warning("[main] boot-resurrect skipped due to error: %s", exc)
+
     # ── Diarizer model init (load model only — warm-up in background) ──
     log.info("[main] Loading diarizer model...")
     try:

@@ -61,6 +61,10 @@ interface AppState {
     lang: 'vi' | 'en';
     /** Sidecar health — drives which buttons are interactive during startup. */
     backendOnline: boolean;
+    /** v1.2.14: backend-reported internet reachability (TCP 1.1.1.1:443 probe).
+     *  null = unknown yet, true = online, false = no internet. Used to surface
+     *  a banner during long uploads when the user's wifi drops. */
+    networkOnline: boolean | null;
 
     // Meetings
     meetings: Meeting[];
@@ -92,6 +96,7 @@ interface AppState {
     setSettingsOpen: (v: boolean) => void;
     setLang: (v: 'vi' | 'en') => void;
     setBackendOnline: (v: boolean) => void;
+    setNetworkOnline: (v: boolean | null) => void;
     setMeetings: (m: Meeting[]) => void;
     setCurrentMeetingId: (id: number | null) => void;
     setTransientSummary: (v: string) => void;
@@ -124,6 +129,7 @@ export const useAppStore = create<AppState>((set) => ({
     settingsOpen: false,
     lang: 'vi',
     backendOnline: false,
+    networkOnline: null,
     meetings: [],
     currentMeetingId: null,
     transientSummary: '',
@@ -242,6 +248,7 @@ export const useAppStore = create<AppState>((set) => ({
     setSettingsOpen: (v) => set({ settingsOpen: v }),
     setLang: (v) => set({ lang: v }),
     setBackendOnline: (v) => set({ backendOnline: v }),
+    setNetworkOnline: (v) => set({ networkOnline: v }),
     setMeetings: (m) => set({ meetings: m }),
     setCurrentMeetingId: (id) => set({ currentMeetingId: id }),
     setTransientSummary: (v) => set({ transientSummary: v }),

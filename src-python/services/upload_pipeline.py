@@ -38,9 +38,15 @@ from services.job_registry import JobState, JobStatus, registry
 from services.vad_splitter import AudioChunk, split_into_chunks
 from stt import (
     HALLUCINATION_PATTERNS,
+    SonioxJobError,
+    SonioxPollError,
+    SonioxUploadError,
+    delete_soniox_file,
     get_language_code,
     transcribe_nvidia_streaming,
     transcribe_soniox_file,
+    transcribe_soniox_file_id,
+    upload_soniox_file,
 )
 
 log = logging.getLogger(__name__)
@@ -61,6 +67,63 @@ DEFAULT_MAX_DURATION_HOURS = 24
 # Soniox-side variance. Files ≤ 3.5h take the single-shot path (preserves
 # globally-consistent speaker diarization across the whole file).
 SONIOX_CHUNK_MAX_SEC = 3.5 * 3600  # 12600s
+
+# ─── v1.2.14: Per-chunk retry with backoff (Fix A + B) ────────────────────
+# Soniox upload pipeline is the longest-running network operation in the app
+# (10h file → up to ~1h Soniox time). A wifi blip mid-chunk would have killed
+# the whole chunk in v1.2.13. With these retries:
+#   1s → 2s → 4s exponential backoff between attempts (3 retries = 4 tries total)
+#   - Total worst-case retry delay: 7s. Fast enough that a brief wifi outage
+#     just becomes a small latency bump instead of a "Tất cả phần thất bại".
+#   - Hard errors (4xx, bad key, bad file) skip retry — no point burning time.
+SONIOX_CHUNK_RETRY_DELAYS = (1.0, 2.0, 4.0)
+
+
+def _classify_chunk_error(exc: BaseException) -> str:
+    """Categorize a Soniox per-chunk exception as 'transient' (retry-worthy)
+    or 'hard' (re-trying would just repeat the same failure). Used by the
+    retry loop so we don't waste 3 attempts on auth or malformed-file errors.
+
+    Returns 'transient' | 'hard'.
+    """
+    type_name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+
+    # Network/transport exceptions from socket / asyncio / httpx — always retry.
+    if any(s in type_name for s in (
+        "timeout", "connection", "network", "dns", "socket",
+        "readerror", "connecterror", "connecttimeout", "readtimeout",
+    )):
+        return "transient"
+
+    # Heuristic message scan — Soniox SDK wraps lower-level errors in
+    # RuntimeError, so type alone doesn't catch them.
+    if any(s in msg for s in (
+        "connection", "timeout", "timed out", "dns ", "name or service",
+        "network", "unreachable", "reset by peer", "broken pipe",
+        "temporary failure", "no route to host", "ssl", "handshake",
+    )):
+        return "transient"
+
+    # HTTP 5xx + 429 rate-limit — server-side, retry helps. 4xx auth/bad-input — hard.
+    if any(code in msg for code in ("429", "rate limit", "too many requests")):
+        return "transient"
+    if any(code in msg for code in ("500", "502", "503", "504")):
+        return "transient"
+    if any(s in msg for s in (
+        "401", "403", "unauthorized", "forbidden", "api key", "invalid key",
+        "missing key", "key chưa được cấu hình",
+    )):
+        return "hard"
+    if any(s in msg for s in (
+        "400", "bad request", "invalid file", "unsupported format",
+        "decode", "corrupt", "cannot read",
+    )):
+        return "hard"
+
+    # Default: transient. Retry is cheap (segments_json cache prevents
+    # duplicate Soniox cost once a chunk lands successfully).
+    return "transient"
 
 # Progress band split: upload completes at 0.0 (Phase 1 took it past upload);
 # this pipeline goes 0.05 → 1.0.
@@ -111,6 +174,96 @@ def _is_cancelled(job: JobState) -> bool:
     return job.cancel_event.is_set()
 
 
+def _has_chunk_plan(meeting_id: int) -> bool:
+    """v1.2.14: True if upload_chunks rows exist for this meeting. Used by
+    failure handlers to decide between 'preserve meeting + offer retry' vs
+    'delete empty meeting + audio file'."""
+    try:
+        return bool(db.get_upload_chunks(meeting_id))
+    except Exception as exc:
+        log.warning("[pipeline] _has_chunk_plan probe failed for %s: %s", meeting_id, exc)
+        return False
+
+
+def resurrect_stuck_meetings_on_boot() -> None:
+    """v1.2.14 (Fix D): On sidecar startup, scan for meetings stuck at
+    status='uploading' — their job state didn't survive the process death
+    (crash / force-quit / OS reboot). Apply policy per meeting:
+
+      1. has chunks with status='done'  → meeting='saved' (partial transcript
+         is already in meetings.transcript from per-chunk rebuild). Flip any
+         NULL chunks → 'failed' so the retry banner appears.
+      2. has chunks, none done          → meeting='failed'. Flip NULL chunks
+         → 'failed' so retry-failed-chunks endpoint can pick them up; the
+         audio file stays on disk so retry doesn't need re-upload.
+      3. no chunks at all               → no resumable state. Delete the
+         meeting + its audio file (same policy as v1.2.11 cleanup so the
+         file_hash doesn't false-trigger duplicate detection later).
+
+    Called once from the FastAPI lifespan after db.init(). Errors per-meeting
+    are caught and logged so a single bad row doesn't block sidecar startup.
+    """
+    try:
+        stuck = db.list_stuck_uploading_meetings()
+    except Exception as exc:
+        log.warning("[pipeline] boot-resurrect query failed: %s", exc)
+        return
+
+    if not stuck:
+        return
+
+    log.info("STARTED: boot-resurrect scanning %d stuck meeting(s)", len(stuck))
+
+    for meeting in stuck:
+        meeting_id = meeting.get("id")
+        if not meeting_id:
+            continue
+        try:
+            chunks = db.get_upload_chunks(meeting_id) or []
+            done_count = sum(1 for c in chunks if c.get("status") == "done")
+
+            if not chunks:
+                # Policy 3 — no resumable state. Match v1.2.11 cleanup.
+                audio_path_raw = meeting.get("audio_path") or ""
+                if audio_path_raw:
+                    try:
+                        Path(audio_path_raw).unlink(missing_ok=True)
+                    except Exception as unlink_exc:
+                        log.warning(
+                            "[pipeline] boot-resurrect unlink %s failed: %s",
+                            audio_path_raw, unlink_exc,
+                        )
+                db.delete_meeting(meeting_id)
+                log.info(
+                    "STATUS: boot-resurrect deleted stuck-empty meeting %s",
+                    meeting_id,
+                )
+                continue
+
+            # Policies 1 + 2 share this: flip NULL chunks → failed so they
+            # show up in the retry banner. Pending chunks were either never
+            # attempted or in-flight when sidecar died — either way they
+            # need user-initiated retry.
+            flipped = db.mark_pending_chunks_failed(
+                meeting_id,
+                "Sidecar restarted while this chunk was processing — retry to reprocess.",
+            )
+
+            new_status = "saved" if done_count > 0 else "failed"
+            db.update_meeting(meeting_id, status=new_status)
+            log.info(
+                "STATUS: boot-resurrect meeting %s: %d chunks (%d done, %d→failed) → status=%s",
+                meeting_id, len(chunks), done_count, flipped, new_status,
+            )
+        except Exception as exc:
+            log.warning(
+                "[pipeline] boot-resurrect meeting %s failed: %s",
+                meeting_id, exc,
+            )
+
+    log.info("COMPLETED: boot-resurrect done")
+
+
 async def run_pipeline(job_id: str) -> None:
     """Public entry: kick off the full pipeline for an existing job + meeting."""
     job = registry.get(job_id)
@@ -144,13 +297,18 @@ async def run_pipeline(job_id: str) -> None:
         has_partial_transcript = bool(
             (meeting_now.get("transcript") or "").strip().strip("[]")
         )
+        # v1.2.14 (Fix C): keep meeting alive if chunk plan exists. Cancel
+        # mid-chunked-upload would otherwise nuke the 10h audio file and
+        # force the user to re-upload from scratch — keep the plan so a
+        # later retry can resume from where we stopped.
+        has_chunk_plan = _has_chunk_plan(job.meeting_id)
         await registry.update(
             job_id,
             status=JobStatus.CANCELLED,
             error="Cancelled",
             transcript_saved=has_partial_transcript,
         )
-        if has_partial_transcript:
+        if has_partial_transcript or has_chunk_plan:
             db.update_meeting(job.meeting_id, status="cancelled")
         else:
             audio_path_raw = meeting_now.get("audio_path") or ""
@@ -184,6 +342,11 @@ async def run_pipeline(job_id: str) -> None:
         has_partial_transcript = bool(
             (meeting_now.get("transcript") or "").strip().strip("[]")
         )
+        # v1.2.14 (Fix C): chunk plan exists → meeting is salvageable via the
+        # retry-failed-chunks endpoint. Deleting it would force a re-upload
+        # of the whole audio file (could be multi-GB / multi-hour), which is
+        # exactly what per-chunk persistence was designed to avoid.
+        has_chunk_plan = _has_chunk_plan(job.meeting_id)
         await registry.update(
             job_id,
             status=JobStatus.FAILED,
@@ -193,6 +356,28 @@ async def run_pipeline(job_id: str) -> None:
         if has_partial_transcript:
             # Path (a): keep the partial — don't overwrite status='saved'.
             pass
+        elif has_chunk_plan:
+            # Path (c): no transcript YET, but chunks are tracked — flip any
+            # in-flight (status=NULL) chunks to 'failed' so they surface in
+            # the retry banner, and mark the meeting as 'failed' (NOT delete).
+            try:
+                db.mark_pending_chunks_failed(
+                    job.meeting_id,
+                    "Pipeline failed before chunk completed — retry will reprocess.",
+                )
+            except Exception as mark_exc:
+                log.warning(
+                    "[pipeline] failed to mark pending chunks for meeting %s: %s",
+                    job.meeting_id, mark_exc,
+                )
+            try:
+                db.update_meeting(job.meeting_id, status="failed")
+            except Exception:
+                pass
+            log.info(
+                "[pipeline] meeting %s preserved (chunk plan exists) — retry available",
+                job.meeting_id,
+            )
         else:
             # Path (b): rollback the empty meeting + its audio file. This
             # MUST happen before the SSE handler emits the failure event so
@@ -479,9 +664,18 @@ async def _run_soniox_pipeline(
         log.warning("[pipeline] Soniox returned no segments")
         return []
 
-    # Build chunk_results + speaker_map directly from Soniox segments.
-    # Speaker IDs from Soniox are 1-based strings ("1", "2") — convert to
-    # 0-based ints to match Nvidia path output.
+    # Renumber speakers sequentially BEFORE building transcript parts.
+    # Chunked-path segments come in with chunk_idx*100 offset (Speaker 1, 2,
+    # 3 then 101, 102…). Single-shot segments come in with Soniox's native
+    # 1-based IDs. In both cases, walking time-order + assigning fresh
+    # 1, 2, 3… surfaces clean numbers in the UI ("Speaker 4" instead of
+    # "Speaker 101"). DB upload_chunks.segments_json keeps the offset
+    # version for uniqueness across retries.
+    _renumber_speakers_sequentially(segments)
+
+    # Build chunk_results + speaker_map. Speaker IDs from renumber are
+    # 1-based strings ("1", "2") — convert to 0-based ints to match Nvidia
+    # path output (frontend uses speakerId for color cycling mod 8).
     chunk_results: list[dict] = []
     speaker_map: dict[int, int] = {}
     for i, seg in enumerate(segments):
@@ -527,6 +721,8 @@ def _make_soniox_progress_cb(
         p: float,
         audio_dur_sec: float | None = None,
         eta_remaining_sec: float | None = None,
+        *,
+        stage: str | None = None,
     ) -> None:
         # Cooperative cancel: raise from the polling thread so the SDK
         # call unwinds and the pipeline can mark itself cancelled.
@@ -550,15 +746,27 @@ def _make_soniox_progress_cb(
         else:
             total_eta_sec = eta_remaining_sec
 
-        # Build a status message:
-        #   1. `queued` (audio_dur_sec is None) — Soniox hasn't started yet.
-        #   2. `processing` (we know audio length + ETA) — show remaining.
-        #   3. Near-done (p >= 0.95 in this chunk) — fetching tokens / cleanup.
-        if audio_dur_sec is None and eta_remaining_sec is None and p < 0.10:
+        # v1.2.14 2-step refactor: `stage` distinguishes upload (Phase A) from
+        # transcribe (Phase B). When stt.py supplies a stage, we get crisper
+        # UI messages — "Đang tải file lên (60%)" vs "Soniox đang phiên âm".
+        # Backward-compat: old callers without stage fall through to the
+        # legacy progress-band heuristic.
+        msg: str
+        if stage == "upload":
             if chunk_label:
-                msg = f"Đang gửi {chunk_label} lên Soniox..."
+                msg = f"Đang tải {chunk_label} lên Soniox..."
             else:
-                msg = "Đang gửi file lên Soniox..."
+                msg = "Đang tải file lên Soniox..."
+        elif stage == "upload_done":
+            if chunk_label:
+                msg = f"Đã tải {chunk_label} lên, đang chờ Soniox..."
+            else:
+                msg = "Đã tải lên xong, đang chờ Soniox..."
+        elif stage == "done":
+            if n_chunks > 1 and chunk_idx < n_chunks - 1:
+                msg = f"Hoàn tất {chunk_label}, chuẩn bị phần tiếp theo..."
+            else:
+                msg = "Đang xử lý kết quả"
         elif total_eta_sec is not None and audio_dur_sec is not None and p < 0.95:
             eta_label = _format_eta_vi(total_eta_sec)
             if n_chunks > 1:
@@ -594,13 +802,22 @@ async def _soniox_transcribe_single(
 ) -> list[dict]:
     """Single Soniox transcription pass over the whole WAV. Used for files
     that fit Soniox's per-submission limit (≤ 3.5h). Preserves globally-
-    consistent speaker diarization."""
+    consistent speaker diarization.
+
+    v1.2.14 2-step: uses the convenience wrapper transcribe_soniox_file()
+    which internally does upload → transcribe_file_id → cleanup. The wrapper
+    still benefits from in-poll network retry (5 consecutive errors with
+    linear backoff) so brief wifi drops during the poll loop don't kill the
+    job. Single-shot doesn't get phase-aware retry (no caching of file_id
+    across attempts) — that's the chunked path's win since this path covers
+    smaller files where re-upload cost is lower.
+    """
     job_id = job.job_id
     await registry.update(
         job_id,
         status=JobStatus.TRANSCRIBING,
         progress=P_TRANSCRIBE_START,
-        message="Đang gửi file lên Soniox...",
+        message="Đang tải file lên Soniox...",
     )
     loop = asyncio.get_running_loop()
     cb = _make_soniox_progress_cb(job, loop, chunk_idx=0, n_chunks=1)
@@ -704,23 +921,140 @@ async def _soniox_transcribe_chunked(
 
         cb = _make_soniox_progress_cb(job, loop, chunk_idx=idx, n_chunks=n_chunks)
 
+        # v1.2.14 (Fix A+B + 2-step refactor): retry transient failures with
+        # exponential backoff. Hard failures (auth, bad file) skip retry.
+        #
+        # Phase-aware retry — caches file_id across attempts so a 5xx during
+        # create-job or poll doesn't force re-upload of the chunk audio.
+        #   - SonioxUploadError → reset cached_file_id, full re-upload on next attempt
+        #   - SonioxJobError / SonioxPollError → keep cached_file_id, re-do only Phase B
+        #   - Other exceptions → classifier decides; conservatively keep file_id
+        #
+        # Cleanup: cached_file_id is deleted in a finally-like block AFTER the
+        # retry loop ends (success OR exhausted) so no orphan files pile up on
+        # Soniox side. v1.2.13 relied on stt.py's internal cleanup; with the
+        # 2-step pattern, file lifecycle is the caller's responsibility.
+        chunk_segments: list[dict] | None = None
+        last_exc: BaseException | None = None
+        cached_file_id: str | None = None
+        max_attempts = len(SONIOX_CHUNK_RETRY_DELAYS) + 1  # 1 initial + 3 retries
+
         try:
-            chunk_segments = await asyncio.to_thread(
-                transcribe_soniox_file, str(chunk_path), soniox_key, hints,
-                progress_cb=cb,
-            )
-        except Exception as exc:
-            # Continue-on-fail: don't trash previously-completed chunks.
-            # Persist the failure so the user can retry just THIS chunk
-            # via POST /meetings/{id}/retry-failed-chunks.
-            log.error(
-                "[pipeline] Soniox chunk %d/%d failed: %s",
-                idx + 1, n_chunks, exc,
-            )
-            await asyncio.to_thread(
-                db.save_soniox_chunk_failed, meeting_id, idx, str(exc),
-            )
-            continue
+            for attempt in range(max_attempts):
+                if _is_cancelled(job):
+                    raise RuntimeError("Cancelled")
+
+                if attempt > 0:
+                    delay = SONIOX_CHUNK_RETRY_DELAYS[attempt - 1]
+                    # UI message reflects WHICH phase is being retried so the
+                    # user knows whether 200MB will be re-sent or just a small
+                    # JSON POST.
+                    retry_phase_label = (
+                        "tải lên" if cached_file_id is None else "xử lý"
+                    )
+                    await registry.update(
+                        job_id,
+                        message=(
+                            f"Phần {idx + 1}/{n_chunks}: thử lại {retry_phase_label} "
+                            f"lần {attempt}/{len(SONIOX_CHUNK_RETRY_DELAYS)} sau {int(delay)}s..."
+                        ),
+                    )
+                    try:
+                        await asyncio.sleep(delay)
+                    except asyncio.CancelledError:
+                        raise
+
+                try:
+                    # Phase A — upload only if not already cached.
+                    if cached_file_id is None:
+                        cached_file_id = await asyncio.to_thread(
+                            upload_soniox_file, str(chunk_path), soniox_key,
+                            progress_cb=cb,
+                        )
+
+                    # Phase B (create job + poll + parse) using cached file_id.
+                    chunk_segments = await asyncio.to_thread(
+                        transcribe_soniox_file_id,
+                        cached_file_id, soniox_key, hints,
+                        progress_cb=cb,
+                    )
+                    break  # success → exit retry loop
+                except SonioxUploadError as exc:
+                    # Upload itself failed — file_id was never created, force
+                    # re-upload on next attempt.
+                    last_exc = exc
+                    cached_file_id = None
+                    category = _classify_chunk_error(exc)
+                    log.warning(
+                        "[pipeline] Soniox chunk %d/%d attempt %d/%d UPLOAD-FAIL [%s]: %s",
+                        idx + 1, n_chunks, attempt + 1, max_attempts, category, exc,
+                    )
+                    if category == "hard":
+                        log.info(
+                            "[pipeline] Soniox chunk %d/%d HARD upload-fail — skipping further retries",
+                            idx + 1, n_chunks,
+                        )
+                        break
+                except (SonioxJobError, SonioxPollError) as exc:
+                    # Phase B failed but file_id is still good on Soniox side
+                    # — retry will skip Phase A (huge bandwidth saving).
+                    last_exc = exc
+                    category = _classify_chunk_error(exc)
+                    log.warning(
+                        "[pipeline] Soniox chunk %d/%d attempt %d/%d JOB-FAIL [%s] (file_id=%s preserved): %s",
+                        idx + 1, n_chunks, attempt + 1, max_attempts, category,
+                        cached_file_id, exc,
+                    )
+                    if category == "hard":
+                        log.info(
+                            "[pipeline] Soniox chunk %d/%d HARD job-fail — skipping further retries",
+                            idx + 1, n_chunks,
+                        )
+                        break
+                except Exception as exc:
+                    # Unknown / RuntimeError from Soniox (e.g. status=error).
+                    # Conservatively keep file_id — a fresh job submission MAY
+                    # succeed; deleting forces re-upload which is more expensive.
+                    last_exc = exc
+                    category = _classify_chunk_error(exc)
+                    log.warning(
+                        "[pipeline] Soniox chunk %d/%d attempt %d/%d [%s] failed: %s",
+                        idx + 1, n_chunks, attempt + 1, max_attempts, category, exc,
+                    )
+                    if category == "hard":
+                        log.info(
+                            "[pipeline] Soniox chunk %d/%d HARD-failed — skipping further retries",
+                            idx + 1, n_chunks,
+                        )
+                        break
+
+            if chunk_segments is None:
+                # All attempts (or single hard attempt) failed. Persist + continue
+                # with next chunk — earlier chunks' segments_json stays intact, so
+                # the user gets a partial transcript + retry banner instead of a
+                # zero-result "everything failed" experience.
+                err_msg = str(last_exc) if last_exc else "Soniox chunk failed (unknown)"
+                log.error(
+                    "[pipeline] Soniox chunk %d/%d exhausted retries: %s",
+                    idx + 1, n_chunks, err_msg,
+                )
+                await asyncio.to_thread(
+                    db.save_soniox_chunk_failed, meeting_id, idx, err_msg,
+                )
+                continue
+        finally:
+            # Always clean up the uploaded file when retry loop exits — both
+            # on success (transcript already pulled) AND on failure (no point
+            # paying Soniox storage for a file we couldn't process). This is
+            # the file lifecycle ownership pivot in the 2-step refactor.
+            if cached_file_id is not None:
+                try:
+                    await asyncio.to_thread(delete_soniox_file, soniox_key, cached_file_id)
+                except Exception as cleanup_exc:
+                    log.warning(
+                        "[pipeline] Soniox file cleanup failed for chunk %d (non-fatal): %s",
+                        idx, cleanup_exc,
+                    )
 
         # Apply offset to start_ms/end_ms so the timeline stays continuous
         # across chunks. Apply speaker offset so IDs from different chunks
@@ -760,15 +1094,49 @@ async def _soniox_transcribe_chunked(
     return all_segments
 
 
+def _renumber_speakers_sequentially(segments: list[dict]) -> None:
+    """Renumber speaker IDs to 1, 2, 3, … based on order of first appearance
+    across all segments in time order. MUTATES the input list in place.
+
+    Why this exists — Soniox detects speakers per-chunk independently. We
+    offset chunk N's speaker IDs by N×100 in DB to keep them unique, but
+    that surfaces as "Speaker 3" → "Speaker 101" jumps in the UI which
+    confuses users (looks like a bug, not 100 different people).
+
+    This pass renumbers AT DISPLAY TIME — walks segments in chronological
+    order, assigns sequential IDs starting from 1. Same person still has
+    different IDs across chunks (Soniox can't carry speaker identity across
+    submissions), but the numbers themselves are clean (1, 2, 3, 4 instead
+    of 1, 2, 3, 101). User can still merge with the rename UI.
+
+    Note: this changes IDs on each rebuild. If a chunk is retried later and
+    introduces a new speaker that lands BEFORE existing ones (impossible
+    since chunks are sorted by time), the existing numbering would shift.
+    In practice chunks complete and time-orders don't reshuffle, so IDs
+    remain stable across rebuilds.
+    """
+    mapping: dict[str, str] = {}
+    next_id = 1
+    for seg in segments:
+        orig = str(seg.get("speaker", "1"))
+        if orig not in mapping:
+            mapping[orig] = str(next_id)
+            next_id += 1
+        seg["speaker"] = mapping[orig]
+
+
 async def _rebuild_soniox_transcript_from_db(meeting_id: int) -> None:
     """Read all status='done' Soniox chunks from DB (ordered by chunk_idx),
-    concat their segments_json, and write the merged transcript back to the
-    meeting record.
+    concat their segments_json, renumber speakers sequentially, and write
+    the merged transcript back to the meeting record.
 
-    This is the single source of truth for the Soniox-chunked transcript —
-    called after each chunk completes during initial run AND after each
-    retry succeeds. Always reads DB in chunk_idx order, so chunks completed
-    out-of-order (retry case) still land at the correct time position.
+    Single source of truth for the Soniox-chunked transcript — called
+    after each chunk completes during initial run AND after each retry
+    succeeds. Reads DB in chunk_idx order so chunks completed out-of-
+    order (retry case) still land at correct time positions. Renumbering
+    happens here so the transcript persisted to meeting.transcript always
+    has clean Speaker 1, 2, 3, … (offset-version stays in upload_chunks
+    .segments_json for internal uniqueness).
     """
     rows = await asyncio.to_thread(db.get_upload_chunks, meeting_id)
     if not rows:
@@ -793,6 +1161,10 @@ async def _rebuild_soniox_transcript_from_db(meeting_id: int) -> None:
 
     if not all_segments:
         return
+
+    # Renumber speakers in time order BEFORE building chunk_results so the
+    # transcript persisted to meeting.transcript has clean IDs.
+    _renumber_speakers_sequentially(all_segments)
 
     # Build chunk_results + speaker_map (same shape as the regular Soniox
     # build path so _build_transcript_parts works unchanged).

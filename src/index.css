@@ -1147,27 +1147,32 @@ body.electron-app .sub-tabs {
   transition: background 150ms var(--ease);
 }
 
-/* Load-more button shown above the visible transcript window when there
-   are older parts hidden (typical for 4h+ sessions). Keeps the DOM small
-   so a long recording doesn't lag the render. */
-.transcript-load-more {
+/* v1.2.14: scroll-triggered auto-load sentinel. Shows at top of the
+   transcript list when older parts are hidden (typical for 4h+ sessions).
+   Scrolling within ~120px of this sentinel auto-loads the next page —
+   no click required. Visual is intentionally subtle (status text + tiny
+   spinner) so it doesn't look like a clickable button. */
+.transcript-load-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   align-self: center;
-  margin: 8px 0 12px;
-  padding: 6px 14px;
-  font-size: 0.78rem;
-  font-weight: 500;
+  margin: 4px 0 8px;
+  padding: 4px 12px;
+  font-size: 0.74rem;
+  font-weight: 400;
   color: var(--text-muted);
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px dashed rgba(99, 102, 241, 0.3);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 150ms var(--ease), color 150ms var(--ease), border-color 150ms var(--ease);
+  background: transparent;
 }
 
-.transcript-load-more:hover {
-  background: rgba(99, 102, 241, 0.16);
-  color: var(--text);
-  border-color: rgba(99, 102, 241, 0.55);
+.transcript-load-sentinel-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(99, 102, 241, 0.25);
+  border-top-color: rgba(99, 102, 241, 0.7);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
 }
 
 /* v1.2.13: retry-failed-chunks banner — sits at top of transcript list
@@ -1242,6 +1247,62 @@ body.electron-app .sub-tabs {
   height: 16px;
   border: 2px solid rgba(180, 83, 9, 0.25);
   border-top-color: #b45309;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ── Network offline banner (v1.2.14) ──────────────────────────────────
+   Red palette (vs amber retry banner) — internet loss is a harder failure
+   than "some chunks failed, retry-able." Shown in upload modal + meeting
+   detail while a long-running pipeline is paused waiting for connection. */
+.network-offline-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md, 10px);
+}
+
+.network-offline-banner-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.18);
+  color: #b91c1c;
+}
+
+.network-offline-banner-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.network-offline-banner-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text, #0f172a);
+  margin-bottom: 2px;
+}
+
+.network-offline-banner-sub {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #64748b);
+  line-height: 1.4;
+}
+
+.network-offline-banner-spinner {
+  flex-shrink: 0;
+  align-self: center;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(185, 28, 28, 0.25);
+  border-top-color: #b91c1c;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }

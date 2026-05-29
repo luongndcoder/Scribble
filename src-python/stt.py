@@ -345,159 +345,306 @@ def transcribe_nvidia_streaming(file_path: str, api_key: str, language: str = "v
     return text
 
 
-def transcribe_soniox_file(
+# ── Soniox 2-step upload pattern (v1.2.14) ───────────────────────────────
+# Splits the old single-call transcribe_soniox_file into 3 distinct phases:
+#   A) upload_soniox_file(path) → file_id      [POST /v1/files, multipart]
+#   B) transcribe_soniox_file_id(file_id, ...) → segments
+#         B.1 POST /v1/transcriptions {file_id, config} [cheap JSON ~1KB]
+#         B.2 GET /v1/transcriptions/{id}   (poll loop, in-poll retry)
+#         B.3 GET /v1/transcriptions/{id}/transcript
+#   delete_soniox_file(file_id)                [DELETE /v1/files/{id}]
+#
+# Why split: a 5xx during create-job or poll no longer forces re-upload of
+# 200MB. The retry loop in upload_pipeline.py caches file_id across attempts,
+# so transient errors after Phase A only cost a ~1KB JSON retry.
+#
+# Phase-specific exceptions let the chunk retry loop decide:
+#   - SonioxUploadError → reset cached_file_id, redo Phase A on next attempt
+#   - SonioxJobError / SonioxPollError → keep file_id, retry only Phase B
+# Outer caller is responsible for calling delete_soniox_file() once the
+# retry loop ends (success OR exhausted) so no orphan files on Soniox.
+
+
+class SonioxUploadError(Exception):
+    """Phase A failure — file upload to Soniox failed. Retry will re-upload."""
+    pass
+
+
+class SonioxJobError(Exception):
+    """Phase B.1 failure — Soniox refused to create transcription job. file_id
+    still valid; retry only needs to re-POST the JSON create request."""
+    pass
+
+
+class SonioxPollError(Exception):
+    """Phase B.2 failure — exhausted in-poll retries while polling for
+    completion. file_id + transcription_id still valid (the job MAY still be
+    running on Soniox side); a fresh transcription create with the same
+    file_id can resume work without re-upload."""
+    pass
+
+
+# In-poll resilience: tolerate N consecutive network errors before bubbling
+# up as SonioxPollError. Each retry backs off linearly (3s, 6s, 9s, 12s, 15s)
+# capped so a brief wifi outage during the poll window doesn't kill the job.
+_POLL_MAX_CONSECUTIVE_NETWORK_ERRORS = 5
+_POLL_BACKOFF_BASE_SEC = 3.0
+_POLL_BACKOFF_CAP_SEC = 30.0
+
+
+def upload_soniox_file(
     file_path: str,
+    api_key: str,
+    *,
+    progress_cb=None,
+) -> str:
+    """Phase A — upload audio file to Soniox Files API, return file_id.
+
+    Caller is responsible for cleanup via delete_soniox_file() once the
+    file_id is no longer needed (after successful transcribe + parse, OR
+    after the retry loop finally exhausts).
+
+    Raises SonioxUploadError on any failure. The retry loop in
+    upload_pipeline.py catches this and forces a re-upload on next attempt.
+    """
+    if not api_key:
+        raise SonioxUploadError("Soniox API key chưa được cấu hình")
+
+    from pathlib import Path
+
+    from soniox import SonioxClient
+
+    filename = Path(file_path).name
+    log.info("[stt:soniox-async] Phase A — uploading %s", filename)
+    client = SonioxClient(api_key=api_key)
+
+    if progress_cb is not None:
+        try: progress_cb(0.0, None, None, stage="upload")
+        except Exception: pass
+
+    try:
+        uploaded = client.files.upload(file_path, filename=filename)
+        file_id = uploaded.id
+    except Exception as exc:
+        # Wrap so caller can distinguish upload failure from job/poll failure.
+        log.warning("[stt:soniox-async] Phase A upload failed: %s", exc)
+        raise SonioxUploadError(f"Upload failed: {exc}") from exc
+
+    if progress_cb is not None:
+        try: progress_cb(0.10, None, None, stage="upload_done")
+        except Exception: pass
+
+    log.info("[stt:soniox-async] Phase A done — file_id=%s", file_id)
+    return file_id
+
+
+def delete_soniox_file(api_key: str, file_id: str) -> None:
+    """Best-effort delete of an uploaded Soniox file. Errors are logged but
+    never raised — cleanup failure must not mask the real outcome of the
+    transcription pipeline."""
+    if not file_id or not api_key:
+        return
+    try:
+        from soniox import SonioxClient
+        client = SonioxClient(api_key=api_key)
+        client.files.delete(file_id)
+        log.info("[stt:soniox-async] deleted file_id=%s", file_id)
+    except Exception as exc:
+        log.warning("[stt:soniox-async] file delete failed (non-fatal): %s", exc)
+
+
+def _classify_poll_error(exc: BaseException) -> bool:
+    """Return True if a poll-time exception is a transient network blip
+    (worth retrying in-place) vs a hard error (bubble up immediately)."""
+    type_name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    if any(s in type_name for s in (
+        "timeout", "connection", "network", "dns", "socket",
+        "readerror", "connecterror", "connecttimeout", "readtimeout",
+    )):
+        return True
+    if any(s in msg for s in (
+        "connection", "timeout", "timed out", "network", "unreachable",
+        "reset by peer", "broken pipe", "ssl", "handshake",
+    )):
+        return True
+    # 5xx + 429 are transient; 4xx auth/format are hard.
+    if any(code in msg for code in ("429", "500", "502", "503", "504")):
+        return True
+    return False
+
+
+def transcribe_soniox_file_id(
+    file_id: str,
     api_key: str,
     language_hints: list[str] | None = None,
     *,
     progress_cb=None,
 ) -> list[dict]:
-    """Transcribe a finite audio file via Soniox async API — returns
-    diarized segments with absolute timestamps.
+    """Phase B — create transcription job + poll for completion + parse
+    segments, using an EXISTING uploaded file_id. Does NOT upload, does NOT
+    delete the file. Caller manages file_id lifecycle.
 
-    Soniox's stt-async-v4 returns tokens with built-in speaker labels
-    (consistent across the WHOLE file — no need for our own cross-chunk
-    clustering). This function groups consecutive same-speaker tokens
-    into segments and returns:
-
-        [
-          {"start_ms": 0, "end_ms": 5230, "text": "...", "speaker": "1"},
-          {"start_ms": 5230, "end_ms": 8100, "text": "...", "speaker": "2"},
-          ...
-        ]
-
-    The file is auto-deleted from Soniox after we fetch the transcript
-    (delete_after=True) so files don't pile up in the user's account.
-
-    progress_cb is called with float progress 0.0..1.0 while polling for
-    completion — used by the upload pipeline to drive SSE progress.
+    Raises:
+      - SonioxJobError: failed to create the transcription job (Phase B.1).
+        file_id still valid; caller may retry with same file_id.
+      - SonioxPollError: poll loop exhausted consecutive network errors OR
+        polling deadline busted. file_id + transcription_id still valid.
+      - RuntimeError: Soniox reported status=error (transcription itself
+        failed semantically — bad audio, internal error). file_id valid but
+        retrying will likely fail the same way.
     """
     if not api_key:
-        raise RuntimeError("Soniox API key chưa được cấu hình")
-
-    from pathlib import Path
+        raise SonioxJobError("Soniox API key chưa được cấu hình")
+    if not file_id:
+        raise SonioxJobError("Missing file_id — Phase A must run first")
 
     from soniox import SonioxClient
     from soniox.types import CreateTranscriptionConfig
 
     hints = language_hints or ["vi"]
     log.info(
-        "[stt:soniox-async] stt-async-v4, language_hints=%s, file=%s, diarization=ON",
-        hints, Path(file_path).name,
+        "[stt:soniox-async] Phase B — file_id=%s, language_hints=%s, diarization=ON",
+        file_id, hints,
     )
-
     client = SonioxClient(api_key=api_key)
     config = CreateTranscriptionConfig(
         model="stt-async-v4",
         language_hints=hints,
-        # Soniox's diarization is excellent and globally consistent across
-        # the whole file — we use it directly and skip our CAM++ pass for
-        # the Soniox path.
         enable_speaker_diarization=True,
         enable_language_identification=False,
     )
 
+    # ── Phase B.1: CREATE JOB (cheap JSON POST) ─────────────────────────
     try:
-        # Use the lower-level transcribe() + wait() so we can emit
-        # progress events while polling. The convenience
-        # transcribe_and_wait_with_tokens() hides the poll loop.
-        transcription = client.stt.transcribe(
-            file=file_path,
-            filename=Path(file_path).name,
-            config=config,
-        )
-        # Poll manually so the upload pipeline can stream progress.
-        import time as _time
-
-        # Soniox stt-async-v4 doesn't expose a `progress_percent` field on the
-        # transcription object — only `audio_duration_ms` (becomes available
-        # once processing actually starts) and `status` (queued/processing/
-        # completed/error). We derive a realistic ETA from:
-        #   1. audio_duration_ms: ground-truth file length, set by Soniox once
-        #      it parses the file header.
-        #   2. SONIOX_THROUGHPUT_X: empirical processing speed of stt-async-v4
-        #      relative to realtime. 10x is conservative — Soniox's actual
-        #      throughput is ~15-25x but we leave headroom for: (a) network
-        #      slowness between client and Soniox edge, (b) peak-load queue
-        #      time, (c) the user's expectation that an ETA shouldn't slip.
-        #      Better to land slightly under-promised than over-promised.
-        #   3. wall_clock_elapsed: time since transcription was created.
-        # Progress = elapsed / expected, capped at 0.95 until status=completed.
-        SONIOX_THROUGHPUT_X = 10.0
-        job_start_time = _time.time()
-
-        # Adaptive polling deadline: start with 30min, extend once Soniox
-        # reveals audio_duration_ms. Final deadline = job_start + max(1800,
-        # audio_dur_sec / 5 + 1800) — gives ≥30min buffer even at 5x worst-
-        # case throughput. Previous hardcoded 1h timeout could bust on
-        # 4-5h chunks during Soniox peak load.
-        deadline = job_start_time + 1800.0
-        deadline_extended = False
-        last_progress = 0.0
-        while _time.time() < deadline:
-            t = client.stt.get(transcription.id)
-            status = getattr(t, "status", None)
-            status_str = str(status)
-            if status_str.endswith("completed") or status_str == "completed":
-                transcription = t
-                break
-            if status_str.endswith("error") or status_str == "error":
-                err = getattr(t, "error_message", None) or "Soniox transcription failed"
-                raise RuntimeError(err)
-
-            # audio_duration_ms appears once Soniox starts processing —
-            # before that, we're in `queued` state with no ETA info. Extend
-            # polling deadline once duration is known so a long file doesn't
-            # bust the initial 30min cap.
-            audio_ms = getattr(t, "audio_duration_ms", None) or 0
-            audio_dur_sec = audio_ms / 1000.0 if audio_ms > 0 else None
-
-            if audio_dur_sec is not None and not deadline_extended:
-                # 5x conservative — even on bad days Soniox shouldn't be
-                # slower. +30min buffer for upload/queue/cleanup.
-                deadline = job_start_time + max(1800.0, audio_dur_sec / 5.0 + 1800.0)
-                deadline_extended = True
-
-            if progress_cb is not None:
-                if audio_dur_sec is not None:
-                    expected_total_sec = max(audio_dur_sec / SONIOX_THROUGHPUT_X, 1.0)
-                    elapsed = _time.time() - job_start_time
-                    progress = min(0.95, elapsed / expected_total_sec)
-                    eta_remaining_sec = max(0.0, expected_total_sec - elapsed)
-                else:
-                    # Still in `queued` — Soniox hasn't started yet. Inch up
-                    # slowly so the user sees activity, but don't fake
-                    # significant progress.
-                    progress = min(0.08, last_progress + 0.01)
-                    eta_remaining_sec = None
-
-                last_progress = progress
-                try:
-                    progress_cb(progress, audio_dur_sec, eta_remaining_sec)
-                except Exception:
-                    pass
-            _time.sleep(3.0)
-        else:
-            raise TimeoutError("Soniox transcription timeout (>1h)")
-
-        result = client.stt.get_transcript(transcription.id)
-        if progress_cb is not None:
-            try: progress_cb(1.0, None, 0.0)
-            except Exception: pass
-
-        # Clean up server-side. Errors here are non-fatal.
-        try:
-            file_id_to_delete = transcription.file_id
-            client.stt.delete(transcription.id)
-            if file_id_to_delete:
-                client.files.delete(file_id_to_delete)
-        except Exception as cleanup_exc:
-            log.warning("[stt:soniox-async] cleanup failed (non-fatal): %s", cleanup_exc)
+        transcription = client.stt.transcribe(file_id=file_id, config=config)
     except Exception as exc:
-        log.warning("[stt:soniox-async] failed: %s", exc)
-        raise
+        log.warning("[stt:soniox-async] Phase B.1 create-job failed: %s", exc)
+        raise SonioxJobError(f"Create transcription failed: {exc}") from exc
 
-    # ── Token → segment grouping ─────────────────────────────────────
+    transcription_id = transcription.id
+    log.info("[stt:soniox-async] Phase B.1 done — transcription_id=%s", transcription_id)
+
+    # ── Phase B.2: POLL with in-poll retry ──────────────────────────────
+    # Adaptive polling deadline same as before — extends once Soniox reveals
+    # audio_duration_ms. SONIOX_THROUGHPUT_X = 10x conservative.
+    import time as _time
+
+    SONIOX_THROUGHPUT_X = 10.0
+    job_start_time = _time.time()
+    deadline = job_start_time + 1800.0
+    deadline_extended = False
+    last_progress = 0.0
+    consecutive_network_errors = 0
+
+    while _time.time() < deadline:
+        try:
+            t = client.stt.get(transcription_id)
+            consecutive_network_errors = 0  # reset on successful poll
+        except Exception as exc:
+            # In-poll retry: tolerate brief network blips without killing the
+            # job. The job stays alive on Soniox side regardless of our poll
+            # connectivity, so a 30s wifi outage shouldn't lose 200MB upload.
+            if not _classify_poll_error(exc):
+                # Hard error — bubble up immediately (e.g. 401 from key
+                # rotation, 404 if Soniox somehow lost the job).
+                log.warning("[stt:soniox-async] Phase B.2 poll HARD-failed: %s", exc)
+                raise SonioxPollError(f"Poll failed: {exc}") from exc
+
+            consecutive_network_errors += 1
+            if consecutive_network_errors >= _POLL_MAX_CONSECUTIVE_NETWORK_ERRORS:
+                log.warning(
+                    "[stt:soniox-async] Phase B.2 exhausted %d consecutive poll errors — bubbling up",
+                    _POLL_MAX_CONSECUTIVE_NETWORK_ERRORS,
+                )
+                raise SonioxPollError(
+                    f"Poll exhausted {_POLL_MAX_CONSECUTIVE_NETWORK_ERRORS} retries: {exc}"
+                ) from exc
+
+            # Linear backoff capped at 30s (3s → 6s → 9s → 12s → 15s).
+            backoff = min(
+                _POLL_BACKOFF_BASE_SEC * consecutive_network_errors,
+                _POLL_BACKOFF_CAP_SEC,
+            )
+            log.info(
+                "[stt:soniox-async] Phase B.2 poll blip %d/%d, backing off %.0fs: %s",
+                consecutive_network_errors, _POLL_MAX_CONSECUTIVE_NETWORK_ERRORS,
+                backoff, exc,
+            )
+            _time.sleep(backoff)
+            continue
+
+        status_str = str(getattr(t, "status", None))
+        if status_str.endswith("completed") or status_str == "completed":
+            transcription = t
+            break
+        if status_str.endswith("error") or status_str == "error":
+            err = getattr(t, "error_message", None) or "Soniox transcription failed"
+            # Soniox-side hard failure (bad audio, model error) — NOT a network
+            # issue, retry won't help. Raise plain RuntimeError so classifier
+            # picks it up as 'hard' and skips retries.
+            raise RuntimeError(err)
+
+        audio_ms = getattr(t, "audio_duration_ms", None) or 0
+        audio_dur_sec = audio_ms / 1000.0 if audio_ms > 0 else None
+
+        if audio_dur_sec is not None and not deadline_extended:
+            deadline = job_start_time + max(1800.0, audio_dur_sec / 5.0 + 1800.0)
+            deadline_extended = True
+
+        if progress_cb is not None:
+            # Phase B maps to 0.10-0.95 of the overall progress range so
+            # the UI can keep its "upload 0-10% → transcribe 10-95% → done
+            # 100%" mental model.
+            if audio_dur_sec is not None:
+                expected_total_sec = max(audio_dur_sec / SONIOX_THROUGHPUT_X, 1.0)
+                elapsed = _time.time() - job_start_time
+                local_p = min(0.95, elapsed / expected_total_sec)
+                eta_remaining_sec = max(0.0, expected_total_sec - elapsed)
+                # Re-scale to 0.10-0.95 band of the outer progress.
+                progress = 0.10 + local_p * (0.95 - 0.10)
+            else:
+                # Still queued — inch up slowly inside the 0.10-0.15 band.
+                progress = min(0.15, last_progress + 0.005)
+                eta_remaining_sec = None
+
+            last_progress = progress
+            try:
+                progress_cb(progress, audio_dur_sec, eta_remaining_sec, stage="transcribe")
+            except Exception:
+                pass
+        _time.sleep(3.0)
+    else:
+        raise SonioxPollError(f"Polling deadline exceeded (>{int(deadline - job_start_time)}s)")
+
+    # ── Phase B.3: FETCH TRANSCRIPT ─────────────────────────────────────
+    try:
+        result = client.stt.get_transcript(transcription_id)
+    except Exception as exc:
+        # Final fetch failed — treat as poll-stage error so caller may retry
+        # with same file_id (fresh job will produce same transcript).
+        log.warning("[stt:soniox-async] Phase B.3 get_transcript failed: %s", exc)
+        raise SonioxPollError(f"Get transcript failed: {exc}") from exc
+
+    if progress_cb is not None:
+        try: progress_cb(1.0, None, 0.0, stage="done")
+        except Exception: pass
+
+    # Best-effort cleanup of transcription record (NOT the file — caller owns).
+    try:
+        client.stt.delete(transcription_id)
+    except Exception as cleanup_exc:
+        log.warning("[stt:soniox-async] transcription cleanup failed (non-fatal): %s", cleanup_exc)
+
+    return _parse_soniox_segments(result)
+
+
+def _parse_soniox_segments(result) -> list[dict]:
+    """Group consecutive same-speaker tokens into segments.
+
+    Result format: [{"start_ms", "end_ms", "text", "speaker"}, ...]
+    Hallucination filter applied per segment.
+    """
     tokens = list(result.tokens or [])
     segments: list[dict] = []
     cur_speaker: str | None = None
@@ -529,20 +676,17 @@ def transcribe_soniox_file(
             continue
 
         if cur_speaker is None:
-            # First token
             cur_speaker = speaker
             cur_start = start_ms
             cur_end = end_ms
             cur_pieces = [text_piece]
         elif speaker != cur_speaker:
-            # Speaker changed → flush current and start new segment
             _flush()
             cur_speaker = speaker
             cur_start = start_ms
             cur_end = end_ms
             cur_pieces = [text_piece]
         else:
-            # Same speaker — extend current segment
             cur_pieces.append(text_piece)
             cur_end = end_ms
 
@@ -553,6 +697,24 @@ def transcribe_soniox_file(
         len({s["speaker"] for s in segments}),
     )
     return segments
+
+
+def transcribe_soniox_file(
+    file_path: str,
+    api_key: str,
+    language_hints: list[str] | None = None,
+    *,
+    progress_cb=None,
+) -> list[dict]:
+    """Convenience wrapper: upload + transcribe + cleanup in one call.
+    No retry-friendly file_id reuse — callers that need that should call
+    upload_soniox_file() and transcribe_soniox_file_id() separately.
+    """
+    file_id = upload_soniox_file(file_path, api_key, progress_cb=progress_cb)
+    try:
+        return transcribe_soniox_file_id(file_id, api_key, language_hints, progress_cb=progress_cb)
+    finally:
+        delete_soniox_file(api_key, file_id)
 
 
 def _strip_wav_header(wav_bytes: bytes) -> bytes:
