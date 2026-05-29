@@ -114,6 +114,12 @@ class Database:
             "ALTER TABLE meetings ADD COLUMN file_hash TEXT DEFAULT NULL",
             "ALTER TABLE meetings ADD COLUMN source_filename TEXT DEFAULT NULL",
             "CREATE INDEX IF NOT EXISTS idx_meetings_file_hash ON meetings(file_hash)",
+            # v1.2.13: per-chunk failure tracking + denormalized failed count
+            # for fast list queries (avoids COUNT(*) per meeting).
+            "ALTER TABLE meetings ADD COLUMN failed_chunks_count INTEGER DEFAULT 0",
+            "ALTER TABLE upload_chunks ADD COLUMN status TEXT DEFAULT NULL",
+            "ALTER TABLE upload_chunks ADD COLUMN error_message TEXT DEFAULT NULL",
+            "ALTER TABLE upload_chunks ADD COLUMN segments_json TEXT DEFAULT NULL",
         ]
         for sql in migrations:
             try:
@@ -204,10 +210,17 @@ class Database:
         conn.commit()
 
     def get_upload_chunks(self, meeting_id: int) -> list[dict]:
-        """Return all upload_chunks rows for a meeting, ordered by chunk_idx."""
+        """Return all upload_chunks rows for a meeting, ordered by chunk_idx.
+
+        Returns columns: chunk_idx, start_ms, end_ms, text, embedding, status,
+        error_message, segments_json. status/error_message/segments_json are
+        v1.2.13 additions for the Soniox chunked path with per-chunk persist
+        and retry support; Nvidia path leaves them NULL.
+        """
         conn = self._conn()
         rows = conn.execute(
-            "SELECT chunk_idx, start_ms, end_ms, text, embedding "
+            "SELECT chunk_idx, start_ms, end_ms, text, embedding, "
+            "       status, error_message, segments_json "
             "FROM upload_chunks WHERE meeting_id = ? ORDER BY chunk_idx",
             (meeting_id,),
         ).fetchall()
@@ -217,6 +230,98 @@ class Database:
         conn = self._conn()
         conn.execute("DELETE FROM upload_chunks WHERE meeting_id = ?", (meeting_id,))
         conn.commit()
+
+    # ─── Soniox chunked path (v1.2.13) ───
+
+    def save_soniox_chunk_done(
+        self,
+        meeting_id: int,
+        chunk_idx: int,
+        segments_json: str,
+    ) -> None:
+        """Mark a Soniox chunk as successfully transcribed. Stores the JSON-
+        encoded segments list (with absolute timestamps already applied).
+
+        Also recomputes meetings.failed_chunks_count so the UI can show the
+        retry banner without a per-fetch COUNT(*).
+        """
+        conn = self._conn()
+        conn.execute(
+            """
+            UPDATE upload_chunks
+            SET status = 'done',
+                error_message = NULL,
+                segments_json = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE meeting_id = ? AND chunk_idx = ?
+            """,
+            (segments_json, meeting_id, chunk_idx),
+        )
+        self._refresh_failed_chunks_count(meeting_id)
+        conn.commit()
+
+    def save_soniox_chunk_failed(
+        self,
+        meeting_id: int,
+        chunk_idx: int,
+        error_message: str,
+    ) -> None:
+        """Mark a Soniox chunk as failed with the upstream error message.
+        Recomputes meetings.failed_chunks_count for the UI banner."""
+        conn = self._conn()
+        # Truncate error_message to keep DB row reasonable. Full message lives
+        # only in process logs.
+        truncated = (error_message or "")[:500]
+        conn.execute(
+            """
+            UPDATE upload_chunks
+            SET status = 'failed',
+                error_message = ?,
+                segments_json = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE meeting_id = ? AND chunk_idx = ?
+            """,
+            (truncated, meeting_id, chunk_idx),
+        )
+        self._refresh_failed_chunks_count(meeting_id)
+        conn.commit()
+
+    def reset_soniox_failed_chunks(self, meeting_id: int) -> int:
+        """Flip all status='failed' rows back to NULL (pending) for a retry.
+        Returns count of chunks reset. Called by retry endpoint before
+        re-running the pipeline so chunks get re-attempted."""
+        conn = self._conn()
+        cursor = conn.execute(
+            """
+            UPDATE upload_chunks
+            SET status = NULL, error_message = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE meeting_id = ? AND status = 'failed'
+            """,
+            (meeting_id,),
+        )
+        affected = cursor.rowcount
+        self._refresh_failed_chunks_count(meeting_id)
+        conn.commit()
+        return affected
+
+    def _refresh_failed_chunks_count(self, meeting_id: int) -> None:
+        """Recompute and persist meetings.failed_chunks_count. Caller's
+        responsibility to commit (we run inside the caller's tx)."""
+        conn = self._conn()
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM upload_chunks
+            WHERE meeting_id = ? AND status = 'failed'
+            """,
+            (meeting_id,),
+        ).fetchone()
+        n = int(row["n"]) if row else 0
+        conn.execute(
+            "UPDATE meetings SET failed_chunks_count = ? WHERE id = ?",
+            (n, meeting_id),
+        )
 
     # ─── Meeting attachments (reference materials for LLM summary) ───
     def add_attachment(

@@ -50,7 +50,17 @@ db = Database()
 # Riva offline_recognize quota: 3 concurrent is comfortable for free-tier keys.
 # Exposed via setting `upload_stt_concurrency` for power users.
 DEFAULT_STT_CONCURRENCY = 3
-DEFAULT_MAX_DURATION_HOURS = 4
+# 24h is a sanity ceiling against runaway uploads — NOT a true product limit.
+# The pipeline handles any duration: Nvidia path chunks via VAD (<2min/chunk),
+# Soniox path auto-splits at SONIOX_CHUNK_MAX_SEC when needed. Adjust via
+# setting `upload_max_duration_hours` if a user has legit >24h needs.
+DEFAULT_MAX_DURATION_HOURS = 24
+
+# Soniox stt-async-v4 has an ~5h cap per submission. We split at 3.5h to
+# leave a 30% safety buffer for network slowness, peak-load queueing, and
+# Soniox-side variance. Files ≤ 3.5h take the single-shot path (preserves
+# globally-consistent speaker diarization across the whole file).
+SONIOX_CHUNK_MAX_SEC = 3.5 * 3600  # 12600s
 
 # Progress band split: upload completes at 0.0 (Phase 1 took it past upload);
 # this pipeline goes 0.05 → 1.0.
@@ -253,14 +263,31 @@ async def _execute(
         return
 
     # ── Provider dispatch ──────────────────────────────────────────────────
-    # Soniox's async API does its own diarization + handles long files natively
-    # (up to 5h). For that path we send the whole WAV in a single call so
-    # speaker IDs are globally consistent (no CAM++ clustering needed). Nvidia
-    # still uses the chunked path because Riva caps audio length per call and
-    # we get parallel STT speedup + per-chunk resume.
+    # Soniox's async API handles files up to ~5h per submission. For shorter
+    # files we send the whole WAV in 1 call so speaker IDs stay globally
+    # consistent (Soniox's diarization, no CAM++ pass). For files > 3.5h we
+    # auto-split into chunks and stitch results back together with offset.
+    # Nvidia path always chunks via VAD because Riva caps audio length per
+    # call and chunking gives parallel STT speedup + per-chunk resume.
     stt_provider = (db.get_setting("stt_provider") or "nvidia").strip().lower()
     if stt_provider == "soniox":
-        transcript_parts = await _run_soniox_pipeline(job, meeting_id, wav_path)
+        transcript_parts = await _run_soniox_pipeline(
+            job, meeting_id, wav_path, duration_sec, tmp_root,
+        )
+        # v1.2.13: When all Soniox chunks failed AND we have no salvageable
+        # transcript at all, raise so the outer handler treats it as full
+        # failure (deletes empty meeting + audio per v1.2.11 cleanup). The
+        # partial-failure case (some chunks done, some failed) stays in the
+        # success branch — UI shows the retry banner inside the meeting.
+        if not transcript_parts:
+            failed_count = int(
+                (db.get_meeting(meeting_id) or {}).get("failed_chunks_count") or 0
+            )
+            if failed_count > 0:
+                raise RuntimeError(
+                    f"Tất cả {failed_count} phần Soniox đều thất bại — "
+                    "vui lòng kiểm tra Soniox API key, mạng, hoặc upload lại file."
+                )
     else:
         transcript_parts = await _run_nvidia_chunked_pipeline(
             job, meeting, meeting_id, wav_path, tmp_root,
@@ -359,15 +386,56 @@ async def _execute(
     )
 
 
+def _format_eta_vi(eta_sec: float) -> str:
+    """Format ETA in Vietnamese: '45s', '12 phút', '1h 23 phút', '2h 15 phút'.
+
+    Granularity:
+      - < 60s → '{X}s'
+      - < 60 min → '{X} phút' (ceil so '0 phút' never shows)
+      - ≥ 60 min → '{H}h' or '{H}h {M} phút' (drop ' 0 phút' for clean output)
+    """
+    import math
+    if eta_sec < 60:
+        return f"{max(1, int(eta_sec))}s"
+    total_min = math.ceil(eta_sec / 60.0)
+    if total_min < 60:
+        return f"{total_min} phút"
+    hours = total_min // 60
+    mins = total_min % 60
+    if mins == 0:
+        return f"{hours}h"
+    return f"{hours}h {mins} phút"
+
+
+def _format_duration_vi(dur_sec: float) -> str:
+    """Format audio duration for display: '45s', '12 phút', '1h 30 phút'."""
+    if dur_sec < 60:
+        return f"{int(dur_sec)}s"
+    total_min = int(dur_sec / 60)
+    if total_min < 60:
+        return f"{total_min} phút"
+    hours = total_min // 60
+    mins = total_min % 60
+    if mins == 0:
+        return f"{hours}h"
+    return f"{hours}h {mins} phút"
+
+
 async def _run_soniox_pipeline(
     job: JobState, meeting_id: int, wav_path: Path,
+    duration_sec: float, tmp_root: Path,
 ) -> list[dict]:
-    """Send the whole normalized WAV to Soniox stt-async-v4 in one call.
+    """Soniox STT pipeline. Auto-splits files > 3.5h into chunks because
+    Soniox stt-async-v4 caps at ~5h per submission.
 
     Returns transcript_parts ready for ``db.update_meeting(transcript=...)``.
-    No VAD chunking, no CAM++ clustering — Soniox does both diarization and
-    long-file transcription natively, and its speaker IDs are consistent
-    across the entire file (so we trust them directly).
+      - File ≤ 3.5h: single-shot — Soniox does globally-consistent diarization
+        across the whole file (best speaker accuracy).
+      - File > 3.5h: chunked — ffmpeg-split into ≤3.5h pieces, each Soniox-
+        transcribed sequentially, then concatenated with chunk-time offset
+        applied to start_ms/end_ms. Speaker IDs are offset per chunk so they
+        stay unique; users can merge same-person-different-chunk labels via
+        the existing "Đổi tên speaker (áp dụng toàn bộ)" UI.
     """
     job_id = job.job_id
 
@@ -381,40 +449,24 @@ async def _run_soniox_pipeline(
         )
     hints_raw = db.get_setting("soniox_language_hints") or "vi"
     hints = [h.strip() for h in hints_raw.split(",") if h.strip()] or ["vi"]
-    log.info("[pipeline] STT provider: soniox (single-file, diarization=ON)")
 
-    await registry.update(
-        job_id,
-        status=JobStatus.TRANSCRIBING,
-        progress=P_TRANSCRIBE_START,
-        message="Đang gửi audio đến Soniox",
-    )
-
-    # Soniox SDK polling runs in a worker thread; bridge progress back to
-    # the asyncio loop via run_coroutine_threadsafe so SSE listeners see
-    # the bar move.
-    loop = asyncio.get_running_loop()
-    cancel_event = job.cancel_event
-
-    def _progress_cb(p: float) -> None:
-        # Cooperative cancel: raise from the polling thread so the SDK
-        # call unwinds and the pipeline can mark itself cancelled.
-        if cancel_event.is_set():
-            raise RuntimeError("Cancelled")
-        mapped = P_TRANSCRIBE_START + p * (P_TRANSCRIBE_END - P_TRANSCRIBE_START)
-        msg = "Đang phiên âm (Soniox)" if p < 0.95 else "Đang xử lý kết quả"
-        try:
-            asyncio.run_coroutine_threadsafe(
-                registry.update(job_id, progress=mapped, message=msg),
-                loop,
-            )
-        except Exception:
-            pass
-
-    segments = await asyncio.to_thread(
-        transcribe_soniox_file, str(wav_path), soniox_key, hints,
-        progress_cb=_progress_cb,
-    )
+    if duration_sec <= SONIOX_CHUNK_MAX_SEC:
+        log.info(
+            "[pipeline] Soniox single-shot (%.1f min)",
+            duration_sec / 60.0,
+        )
+        segments = await _soniox_transcribe_single(
+            job, wav_path, soniox_key, hints,
+        )
+    else:
+        n_chunks = -(-int(duration_sec) // int(SONIOX_CHUNK_MAX_SEC))  # ceil
+        log.info(
+            "[pipeline] Soniox chunked: %.1f min → %d chunks (Soniox ~5h cap)",
+            duration_sec / 60.0, n_chunks,
+        )
+        segments = await _soniox_transcribe_chunked(
+            job, wav_path, duration_sec, tmp_root, soniox_key, hints, n_chunks,
+        )
 
     await registry.update(
         job_id,
@@ -448,6 +500,370 @@ async def _run_soniox_pipeline(
         speaker_map[i] = sp_id
 
     return _build_transcript_parts(chunk_results, speaker_map)
+
+
+def _make_soniox_progress_cb(
+    job: JobState,
+    loop: asyncio.AbstractEventLoop,
+    chunk_idx: int = 0,
+    n_chunks: int = 1,
+):
+    """Build a progress callback that maps Soniox's per-chunk progress (0..1)
+    into the pipeline's TRANSCRIBE band, with optional chunk indicator.
+
+    For single-shot: chunk_idx=0, n_chunks=1 → progress fills the full band,
+    ETA is per-file directly.
+    For chunked: each chunk gets an equal slice of the band. The displayed
+    ETA is the TOTAL remaining time across all chunks (current chunk's ETA
+    + estimate for the upcoming chunks), not just this chunk's ETA. Users
+    care about total wait, not per-chunk granularity.
+    """
+    job_id = job.job_id
+    cancel_event = job.cancel_event
+    # Same conservative throughput we use in stt.py for ETA estimation.
+    SONIOX_THROUGHPUT_X = 10.0
+
+    def _cb(
+        p: float,
+        audio_dur_sec: float | None = None,
+        eta_remaining_sec: float | None = None,
+    ) -> None:
+        # Cooperative cancel: raise from the polling thread so the SDK
+        # call unwinds and the pipeline can mark itself cancelled.
+        if cancel_event.is_set():
+            raise RuntimeError("Cancelled")
+
+        # Slice the transcribe band evenly across chunks.
+        band = P_TRANSCRIBE_END - P_TRANSCRIBE_START
+        global_p = (chunk_idx + min(1.0, max(0.0, p))) / n_chunks
+        mapped = P_TRANSCRIBE_START + global_p * band
+
+        chunk_label = f"phần {chunk_idx + 1}/{n_chunks}" if n_chunks > 1 else ""
+
+        # Aggregate ETA: this chunk's remaining + future chunks' projection.
+        # If we know audio_dur_sec of current chunk, assume future chunks
+        # are similar size (true with our even-split).
+        if eta_remaining_sec is not None and audio_dur_sec is not None and n_chunks > 1:
+            future_chunks = n_chunks - chunk_idx - 1
+            projected_future_sec = future_chunks * (audio_dur_sec / SONIOX_THROUGHPUT_X)
+            total_eta_sec = eta_remaining_sec + projected_future_sec
+        else:
+            total_eta_sec = eta_remaining_sec
+
+        # Build a status message:
+        #   1. `queued` (audio_dur_sec is None) — Soniox hasn't started yet.
+        #   2. `processing` (we know audio length + ETA) — show remaining.
+        #   3. Near-done (p >= 0.95 in this chunk) — fetching tokens / cleanup.
+        if audio_dur_sec is None and eta_remaining_sec is None and p < 0.10:
+            if chunk_label:
+                msg = f"Đang gửi {chunk_label} lên Soniox..."
+            else:
+                msg = "Đang gửi file lên Soniox..."
+        elif total_eta_sec is not None and audio_dur_sec is not None and p < 0.95:
+            eta_label = _format_eta_vi(total_eta_sec)
+            if n_chunks > 1:
+                msg = f"Đang phiên âm {chunk_label} — còn ~{eta_label}"
+            else:
+                dur_label = _format_duration_vi(audio_dur_sec)
+                msg = f"Đang phiên âm (Soniox) — còn ~{eta_label} (file {dur_label})"
+        elif p < 0.95:
+            if n_chunks > 1:
+                msg = f"Đang phiên âm {chunk_label} (Soniox)"
+            else:
+                msg = "Đang phiên âm (Soniox)"
+        else:
+            if n_chunks > 1 and chunk_idx < n_chunks - 1:
+                msg = f"Hoàn tất {chunk_label}, chuẩn bị phần tiếp theo..."
+            else:
+                msg = "Đang xử lý kết quả"
+
+        try:
+            asyncio.run_coroutine_threadsafe(
+                registry.update(job_id, progress=mapped, message=msg),
+                loop,
+            )
+        except Exception:
+            pass
+
+    return _cb
+
+
+async def _soniox_transcribe_single(
+    job: JobState, wav_path: Path,
+    soniox_key: str, hints: list[str],
+) -> list[dict]:
+    """Single Soniox transcription pass over the whole WAV. Used for files
+    that fit Soniox's per-submission limit (≤ 3.5h). Preserves globally-
+    consistent speaker diarization."""
+    job_id = job.job_id
+    await registry.update(
+        job_id,
+        status=JobStatus.TRANSCRIBING,
+        progress=P_TRANSCRIBE_START,
+        message="Đang gửi file lên Soniox...",
+    )
+    loop = asyncio.get_running_loop()
+    cb = _make_soniox_progress_cb(job, loop, chunk_idx=0, n_chunks=1)
+    return await asyncio.to_thread(
+        transcribe_soniox_file, str(wav_path), soniox_key, hints,
+        progress_cb=cb,
+    )
+
+
+async def _soniox_transcribe_chunked(
+    job: JobState, wav_path: Path,
+    duration_sec: float, tmp_root: Path,
+    soniox_key: str, hints: list[str], n_chunks: int,
+) -> list[dict]:
+    """Split a long WAV into ≤3.5h chunks via ffmpeg, transcribe each via
+    Soniox sequentially, then concatenate the segments with chunk-time
+    offset applied so the timeline stays continuous.
+
+    Per-chunk persistence (v1.2.13):
+      - The chunk plan (idx, start_ms, end_ms) is upserted to DB upfront so
+        retry semantics work even if the sidecar crashes mid-job.
+      - Each successful chunk's segments_json + status='done' is written to
+        upload_chunks IMMEDIATELY after Soniox returns — the user can open
+        the meeting and read what's been transcribed so far while later
+        chunks are still processing.
+      - On chunk failure: status='failed' + error_message is saved, and the
+        loop CONTINUES with the next chunk (no re-raise). After the loop
+        finishes, the outer pipeline can detect failed_chunks_count > 0 and
+        prompt the user to retry just the failed chunks.
+      - On resume (sidecar restart, or retry-failed-chunks endpoint call):
+        chunks where status='done' are LOADED from DB instead of re-
+        transcribed. This makes retries idempotent and free of duplicate
+        Soniox cost.
+
+    Speaker IDs are offset by `chunk_idx * 100` per chunk so they stay
+    unique across chunks. Users merge same-person labels via the existing
+    rename-speaker UI.
+    """
+    job_id = job.job_id
+    meeting_id = job.meeting_id
+
+    # ── Step 1: split WAV + persist chunk plan ───────────────────────────
+    # Plan is persisted BEFORE any transcription so retries can identify
+    # what was already done vs what still needs work.
+    await registry.update(
+        job_id,
+        status=JobStatus.TRANSCRIBING,
+        progress=P_TRANSCRIBE_START,
+        message=f"Đang cắt file thành {n_chunks} phần (file dài {_format_duration_vi(duration_sec)})",
+    )
+    chunks_dir = tmp_root / "soniox_chunks"
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    chunk_paths = await asyncio.to_thread(
+        _split_wav_for_soniox, wav_path, duration_sec, chunks_dir, n_chunks,
+    )
+
+    # Build plan (idx, start_ms, end_ms) and upsert to DB. INSERT OR IGNORE
+    # semantics so existing rows (from a previous run) are preserved.
+    chunk_dur_ms = int(duration_sec * 1000 / n_chunks)
+    plan = []
+    for idx, (_, off_ms) in enumerate(chunk_paths):
+        end_ms = off_ms + chunk_dur_ms if idx < n_chunks - 1 else int(duration_sec * 1000)
+        plan.append((idx, off_ms, end_ms))
+    await asyncio.to_thread(db.upsert_chunk_plan, meeting_id, plan)
+
+    if _is_cancelled(job):
+        raise RuntimeError("Cancelled")
+
+    # ── Step 2: load existing chunk states (resume support) ──────────────
+    # When sidecar restarts mid-pipeline, OR when the user invokes the
+    # retry-failed-chunks endpoint, we want to skip work that's already
+    # been done. Loaded segments_json strings are decoded back into the
+    # final all_segments list so the per-chunk persist below stays an
+    # append-only operation.
+    existing = await asyncio.to_thread(db.get_upload_chunks, meeting_id)
+    existing_by_idx = {c["chunk_idx"]: c for c in existing}
+
+    loop = asyncio.get_running_loop()
+    all_segments: list[dict] = []
+
+    for idx, (chunk_path, chunk_offset_ms) in enumerate(chunk_paths):
+        if _is_cancelled(job):
+            raise RuntimeError("Cancelled")
+
+        # Skip chunks already marked done — load their segments from DB.
+        existing_chunk = existing_by_idx.get(idx)
+        if existing_chunk and existing_chunk.get("status") == "done" and existing_chunk.get("segments_json"):
+            try:
+                cached_segs = json.loads(existing_chunk["segments_json"])
+                all_segments.extend(cached_segs)
+                log.info(
+                    "[pipeline] Soniox chunk %d/%d already done — loaded %d segments from DB",
+                    idx + 1, n_chunks, len(cached_segs),
+                )
+                continue
+            except (json.JSONDecodeError, TypeError):
+                log.warning(
+                    "[pipeline] Bad segments_json for chunk %d — re-transcribing",
+                    idx,
+                )
+
+        cb = _make_soniox_progress_cb(job, loop, chunk_idx=idx, n_chunks=n_chunks)
+
+        try:
+            chunk_segments = await asyncio.to_thread(
+                transcribe_soniox_file, str(chunk_path), soniox_key, hints,
+                progress_cb=cb,
+            )
+        except Exception as exc:
+            # Continue-on-fail: don't trash previously-completed chunks.
+            # Persist the failure so the user can retry just THIS chunk
+            # via POST /meetings/{id}/retry-failed-chunks.
+            log.error(
+                "[pipeline] Soniox chunk %d/%d failed: %s",
+                idx + 1, n_chunks, exc,
+            )
+            await asyncio.to_thread(
+                db.save_soniox_chunk_failed, meeting_id, idx, str(exc),
+            )
+            continue
+
+        # Apply offset to start_ms/end_ms so the timeline stays continuous
+        # across chunks. Apply speaker offset so IDs from different chunks
+        # don't collide (different chunks' "Speaker 1" become Speaker 1 and
+        # Speaker 101, which the rename UI lets users merge if same person).
+        speaker_offset = idx * 100
+        for seg in chunk_segments:
+            seg["start_ms"] = int(seg["start_ms"]) + chunk_offset_ms
+            seg["end_ms"] = int(seg["end_ms"]) + chunk_offset_ms
+            try:
+                sp = int(seg.get("speaker", "1"))
+                seg["speaker"] = str(sp + speaker_offset)
+            except (TypeError, ValueError):
+                seg["speaker"] = str(1 + speaker_offset)
+
+        # Persist this chunk's segments_json IMMEDIATELY so the rebuild-
+        # from-DB transcript (next step) sees it. Also enables partial
+        # recovery if the pipeline crashes between here and pipeline end.
+        await asyncio.to_thread(
+            db.save_soniox_chunk_done,
+            meeting_id, idx, json.dumps(chunk_segments, ensure_ascii=False),
+        )
+        all_segments.extend(chunk_segments)
+
+        # Rebuild + persist full transcript from DB (sorted by chunk_idx)
+        # so the user can open the meeting and read what's been transcribed
+        # while later chunks are still processing. Sort guarantees that
+        # late-completing chunks (e.g., retry of chunk 2 after chunks 1+3
+        # are done) land at the correct time position in the transcript.
+        await _rebuild_soniox_transcript_from_db(meeting_id)
+
+        log.info(
+            "[pipeline] Soniox chunk %d/%d done: %d segments, offset=%d ms",
+            idx + 1, n_chunks, len(chunk_segments), chunk_offset_ms,
+        )
+
+    return all_segments
+
+
+async def _rebuild_soniox_transcript_from_db(meeting_id: int) -> None:
+    """Read all status='done' Soniox chunks from DB (ordered by chunk_idx),
+    concat their segments_json, and write the merged transcript back to the
+    meeting record.
+
+    This is the single source of truth for the Soniox-chunked transcript —
+    called after each chunk completes during initial run AND after each
+    retry succeeds. Always reads DB in chunk_idx order, so chunks completed
+    out-of-order (retry case) still land at the correct time position.
+    """
+    rows = await asyncio.to_thread(db.get_upload_chunks, meeting_id)
+    if not rows:
+        return
+
+    all_segments: list[dict] = []
+    for c in rows:  # already ORDER BY chunk_idx from SQL
+        if c.get("status") != "done":
+            continue
+        segments_json = c.get("segments_json")
+        if not segments_json:
+            continue
+        try:
+            chunk_segs = json.loads(segments_json)
+            if isinstance(chunk_segs, list):
+                all_segments.extend(chunk_segs)
+        except (json.JSONDecodeError, TypeError):
+            log.warning(
+                "[pipeline] Bad segments_json for meeting %d chunk %d — skipping",
+                meeting_id, c.get("chunk_idx"),
+            )
+
+    if not all_segments:
+        return
+
+    # Build chunk_results + speaker_map (same shape as the regular Soniox
+    # build path so _build_transcript_parts works unchanged).
+    chunk_results = []
+    speaker_map: dict[int, int] = {}
+    for i, seg in enumerate(all_segments):
+        chunk_results.append({
+            "idx": i,
+            "text": seg["text"],
+            "embedding": None,
+            "start_ms": int(seg["start_ms"]),
+            "end_ms": int(seg["end_ms"]),
+        })
+        try:
+            sp_id = max(0, int(seg.get("speaker", "1")) - 1)
+        except (ValueError, TypeError):
+            sp_id = 0
+        speaker_map[i] = sp_id
+
+    parts = _build_transcript_parts(chunk_results, speaker_map)
+    transcript_json = json.dumps(parts, ensure_ascii=False)
+    await asyncio.to_thread(
+        db.update_meeting, meeting_id,
+        transcript=transcript_json, status="saved",
+    )
+
+
+def _split_wav_for_soniox(
+    wav_path: Path, duration_sec: float, chunks_dir: Path, n_chunks: int,
+) -> list[tuple[Path, int]]:
+    """Split a PCM 16kHz mono WAV evenly into N chunks via ffmpeg. Returns
+    [(chunk_path, offset_ms), ...] for each chunk in time order.
+
+    Even-split (vs fixed 3.5h with short tail) keeps ETA per chunk roughly
+    equal — avoids the UX of "chunk 3/3" being a 5-minute leftover that
+    makes the progress bar lurch.
+
+    Uses `-c copy` since the source is already canonical PCM WAV (no
+    re-encode needed). ffmpeg's `-ss` seek is sample-accurate on PCM.
+    """
+    ffmpeg = find_ffmpeg()
+    chunk_dur = duration_sec / n_chunks
+    out: list[tuple[Path, int]] = []
+
+    for idx in range(n_chunks):
+        start_sec = idx * chunk_dur
+        # Last chunk: -t omitted so ffmpeg reads to EOF (avoids floating-
+        # point rounding losing the final fraction of a second).
+        chunk_path = chunks_dir / f"soniox_chunk_{idx:02d}.wav"
+        cmd = [
+            ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", f"{start_sec:.3f}",
+            "-i", str(wav_path),
+        ]
+        if idx < n_chunks - 1:
+            cmd += ["-t", f"{chunk_dur:.3f}"]
+        cmd += ["-c", "copy", str(chunk_path)]
+
+        popen_kwargs: dict = {"capture_output": True, "timeout": 300}
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        result = subprocess.run(cmd, **popen_kwargs)
+        if result.returncode != 0 or not chunk_path.is_file():
+            raise RuntimeError(
+                f"ffmpeg split chunk {idx} failed: "
+                f"{result.stderr.decode(errors='replace')[:300]}"
+            )
+        offset_ms = int(start_sec * 1000)
+        out.append((chunk_path, offset_ms))
+
+    return out
 
 
 async def _run_nvidia_chunked_pipeline(

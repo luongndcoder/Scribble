@@ -1,7 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { TranscriptPart, Meeting, useAppStore } from '../stores/appStore';
-import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile } from '../lib/api';
+import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile, retryFailedChunks } from '../lib/api';
+import { subscribeJobEvents } from '../lib/upload-audio';
 import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
 import { MeetingAttachments } from './MeetingAttachments';
@@ -446,6 +447,24 @@ export function MeetingDetail() {
     const [editingMinutes, setEditingMinutes] = useState(false);
     const minutesEditRef = useRef<HTMLDivElement>(null);
 
+    // ── Retry failed Soniox chunks (v1.2.13) ─────────────────────────────
+    // Shown when the upload pipeline finished with some chunks in status=
+    // 'failed'. Banner offers a one-click "Thử lại" that hits the backend
+    // retry endpoint and subscribes to its SSE so the transcript updates
+    // live while the previously-failed chunks re-transcribe.
+    const [retryingChunks, setRetryingChunks] = useState(false);
+    const [retryProgress, setRetryProgress] = useState<{ progress: number; message: string } | null>(null);
+    const retryAbortRef = useRef<AbortController | null>(null);
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (retryAbortRef.current) {
+                retryAbortRef.current.abort();
+                retryAbortRef.current = null;
+            }
+        };
+    }, []);
+
     // ── Load-more pagination ─────────────────────────────────────────────
     // Long sessions (4h+) can produce 500+ transcript parts. Rendering them
     // all at once tanks the DOM. We render only the tail by default; the
@@ -594,6 +613,86 @@ export function MeetingDetail() {
     const applyTranscriptUpdate = async (nextParts: TranscriptPart[]) => {
         setTranscriptParts(nextParts);
         await persistTranscriptParts(nextParts);
+    };
+
+    // Refetch meeting from DB and refresh in-memory transcript. Called
+    // after retry succeeds OR whenever an SSE event signals the transcript
+    // landed new chunks (per-chunk persist commits to DB → we re-load).
+    const refreshMeetingFromDb = async () => {
+        const id = currentMeetingId || draftId;
+        if (!id) return;
+        try {
+            const m = await getMeeting(id);
+            setMeetingData(m);
+            if (typeof m.transcript === 'string' && m.transcript.trim()) {
+                try {
+                    const parsed = JSON.parse(m.transcript);
+                    if (Array.isArray(parsed)) setTranscriptParts(parsed);
+                } catch { /* not JSON — likely legacy plain text, ignore */ }
+            }
+            // Sync meetings list so MeetingList badge counts update too.
+            try {
+                const list = await getMeetings();
+                if (list) useAppStore.getState().setMeetings(list);
+            } catch { /* best effort */ }
+        } catch (err) {
+            console.warn('[detail] refreshMeetingFromDb failed:', err);
+        }
+    };
+
+    const handleRetryFailedChunks = async () => {
+        const id = currentMeetingId || draftId;
+        if (!id || retryingChunks) return;
+        // Warn about overwrite — retry rebuilds transcript from DB chunks,
+        // wiping any manual speaker renames/edits done since last chunk
+        // completed. User can dismiss this if they've made edits.
+        const confirmed = await showConfirm(
+            lang === 'vi'
+                ? 'Thử lại các phần lỗi sẽ ghi đè các chỉnh sửa transcript thủ công kể từ lần phiên âm trước. Tiếp tục?'
+                : 'Retrying failed chunks will overwrite any manual transcript edits made since the last transcription. Continue?',
+            lang,
+        );
+        if (!confirmed) return;
+
+        setRetryingChunks(true);
+        setRetryProgress({ progress: 0, message: lang === 'vi' ? 'Đang khởi động lại...' : 'Starting retry...' });
+
+        try {
+            const { job_id } = await retryFailedChunks(id as number);
+            const abort = new AbortController();
+            retryAbortRef.current = abort;
+            await subscribeJobEvents(job_id, {
+                signal: abort.signal,
+                onStatus: (state) => {
+                    setRetryProgress({ progress: state.progress || 0, message: state.message || '' });
+                    if (state.status === 'done') {
+                        showToast(
+                            lang === 'vi' ? 'Đã transcribe các phần lỗi' : 'Failed chunks retried',
+                            'success',
+                        );
+                        void refreshMeetingFromDb();
+                    } else if (state.status === 'failed') {
+                        const stillFailed = state.error || (lang === 'vi' ? 'Một số phần vẫn lỗi' : 'Some chunks still failed');
+                        showToast(stillFailed, 'error');
+                        // Even on failure, refresh to pick up any chunks
+                        // that DID succeed before the new failure.
+                        void refreshMeetingFromDb();
+                    }
+                },
+            });
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!msg.toLowerCase().includes('abort')) {
+                showToast(
+                    lang === 'vi' ? `Thử lại thất bại: ${msg}` : `Retry failed: ${msg}`,
+                    'error',
+                );
+            }
+        } finally {
+            setRetryingChunks(false);
+            setRetryProgress(null);
+            retryAbortRef.current = null;
+        }
     };
 
     const startEditSpeaker = (speakerId: number, anchorIdx: number) => {
@@ -908,6 +1007,62 @@ export function MeetingDetail() {
                     </div>
                 ) : (
                     <div className={`transcript-list ${translationEnabled ? 'with-translation' : ''}`} ref={transcriptRef}>
+                        {/* Retry banner (v1.2.13): shown when the Soniox upload
+                            pipeline left some chunks in status='failed'. Lets
+                            the user one-click retry just those chunks without
+                            re-uploading the source file. */}
+                        {(() => {
+                            const failedCount = Number(meetingData?.failed_chunks_count || 0);
+                            if (failedCount <= 0 && !retryingChunks) return null;
+                            const inProgress = retryingChunks;
+                            return (
+                                <div className="retry-chunks-banner">
+                                    <div className="retry-chunks-banner-icon">
+                                        {inProgress ? (
+                                            <span className="retry-chunks-spinner" aria-hidden />
+                                        ) : (
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M12 2 2 22h20L12 2Z" />
+                                                <line x1="12" x2="12" y1="9" y2="14" />
+                                                <circle cx="12" cy="17" r="0.5" />
+                                            </svg>
+                                        )}
+                                    </div>
+                                    <div className="retry-chunks-banner-body">
+                                        <div className="retry-chunks-banner-title">
+                                            {inProgress
+                                                ? (lang === 'vi' ? 'Đang thử lại các phần lỗi...' : 'Retrying failed chunks...')
+                                                : (lang === 'vi'
+                                                    ? `${failedCount} phần phiên âm thất bại`
+                                                    : `${failedCount} transcription part(s) failed`)}
+                                        </div>
+                                        <div className="retry-chunks-banner-sub">
+                                            {inProgress
+                                                ? (retryProgress?.message || (lang === 'vi' ? 'Đang xử lý...' : 'Processing...'))
+                                                : (lang === 'vi'
+                                                    ? 'Transcript hiện chỉ có các phần đã transcribe xong. Nhấn "Thử lại" để retry các phần còn lỗi.'
+                                                    : 'Transcript shows only successful parts. Click "Retry" to re-attempt the failed parts.')}
+                                        </div>
+                                        {inProgress && retryProgress && (
+                                            <div className="retry-chunks-progress-bar">
+                                                <div
+                                                    className="retry-chunks-progress-fill"
+                                                    style={{ width: `${Math.max(0, Math.min(100, retryProgress.progress * 100))}%` }}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                    {!inProgress && (
+                                        <button
+                                            className="retry-chunks-banner-btn"
+                                            onClick={() => void handleRetryFailedChunks()}
+                                        >
+                                            {lang === 'vi' ? 'Thử lại' : 'Retry'}
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })()}
                         {hasOlderParts && (
                             <button
                                 className="transcript-load-more"

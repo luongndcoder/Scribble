@@ -409,7 +409,30 @@ def transcribe_soniox_file(
         # Poll manually so the upload pipeline can stream progress.
         import time as _time
 
-        deadline = _time.time() + 3600  # 1-hour absolute cap for safety
+        # Soniox stt-async-v4 doesn't expose a `progress_percent` field on the
+        # transcription object — only `audio_duration_ms` (becomes available
+        # once processing actually starts) and `status` (queued/processing/
+        # completed/error). We derive a realistic ETA from:
+        #   1. audio_duration_ms: ground-truth file length, set by Soniox once
+        #      it parses the file header.
+        #   2. SONIOX_THROUGHPUT_X: empirical processing speed of stt-async-v4
+        #      relative to realtime. 10x is conservative — Soniox's actual
+        #      throughput is ~15-25x but we leave headroom for: (a) network
+        #      slowness between client and Soniox edge, (b) peak-load queue
+        #      time, (c) the user's expectation that an ETA shouldn't slip.
+        #      Better to land slightly under-promised than over-promised.
+        #   3. wall_clock_elapsed: time since transcription was created.
+        # Progress = elapsed / expected, capped at 0.95 until status=completed.
+        SONIOX_THROUGHPUT_X = 10.0
+        job_start_time = _time.time()
+
+        # Adaptive polling deadline: start with 30min, extend once Soniox
+        # reveals audio_duration_ms. Final deadline = job_start + max(1800,
+        # audio_dur_sec / 5 + 1800) — gives ≥30min buffer even at 5x worst-
+        # case throughput. Previous hardcoded 1h timeout could bust on
+        # 4-5h chunks during Soniox peak load.
+        deadline = job_start_time + 1800.0
+        deadline_extended = False
         last_progress = 0.0
         while _time.time() < deadline:
             t = client.stt.get(transcription.id)
@@ -421,12 +444,36 @@ def transcribe_soniox_file(
             if status_str.endswith("error") or status_str == "error":
                 err = getattr(t, "error_message", None) or "Soniox transcription failed"
                 raise RuntimeError(err)
-            # Heuristic progress: ramp 0.0 → 0.9 over expected duration.
-            # Soniox doesn't expose a true progress %, so we ease toward 0.9.
+
+            # audio_duration_ms appears once Soniox starts processing —
+            # before that, we're in `queued` state with no ETA info. Extend
+            # polling deadline once duration is known so a long file doesn't
+            # bust the initial 30min cap.
+            audio_ms = getattr(t, "audio_duration_ms", None) or 0
+            audio_dur_sec = audio_ms / 1000.0 if audio_ms > 0 else None
+
+            if audio_dur_sec is not None and not deadline_extended:
+                # 5x conservative — even on bad days Soniox shouldn't be
+                # slower. +30min buffer for upload/queue/cleanup.
+                deadline = job_start_time + max(1800.0, audio_dur_sec / 5.0 + 1800.0)
+                deadline_extended = True
+
             if progress_cb is not None:
-                last_progress = min(0.9, last_progress + 0.05)
+                if audio_dur_sec is not None:
+                    expected_total_sec = max(audio_dur_sec / SONIOX_THROUGHPUT_X, 1.0)
+                    elapsed = _time.time() - job_start_time
+                    progress = min(0.95, elapsed / expected_total_sec)
+                    eta_remaining_sec = max(0.0, expected_total_sec - elapsed)
+                else:
+                    # Still in `queued` — Soniox hasn't started yet. Inch up
+                    # slowly so the user sees activity, but don't fake
+                    # significant progress.
+                    progress = min(0.08, last_progress + 0.01)
+                    eta_remaining_sec = None
+
+                last_progress = progress
                 try:
-                    progress_cb(last_progress)
+                    progress_cb(progress, audio_dur_sec, eta_remaining_sec)
                 except Exception:
                     pass
             _time.sleep(3.0)
@@ -435,7 +482,7 @@ def transcribe_soniox_file(
 
         result = client.stt.get_transcript(transcription.id)
         if progress_cb is not None:
-            try: progress_cb(1.0)
+            try: progress_cb(1.0, None, 0.0)
             except Exception: pass
 
         # Clean up server-side. Errors here are non-fatal.

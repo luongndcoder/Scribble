@@ -1,6 +1,6 @@
 [package]
 name = "voicescribe"
-version = "1.2.11"
+version = "1.2.13"
 description = "Scribble - Meeting Minutes"
 authors = ["you"]
 edition = "2021"

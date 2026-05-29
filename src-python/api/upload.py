@@ -236,3 +236,58 @@ async def resume_upload(meeting_id: int):
     asyncio.create_task(run_pipeline(job.job_id))
 
     return {"job_id": job.job_id, "meeting_id": meeting_id}
+
+
+@router.post("/meetings/{meeting_id}/retry-failed-chunks")
+async def retry_failed_chunks(meeting_id: int):
+    """Re-run the Soniox transcription for chunks that previously failed.
+
+    v1.2.13 feature — when a long file upload has some chunks fail (e.g.
+    Soniox 5xx, network blip), the user can click "Thử lại" in the meeting
+    detail UI to retry just those failed chunks. The done chunks are
+    skipped (segments loaded from DB), so retry is idempotent and free of
+    duplicate Soniox cost.
+
+    Behaves like /resume but specifically targets chunks marked
+    status='failed' — flips them to NULL (pending) so the pipeline re-
+    attempts them, then spawns a new job. Returns {job_id, meeting_id,
+    retry_chunks} for the frontend to subscribe to.
+    """
+    meeting = db.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    failed_count = int(meeting.get("failed_chunks_count") or 0)
+    if failed_count <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No failed chunks to retry — meeting transcript is complete",
+        )
+
+    audio_path = (meeting.get("audio_path") or "").strip()
+    if not audio_path or not Path(audio_path).is_file():
+        raise HTTPException(
+            status_code=410, detail="Original audio file missing on disk",
+        )
+
+    # Reset failed → pending so pipeline re-attempts them. Done chunks
+    # stay done (status='done') and are skipped in the loop.
+    reset = db.reset_soniox_failed_chunks(meeting_id)
+    log.info(
+        "[retry] Meeting %s: reset %d failed chunks to pending",
+        meeting_id, reset,
+    )
+
+    job = registry.create(meeting_id=meeting_id)
+    await registry.update(
+        job.job_id,
+        status=JobStatus.PENDING,
+        message=f"Thử lại {reset} phần đã lỗi",
+    )
+    asyncio.create_task(run_pipeline(job.job_id))
+
+    return {
+        "job_id": job.job_id,
+        "meeting_id": meeting_id,
+        "retry_chunks": reset,
+    }

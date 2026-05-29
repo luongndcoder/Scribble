@@ -236,6 +236,17 @@ export async function downloadTextFile(filename: string, content: string) {
     a.remove();
     URL.revokeObjectURL(url);
 }
+// ─── Retry failed Soniox chunks (v1.2.13) ───
+// Triggers re-transcription of upload_chunks rows marked status='failed' for
+// the given meeting. Returns a job_id the caller subscribes to via SSE just
+// like a normal upload — when the retry job ends DONE the transcript is
+// merged in-place (per-chunk rebuild keeps timeline correct).
+export const retryFailedChunks = (meetingId: number) =>
+    request<{ job_id: string; meeting_id: number; retry_chunks: number }>(
+        `/meetings/${meetingId}/retry-failed-chunks`,
+        { method: 'POST' },
+    );
+
 // ─── Settings ───
 export const getSettings = () => request<SettingsData>('/settings');
 export const saveSettings = (data: Record<string, unknown>) =>
