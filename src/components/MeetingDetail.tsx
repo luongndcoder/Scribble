@@ -486,7 +486,6 @@ export function MeetingDetail() {
     //     reset to null so subsequent live-appended parts stay visible.
     const TRANSCRIPT_PAGE_SIZE = 200;
     const MAX_WINDOW_SIZE = 400; // hard DOM cap — slides instead of growing
-    const SCROLL_LOAD_THRESHOLD = 120; // px from top OR bottom
     const [topAnchorChunkId, setTopAnchorChunkId] = useState<string | null>(null);
     const [bottomAnchorChunkId, setBottomAnchorChunkId] = useState<string | null>(null);
 
@@ -579,64 +578,105 @@ export function MeetingDetail() {
         el.scrollTop += newTop - anchor.viewportTop;
     };
 
-    // Single scroll handler — fires up-load OR down-load depending on which
-    // edge the user is near. Throttled via inflight ref so a momentum bounce
-    // doesn't trigger 2 loads in a row.
+    // v1.2.14: load-more via IntersectionObserver (Facebook-feed pattern).
+    // Replaces the scrollTop-threshold heuristic which kept firing as the user
+    // sat near the edge — observer fires ONLY on visibility transitions, plus
+    // a 600ms cooldown safety net so a window re-render that keeps the
+    // sentinel partially visible can't burst into a load loop.
     const loadingMoreRef = useRef(false);
-    const handleTranscriptScroll = useCallback(() => {
+    const topSentinelRef = useRef<HTMLDivElement>(null);
+    const bottomSentinelRef = useRef<HTMLDivElement>(null);
+
+    const loadOlder = useCallback(() => {
         if (loadingMoreRef.current) return;
         const el = transcriptRef.current;
-        if (!el) return;
-
-        const nearTop = el.scrollTop <= SCROLL_LOAD_THRESHOLD;
-        const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-        const nearBottom = distanceFromBottom <= SCROLL_LOAD_THRESHOLD;
-
-        const wantsUpLoad = nearTop && hasOlderParts;
-        const wantsDownLoad = nearBottom && hasNewerParts;
-        if (!wantsUpLoad && !wantsDownLoad) return;
-
+        if (!el || !hasOlderParts) return;
         loadingMoreRef.current = true;
+
         const anchor = captureScrollAnchor(el);
         const total = transcriptParts.length;
-
-        if (wantsUpLoad) {
-            // Slide window backward by one page; cap size at MAX_WINDOW_SIZE
-            // by trimming the same number of parts off the bottom. Keep
-            // tail open when newEnd === total so live appends still flow
-            // naturally — visibleStartIdx's hard cap (start ≥ end - MAX)
-            // prevents unbounded growth even in tail-open mode.
-            const newStart = Math.max(0, visibleStartIdx - TRANSCRIPT_PAGE_SIZE);
-            const newEnd = Math.min(total, newStart + MAX_WINDOW_SIZE);
-            setTopAnchorChunkId(newStart > 0 ? (transcriptParts[newStart]?.chunkId || null) : null);
-            setBottomAnchorChunkId(
-                newEnd < total ? (transcriptParts[newEnd - 1]?.chunkId || null) : null,
-            );
-        } else if (wantsDownLoad) {
-            // Slide window forward by one page; cap size at MAX_WINDOW_SIZE
-            // by trimming the same number of parts off the top. When the new
-            // window reaches the array tail, UNSET BOTH anchors to drop back
-            // into default tail-follow mode (window collapses to PAGE_SIZE,
-            // live appends auto-flow into view).
-            const newEnd = Math.min(total, visibleEndIdx + TRANSCRIPT_PAGE_SIZE);
-            const newStart = Math.max(0, newEnd - MAX_WINDOW_SIZE);
-            const reachedTail = newEnd === total;
-            setTopAnchorChunkId(
-                reachedTail || newStart === 0
-                    ? null
-                    : (transcriptParts[newStart]?.chunkId || null),
-            );
-            setBottomAnchorChunkId(
-                reachedTail ? null : (transcriptParts[newEnd - 1]?.chunkId || null),
-            );
-        }
+        // Slide window backward by one page; cap size at MAX_WINDOW_SIZE.
+        // Keep tail open when newEnd === total so live appends still flow.
+        const newStart = Math.max(0, visibleStartIdx - TRANSCRIPT_PAGE_SIZE);
+        const newEnd = Math.min(total, newStart + MAX_WINDOW_SIZE);
+        setTopAnchorChunkId(newStart > 0 ? (transcriptParts[newStart]?.chunkId || null) : null);
+        setBottomAnchorChunkId(
+            newEnd < total ? (transcriptParts[newEnd - 1]?.chunkId || null) : null,
+        );
 
         requestAnimationFrame(() => {
             const elNow = transcriptRef.current;
             if (elNow) restoreScrollAnchor(elNow, anchor);
-            loadingMoreRef.current = false;
+            // Cooldown — prevents instant re-trigger if the sentinel happens
+            // to remain partially visible after the slide. User must scroll
+            // away + back to load the next page.
+            setTimeout(() => { loadingMoreRef.current = false; }, 600);
         });
-    }, [hasOlderParts, hasNewerParts, visibleStartIdx, visibleEndIdx, transcriptParts]);
+    }, [hasOlderParts, visibleStartIdx, transcriptParts]);
+
+    const loadNewer = useCallback(() => {
+        if (loadingMoreRef.current) return;
+        const el = transcriptRef.current;
+        if (!el || !hasNewerParts) return;
+        loadingMoreRef.current = true;
+
+        const anchor = captureScrollAnchor(el);
+        const total = transcriptParts.length;
+        // Slide window forward by one page. When new window reaches the array
+        // tail, UNSET BOTH anchors to drop back into default tail-follow mode.
+        const newEnd = Math.min(total, visibleEndIdx + TRANSCRIPT_PAGE_SIZE);
+        const newStart = Math.max(0, newEnd - MAX_WINDOW_SIZE);
+        const reachedTail = newEnd === total;
+        setTopAnchorChunkId(
+            reachedTail || newStart === 0
+                ? null
+                : (transcriptParts[newStart]?.chunkId || null),
+        );
+        setBottomAnchorChunkId(
+            reachedTail ? null : (transcriptParts[newEnd - 1]?.chunkId || null),
+        );
+
+        requestAnimationFrame(() => {
+            const elNow = transcriptRef.current;
+            if (elNow) restoreScrollAnchor(elNow, anchor);
+            setTimeout(() => { loadingMoreRef.current = false; }, 600);
+        });
+    }, [hasNewerParts, visibleEndIdx, transcriptParts]);
+
+    // Attach IntersectionObserver to whichever sentinels are mounted. The
+    // observer fires only on viewport-entry transitions (isIntersecting
+    // true → only when the user scrolls so the sentinel comes INTO view from
+    // OFF-screen). After load, scroll restoration keeps user at the same
+    // chunk → sentinel slides OUT of viewport → observer state resets, ready
+    // for the next user-initiated scroll to top/bottom.
+    useEffect(() => {
+        const container = transcriptRef.current;
+        if (!container) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    if (entry.target === topSentinelRef.current) {
+                        loadOlder();
+                    } else if (entry.target === bottomSentinelRef.current) {
+                        loadNewer();
+                    }
+                }
+            },
+            {
+                root: container,
+                // 10% visibility = clear "user actually scrolled to see it".
+                // Lower would fire on momentum bounces; higher would require
+                // dragging fully on-screen which feels sluggish.
+                threshold: 0.1,
+            },
+        );
+
+        if (topSentinelRef.current) observer.observe(topSentinelRef.current);
+        if (bottomSentinelRef.current) observer.observe(bottomSentinelRef.current);
+        return () => observer.disconnect();
+    }, [loadOlder, loadNewer, hasOlderParts, hasNewerParts]);
 
     const persistTranscriptParts = async (parts: TranscriptPart[]) => {
         const meetingId = currentMeetingId || draftId;
@@ -1156,7 +1196,6 @@ export function MeetingDetail() {
                     <div
                         className={`transcript-list ${translationEnabled ? 'with-translation' : ''}`}
                         ref={transcriptRef}
-                        onScroll={handleTranscriptScroll}
                     >
                         {/* v1.2.14: Internet-offline banner. Self-renders only
                             when the backend's TCP probe (1.1.1.1:443) flips to
@@ -1220,17 +1259,22 @@ export function MeetingDetail() {
                                 </div>
                             );
                         })()}
-                        {/* Sentinel shown at top of list when older parts
-                            are hidden. Pure status indicator — no click
-                            handler. Scrolling within SCROLL_LOAD_THRESHOLD
-                            px of this sentinel auto-loads the next page. */}
+                        {/* Top sentinel — fires IntersectionObserver when it
+                            scrolls into view (10% visible), triggering loadOlder.
+                            Only one load per user-initiated scroll into the
+                            sentinel — observer fires on transition only, plus
+                            600ms cooldown safety net. */}
                         {hasOlderParts && (
-                            <div className="transcript-load-sentinel" aria-live="polite">
+                            <div
+                                ref={topSentinelRef}
+                                className="transcript-load-sentinel"
+                                aria-live="polite"
+                            >
                                 <span className="transcript-load-sentinel-spinner" aria-hidden />
                                 <span>
                                     {lang === 'vi'
-                                        ? `Đang ẩn ${visibleStartIdx} đoạn cũ hơn — cuộn lên để tải thêm`
-                                        : `${visibleStartIdx} older part(s) hidden — scroll up to load more`}
+                                        ? `Đang ẩn ${visibleStartIdx} đoạn cũ hơn — cuộn đến đây để tải thêm`
+                                        : `${visibleStartIdx} older part(s) hidden — scroll here to load more`}
                                 </span>
                             </div>
                         )}
@@ -1317,17 +1361,20 @@ export function MeetingDetail() {
                                 </div>
                             );
                         })}
-                        {/* Bottom sentinel — surfaces when the sliding window
-                            has trimmed newer parts off the bottom (user scrolled
-                            up past MAX_WINDOW_SIZE then back). Cuộn xuống tự
-                            động slide window forward. */}
+                        {/* Bottom sentinel — IntersectionObserver triggers
+                            loadNewer when it reaches viewport. Same one-shot
+                            transition + 600ms cooldown semantics as top. */}
                         {hasNewerParts && (
-                            <div className="transcript-load-sentinel" aria-live="polite">
+                            <div
+                                ref={bottomSentinelRef}
+                                className="transcript-load-sentinel"
+                                aria-live="polite"
+                            >
                                 <span className="transcript-load-sentinel-spinner" aria-hidden />
                                 <span>
                                     {lang === 'vi'
-                                        ? `Đang ẩn ${transcriptParts.length - visibleEndIdx} đoạn mới hơn — cuộn xuống để tải`
-                                        : `${transcriptParts.length - visibleEndIdx} newer part(s) hidden — scroll down to load`}
+                                        ? `Đang ẩn ${transcriptParts.length - visibleEndIdx} đoạn mới hơn — cuộn đến đây để tải`
+                                        : `${transcriptParts.length - visibleEndIdx} newer part(s) hidden — scroll here to load`}
                                 </span>
                             </div>
                         )}
