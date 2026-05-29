@@ -43,7 +43,15 @@ export function MeetingList() {
         } catch { /* best effort refresh */ }
         setCurrentMeetingId(meetingId);
         setDraftId(null);
-        setActiveTab('summary');
+        // Route based on whether summary was generated:
+        //   - summary present → tab 'summary' (biên bản)
+        //   - summary empty → tab 'recording' (transcript only — LLM skipped
+        //     because user chưa cấu hình AI API key, OR auto-summarize failed)
+        // Without this guard, user without LLM key lands on empty "Biên bản"
+        // tab and thinks the upload failed.
+        const meeting = useAppStore.getState().meetings.find((m) => m.id === meetingId);
+        const hasSummary = (meeting?.summary || '').trim().length > 0;
+        setActiveTab(hasSummary ? 'summary' : 'recording');
         setCurrentView('detail');
     };
 

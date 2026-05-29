@@ -639,11 +639,25 @@ def transcribe_soniox_file_id(
     return _parse_soniox_segments(result)
 
 
+# Segment-split thresholds — defensive measure khi Soniox diarization fail
+# (toàn bộ chunk gán cùng 1 speaker → segment khổng lồ vài chục phút).
+# Chia theo natural pause (gap) + hard cap duration để UI render được.
+_SEGMENT_GAP_SPLIT_MS = 2000       # 2s silence = natural turn/sentence break
+_SEGMENT_MAX_DURATION_MS = 60_000  # 1 phút — hard cap kể cả speaker liên tục
+
+
 def _parse_soniox_segments(result) -> list[dict]:
     """Group consecutive same-speaker tokens into segments.
 
     Result format: [{"start_ms", "end_ms", "text", "speaker"}, ...]
     Hallucination filter applied per segment.
+
+    Splits on:
+      1. Speaker change (primary)
+      2. Gap ≥ 2s giữa 2 tokens kế tiếp (natural pause — defensive against
+         Soniox diarization fail khi gán cùng speaker cho toàn chunk)
+      3. Segment duration ≥ 60s (hard UI cap — speaker nói liên tục không
+         nghỉ vẫn phải break để UI render + scroll được)
     """
     tokens = list(result.tokens or [])
     segments: list[dict] = []
@@ -680,7 +694,21 @@ def _parse_soniox_segments(result) -> list[dict]:
             cur_start = start_ms
             cur_end = end_ms
             cur_pieces = [text_piece]
-        elif speaker != cur_speaker:
+            continue
+
+        # Compute gap from previous token end → this token start, and current
+        # segment duration if extended. Both are NON-NEGATIVE in practice
+        # (Soniox tokens are time-sorted) but clamp to 0 to be safe.
+        gap_ms = max(0, start_ms - cur_end) if cur_end is not None else 0
+        seg_dur_ms = max(0, end_ms - cur_start) if cur_start is not None else 0
+
+        should_split = (
+            speaker != cur_speaker
+            or gap_ms >= _SEGMENT_GAP_SPLIT_MS
+            or seg_dur_ms >= _SEGMENT_MAX_DURATION_MS
+        )
+
+        if should_split:
             _flush()
             cur_speaker = speaker
             cur_start = start_ms
