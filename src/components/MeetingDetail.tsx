@@ -999,7 +999,25 @@ export function MeetingDetail() {
             {/* Compact toolbar: back button + tab switcher on ONE row.
                 Earlier these lived on two separate rows (~90px combined). */}
             <div className="detail-toolbar">
-                <button className="back-btn back-btn-compact" onClick={() => setCurrentView('list')}>
+                <button
+                    className="back-btn back-btn-compact"
+                    onClick={() => {
+                        // v1.2.14 fix: block back navigation while recording.
+                        // Leaving the detail view tears down RecordingBar →
+                        // WebSocket disconnects → realtime transcript breaks.
+                        // User must explicitly stop recording first.
+                        if (recording) {
+                            showToast(
+                                lang === 'vi'
+                                    ? 'Đang ghi âm — vui lòng bấm Dừng trước khi quay lại danh sách'
+                                    : 'Recording in progress — please stop recording before going back',
+                                'warning',
+                            );
+                            return;
+                        }
+                        setCurrentView('list');
+                    }}
+                >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="m15 18-6-6 6-6" />
                     </svg>
