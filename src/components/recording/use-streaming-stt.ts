@@ -53,9 +53,13 @@ export function attachSocketHandlers(
         readyBase: string | null;
         fallbackToChunkMode: () => void;
         setIsTranscribing: (v: boolean) => void;
+        /** Terminal STT error (e.g. Soniox 402 budget exhausted). When set, the
+         * caller should stop recording + show a toast. Distinct from transient
+         * connection errors which trigger fallbackToChunkMode. */
+        onTerminalError?: (msg: string) => void;
     },
 ) {
-    const { wsRef, sttProvider, readyBase, fallbackToChunkMode, setIsTranscribing } = opts;
+    const { wsRef, sttProvider, readyBase, fallbackToChunkMode, setIsTranscribing, onTerminalError } = opts;
 
     ws.onmessage = (event) => {
         try {
@@ -63,17 +67,33 @@ export function attachSocketHandlers(
             if (data.error) {
                 // Surface the actual message (Soniox sends error: true + text: "..."),
                 // not the boolean flag, so the user sees what went wrong.
-                const msg = (typeof data.error === "string" ? data.error : "") || data.text || "STT error";
+                const fallbackErr = useAppStore.getState().lang === "vi" ? "Lỗi nhận dạng giọng nói" : "STT error";
+                const msg = (typeof data.error === "string" ? data.error : "") || data.text || fallbackErr;
                 console.error("[stt-ws]", msg);
                 setIsTranscribing(false);
-                useAppStore.getState().setInterimText(`⚠ ${msg}`);
+                useAppStore.getState().setInterimText("");
+                // Terminal errors (402 budget, auth fail) — the stream is dead.
+                // Null wsRef BEFORE close so the onclose handler skips reconnect.
+                if (data.terminal || onTerminalError) {
+                    wsRef.current = null;
+                    try { ws.close(); } catch { /* may already be closed */ }
+                    onTerminalError?.(msg);
+                } else {
+                    // Backwards-compat: legacy non-terminal error keeps old UX.
+                    useAppStore.getState().setInterimText(`⚠ ${msg}`);
+                }
                 return;
             }
             // Backend reconnect heartbeat (Soniox auto-reconnect after server
             // closed the WS due to its ~1h session-duration cap). Show as
-            // interim status; do NOT add to transcriptParts.
+            // interim status; do NOT add to transcriptParts. We OWN the display
+            // string (localized) instead of echoing the backend's English text,
+            // so the message always matches the UI language.
             if (data.info || data.type === "info") {
-                useAppStore.getState().setInterimText(`🔄 ${data.text || "Reconnecting..."}`);
+                const reconnecting = useAppStore.getState().lang === "vi"
+                    ? "Đang kết nối lại..."
+                    : "Reconnecting...";
+                useAppStore.getState().setInterimText(`🔄 ${reconnecting}`);
                 return;
             }
             if (data.type === "speaker_correction" && data.chunk_id) {

@@ -415,7 +415,7 @@ export function MeetingDetail() {
         setCurrentView, lang, activeTab, setActiveTab,
         currentMeetingId, draftId, setTranscriptParts, isTranscribing,
         meetings, transientSummary,
-        summaryLoading, translationEnabled,
+        summaryLoading, translationEnabled, aiConfigured, setSettingsOpen,
     } = useAppStore();
 
     // Live translation: read via subscription + DOM ref (avoids re-render of entire list)
@@ -490,7 +490,8 @@ export function MeetingDetail() {
     const [bottomAnchorChunkId, setBottomAnchorChunkId] = useState<string | null>(null);
 
     // Reset both anchors when switching meetings — different meeting means
-    // different transcriptParts identity, window must restart from tail.
+    // different transcriptParts identity, window must restart. The load effect
+    // then re-pins the window to page 1 once the new transcript arrives.
     const prevMeetingKeyRef = useRef<string | number | null>(null);
     useEffect(() => {
         const key = currentMeetingId || draftId || null;
@@ -945,6 +946,16 @@ export function MeetingDetail() {
                 if (activeMeetingId !== requestedMeetingId) return;
 
                 setMeetingData(m);
+
+                // No minutes yet → land the user on the Recording tab instead of
+                // an empty "Biên bản" pane. Tied to load so it only fires when a
+                // meeting is opened (not during summarize, which sets the summary
+                // tab itself and streams content in).
+                const hasSavedSummary = typeof m.summary === 'string' && m.summary.trim().length > 0;
+                if (!hasSavedSummary) {
+                    setActiveTab('recording');
+                }
+
                 let parts: TranscriptPart[] = [];
 
                 // Parse transcript — JSON array (new format) or plain text (legacy)
@@ -979,6 +990,32 @@ export function MeetingDetail() {
                 }
                 const normalized = collapseTranscriptSnapshots(parts);
                 setTranscriptParts(normalized.parts);
+
+                // Open a freshly-opened SAVED transcript at page 1 (the
+                // beginning), not mid-stream. We do this HERE — tied to the
+                // load — instead of in a reactive effect, because an effect
+                // watching transcriptParts fires on STALE store data when the
+                // detail view mounts (the previous meeting's parts are still in
+                // the store until this load replaces them), which made the
+                // positioning flaky (sometimes mid-transcript, sometimes page
+                // 1). React batches these state updates with setTranscriptParts
+                // above, so the window renders straight at [0, PAGE_SIZE] with
+                // no intermediate tail flash.
+                // Skip when resuming the SAME meeting (e.g. recording just
+                // stopped) so we don't yank the user away from where they were.
+                if (!isSameMeeting && !recording) {
+                    setTopAnchorChunkId(null);
+                    setBottomAnchorChunkId(
+                        normalized.parts.length > TRANSCRIPT_PAGE_SIZE
+                            ? (normalized.parts[TRANSCRIPT_PAGE_SIZE - 1]?.chunkId ?? null)
+                            : null,
+                    );
+                    requestAnimationFrame(() => {
+                        const el = transcriptRef.current;
+                        if (el) el.scrollTop = 0;
+                    });
+                }
+
                 if (normalized.changed) {
                     const duration = Number(m.audio_duration ?? 0);
                     void updateMeeting(requestedMeetingId, {
@@ -999,6 +1036,10 @@ export function MeetingDetail() {
             cancelled = true;
         };
     }, [viewingMeetingId, recording, setTranscriptParts]);
+
+    // (Page-1 positioning for a freshly-opened saved transcript is handled in
+    // the load effect above — tied to the load event so it anchors on the
+    // just-loaded parts, not stale store data from the previous meeting.)
 
     // Auto-scroll: only when the user is near the bottom AND tail is open
     // (so we don't yank them away while they're reading mid-transcript via
@@ -1072,7 +1113,32 @@ export function MeetingDetail() {
                         </svg>
                         <span>{lang === 'vi' ? 'Ghi âm' : 'Recording'}</span>
                     </button>
-                    <button className={`sub-tab ${activeTab === 'summary' ? 'active' : ''}`} onClick={() => setActiveTab('summary')}>
+                    {/* Minutes tab locks when AI isn't configured — UNLESS this
+                        meeting already has a summary (so old, already-summarized
+                        meetings stay viewable). Locked → guide to Settings
+                        instead of switching to an empty/unusable pane. */}
+                    <button
+                        className={`sub-tab ${activeTab === 'summary' ? 'active' : ''} ${(!aiConfigured && !hasMinutes) ? 'locked' : ''}`}
+                        onClick={() => {
+                            if (!aiConfigured && !hasMinutes) {
+                                showToast(
+                                    lang === 'vi'
+                                        ? 'Chưa cấu hình Trợ lý AI. Đang mở Cài đặt để bật tính năng biên bản.'
+                                        : 'AI Assistant not set up. Opening Settings to enable minutes.',
+                                    'info',
+                                );
+                                setSettingsOpen(true);
+                                return;
+                            }
+                            setActiveTab('summary');
+                        }}
+                        title={(!aiConfigured && !hasMinutes)
+                            ? (lang === 'vi'
+                                ? 'Cấu hình Trợ lý AI trong Cài đặt để dùng tính năng biên bản'
+                                : 'Configure the AI Assistant in Settings to use minutes')
+                            : undefined}
+                        aria-disabled={(!aiConfigured && !hasMinutes) ? true : undefined}
+                    >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
                         </svg>
@@ -1466,6 +1532,7 @@ const TranscriptSentences = memo(function TranscriptSentences({
     liveTranslationRef?: React.RefObject<HTMLDivElement | null>;
     onSave?: (newText: string) => void;
 }) {
+    const lang = useAppStore((s) => s.lang);
     const [editMode, setEditMode] = useState(false);
     const [editVal, setEditVal] = useState('');
 
@@ -1482,12 +1549,13 @@ const TranscriptSentences = memo(function TranscriptSentences({
         if (onSave) onSave('');
     };
 
+    const deleteLabel = lang === 'vi' ? 'Xoá đoạn này' : 'Delete part';
     const deleteBtn = onSave ? (
         <button
             className="sentence-delete-btn"
             onClick={(e) => { e.stopPropagation(); handleDelete(); }}
-            title="Xoá đoạn này"
-            aria-label="Delete part"
+            title={deleteLabel}
+            aria-label={deleteLabel}
         >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 6 6 18" /><path d="m6 6 12 12" />

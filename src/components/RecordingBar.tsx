@@ -16,13 +16,13 @@ import { useSummarize } from './recording/use-summarize';
 import {
     useStreamingStt, openStreamingWebSocket, attachSocketHandlers,
 } from './recording/use-streaming-stt';
+import { MinutesOptionsModal } from './recording/minutes-options-modal';
 
 
 export function RecordingBar() {
     const {
         recording, paused, seconds, transcriptParts, currentMeetingId, meetings,
-        translationEnabled, translationLang, summaryLang, setSummaryLang,
-        summaryTemplate, setSummaryTemplate, customPrompt, setCustomPrompt,
+        translationEnabled, translationLang,
         setRecording, setPaused, setSeconds, clearTranscript,
         addTranscriptPart,
         setTranslationEnabled, setTranslationLang, lang,
@@ -35,6 +35,14 @@ export function RecordingBar() {
     const sttProviderRef = useRef('nvidia');
     const { showToast } = useToast();
 
+    // AI is OPTIONAL — `aiConfigured` (resolved in App.tsx, shared via store)
+    // gates the minutes actions. When false, the "Create Minutes" CTA routes
+    // the user to Settings instead of summarizing.
+    const aiConfigured = useAppStore((s) => s.aiConfigured);
+    // Minutes options popup — language + template now live here (out of the
+    // bar) so the bar stays compact; opened by the CTA when AI is configured.
+    const [minutesPopupOpen, setMinutesPopupOpen] = useState(false);
+
     // Hooks from recording modules
     const { analyserRef, startDrawing, stopDrawing, setBarHeightsFn } = useWaveform();
     const { archiveRecorderRef, startDraftAudioArchive, stopDraftAudioArchive } = useDraftArchive();
@@ -44,6 +52,33 @@ export function RecordingBar() {
 
     const streamRef = useRef<MediaStream | null>(null);
     const timerRef = useRef<number | null>(null);
+
+    // Indirect ref to stopRecording — needed because the terminal-error
+    // handler must be passed into startRecording / attachSocketHandlers
+    // BEFORE stopRecording is defined below (function-component ordering).
+    const stopRecordingRef = useRef<() => Promise<void> | void>(() => {});
+    // Guard so a flood of error events (Soniox can fire the same 402 repeatedly
+    // on each reconnect attempt) collapses into a SINGLE toast + stop call.
+    const terminalErrorFiredRef = useRef(false);
+    const handleSttTerminalError = useCallback((rawMsg: string) => {
+        if (terminalErrorFiredRef.current) return;
+        terminalErrorFiredRef.current = true;
+        // Translate well-known Soniox billing/auth codes into actionable text.
+        let userMsg = rawMsg;
+        const lower = rawMsg.toLowerCase();
+        if (lower.includes('402') || lower.includes('budget exhausted')) {
+            userMsg = lang === 'vi'
+                ? 'Soniox đã hết quota tháng. Vui lòng nạp thêm hoặc đổi sang Nvidia trong Cài đặt.'
+                : 'Soniox monthly budget exhausted. Top up or switch to Nvidia in Settings.';
+        } else if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid api key')) {
+            userMsg = lang === 'vi'
+                ? 'Soniox API Key không hợp lệ. Vui lòng kiểm tra lại trong Cài đặt.'
+                : 'Invalid Soniox API key. Please check Settings.';
+        }
+        showToast(userMsg, 'error');
+        console.error('[stt-terminal]', rawMsg);
+        try { void stopRecordingRef.current(); } catch (e) { console.warn('[stt-terminal] stop failed:', e); }
+    }, [lang, showToast]);
 
     // Sync barHeights from waveform hook to local state
     useEffect(() => {
@@ -144,9 +179,26 @@ export function RecordingBar() {
                 }
                 const data = JSON.parse(event.payload);
                 if (data.error) {
-                    console.error('[system-audio]', data.error);
                     setIsTranscribing(false);
                     useAppStore.getState().setInterimText('');
+                    // Terminal STT error (Soniox 402, auth fail) — stop the
+                    // recording + toast. Before fix: error text leaked through
+                    // as a "System" speaker transcript segment.
+                    if (data.terminal || data.error === true) {
+                        const fallbackErr = useAppStore.getState().lang === 'vi' ? 'Lỗi nhận dạng giọng nói' : 'STT error';
+                        const msg = (typeof data.error === 'string' ? data.error : '') || data.text || fallbackErr;
+                        handleSttTerminalError(msg);
+                    } else {
+                        console.error('[system-audio]', data.error);
+                    }
+                    return;
+                }
+                // Reconnect heartbeat — show as interim banner, do NOT add a part.
+                // Own the display string (localized) instead of echoing the
+                // backend's English text so it matches the UI language.
+                if (data.info || data.type === 'info') {
+                    const reconnecting = useAppStore.getState().lang === 'vi' ? 'Đang kết nối lại...' : 'Reconnecting...';
+                    useAppStore.getState().setInterimText(`🔄 ${reconnecting}`);
                     return;
                 }
 
@@ -270,11 +322,15 @@ export function RecordingBar() {
             } catch {}
         });
         return unlisten;
-    }, [addTranscriptPart, setIsTranscribing]);
+    }, [addTranscriptPart, setIsTranscribing, handleSttTerminalError]);
 
     // ── Start recording ──
     const startRecording = useCallback(async () => {
         try {
+            // Reset the terminal-error latch so a fresh recording session can
+            // surface a new fatal error (e.g. budget exhausted -> user tops up
+            // -> tries again -> fails again -> we want the toast to fire).
+            terminalErrorFiredRef.current = false;
             setInterimText('');
             setInterimSpeaker('Speaker 1', 0);
             setIsTranscribing(false);
@@ -466,6 +522,7 @@ export function RecordingBar() {
                 wsRef.current = ws;
                 attachSocketHandlers(ws, {
                     wsRef, sttProvider, readyBase, fallbackToChunkMode, setIsTranscribing,
+                    onTerminalError: handleSttTerminalError,
                 });
                 connectPcmStream(audioCtx, source);
             }
@@ -478,6 +535,7 @@ export function RecordingBar() {
         startDraftAudioArchive, addTranscriptPart, lang, setInterimText, setInterimSpeaker,
         setIsTranscribing, ensureSystemCapturePermission, setupSystemAudioListener,
         wsRef, connectPcmStream, disconnectPcmStream, closeWebSocket, analyserRef,
+        showToast, handleSttTerminalError,
     ]);
 
     // ── Stop recording ──
@@ -562,6 +620,13 @@ export function RecordingBar() {
         stopDraftAudioArchive, closeWebSocket, disconnectPcmStream, stopDrawing,
         mediaRecorderRef, inflightChunksRef]);
 
+    // Keep stopRecording reachable from callbacks defined ABOVE this point
+    // (handleSttTerminalError needs to invoke it without creating a render-loop
+    // dep cycle on the callback identity).
+    useEffect(() => {
+        stopRecordingRef.current = stopRecording;
+    }, [stopRecording]);
+
     // ── Pause / Resume ──
     const togglePause = useCallback(() => {
         const nextPaused = !paused;
@@ -602,6 +667,27 @@ export function RecordingBar() {
             })
             .filter(Boolean);
         if (lines.length) await downloadTextFile(filename, lines.join('\n\n'));
+    };
+
+    // ── Minutes CTA ──
+    // Not configured → guide the user to Settings (with a toast explaining why)
+    // instead of a dead button. Configured → open the options popup.
+    const handleCreateMinutes = () => {
+        if (!aiConfigured) {
+            showToast(
+                lang === 'vi'
+                    ? 'Chưa cấu hình Trợ lý AI. Đang mở Cài đặt để bạn bật tính năng tạo biên bản.'
+                    : 'AI Assistant not set up. Opening Settings so you can enable minutes.',
+                'info',
+            );
+            useAppStore.getState().setSettingsOpen(true);
+            return;
+        }
+        setMinutesPopupOpen(true);
+    };
+    const confirmCreateMinutes = () => {
+        setMinutesPopupOpen(false);
+        summarize();
     };
 
     // ── Render ──
@@ -653,7 +739,7 @@ export function RecordingBar() {
                     </>
                 )}
 
-                {!recording && transcriptParts.length > 0 && (
+                {!recording && translationEnabled && transcriptParts.length > 0 && (
                     <button className="rec-download-btn" onClick={downloadTranslation} disabled={!hasTranslatedParts}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -665,47 +751,43 @@ export function RecordingBar() {
                 )}
 
                 {!recording && transcriptParts.length > 0 && (
-                    <div className="summarize-group">
-                        <CustomSelect className="summary-lang-select" value={summaryLang} onChange={setSummaryLang}
-                            options={[{ value: 'vi', label: 'Vietnamese' }, { value: 'en', label: 'English' }]}
-                        />
-                        <CustomSelect className="summary-template-select" value={summaryTemplate} onChange={setSummaryTemplate}
-                            options={[
-                                { value: 'mom', label: lang === 'vi' ? 'Biên bản (MoM)' : 'Minutes (MoM)' },
-                                { value: 'deep', label: lang === 'vi' ? 'Phân tích chi tiết' : 'Deep Analysis' },
-                                { value: 'summary', label: lang === 'vi' ? 'Tóm tắt' : 'Summary' },
-                                { value: 'bullets', label: 'Bullet Points' },
-                                { value: 'custom', label: lang === 'vi' ? 'Tùy chỉnh' : 'Custom Prompt' },
-                            ]}
-                        />
-                        {summaryTemplate === 'custom' && (
-                            <textarea className="custom-prompt-input" value={customPrompt}
-                                onChange={(e) => setCustomPrompt(e.target.value)}
-                                placeholder={lang === 'vi' ? 'Nhập prompt tùy chỉnh...' : 'Enter your custom prompt...'} rows={3}
-                            />
+                    <button
+                        className={`rec-summarize-btn ${summaryLoading ? 'loading' : ''} ${!aiConfigured ? 'needs-setup' : ''}`}
+                        onClick={handleCreateMinutes}
+                        disabled={summaryLoading}
+                        aria-busy={summaryLoading}
+                        title={!aiConfigured
+                            ? (lang === 'vi'
+                                ? 'Chưa cấu hình Trợ lý AI — bấm để mở Cài đặt và bật tính năng tạo biên bản'
+                                : 'AI Assistant not set up — click to open Settings and enable minutes')
+                            : (lang === 'vi' ? 'Chọn tuỳ chọn rồi tạo biên bản' : 'Pick options, then create minutes')}>
+                        {summaryLoading ? (
+                            <>
+                                <svg className="rec-btn-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+                                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                                </svg>
+                                <span>{lang === 'vi' ? 'Đang tạo biên bản...' : 'Creating minutes...'}</span>
+                            </>
+                        ) : (
+                            <>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
+                                </svg>
+                                <span>{lang === 'vi' ? 'Tạo biên bản' : 'Create Minutes'}</span>
+                            </>
                         )}
-                        <button className={`rec-summarize-btn ${summaryLoading ? 'loading' : ''}`}
-                            onClick={summarize} disabled={summaryLoading} aria-busy={summaryLoading}>
-                            {summaryLoading ? (
-                                <>
-                                    <svg className="rec-btn-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none">
-                                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-                                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                    </svg>
-                                    <span>{lang === 'vi' ? 'Đang tạo biên bản...' : 'Creating minutes...'}</span>
-                                </>
-                            ) : (
-                                <>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
-                                    </svg>
-                                    <span>{lang === 'vi' ? 'Tạo biên bản' : 'Create Minutes'}</span>
-                                </>
-                            )}
-                        </button>
-                    </div>
+                    </button>
                 )}
             </div>
+
+            {/* Minutes options popup — language + template moved out of the bar */}
+            <MinutesOptionsModal
+                open={minutesPopupOpen}
+                lang={lang}
+                onClose={() => setMinutesPopupOpen(false)}
+                onConfirm={confirmCreateMinutes}
+            />
 
             {/* Translation Bar */}
             <div className="translation-bar">

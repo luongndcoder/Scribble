@@ -13,10 +13,11 @@ TRANSLATIONS = {
         "groq_key_missing": "Chưa nhập mã truy cập Groq",
         "groq_key_invalid": "Mã truy cập Groq không hợp lệ",
         "groq_connect_fail": "Không thể kết nối đến Groq",
-        "llm_connected": "Trợ lý AI đã kết nối thành công",
+        "llm_connected": "Đã kết nối thành công",
         "llm_key_missing": "Chưa nhập mã truy cập AI",
         "llm_key_invalid": "Mã truy cập AI không hợp lệ",
         "llm_connect_fail": "Không thể kết nối đến dịch vụ AI",
+        "network_offline": "Không có kết nối mạng — kiểm tra Internet rồi thử lại",
 
         # ── Startup logs ──
         "starting": "VoiceScribe dang khoi dong...",
@@ -41,10 +42,11 @@ TRANSLATIONS = {
         "groq_key_missing": "Groq access key not set",
         "groq_key_invalid": "Invalid Groq access key",
         "groq_connect_fail": "Cannot connect to Groq",
-        "llm_connected": "AI assistant connected successfully",
+        "llm_connected": "Connected successfully",
         "llm_key_missing": "AI access key not set",
         "llm_key_invalid": "Invalid AI access key",
         "llm_connect_fail": "Cannot connect to AI service",
+        "network_offline": "No internet connection — check your network and retry",
 
         # ── Startup logs ──
         "starting": "VoiceScribe starting...",

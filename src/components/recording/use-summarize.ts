@@ -2,6 +2,8 @@ import { useRef } from "react";
 import { useAppStore } from "../../stores/appStore";
 import { fetchSidecar } from "../../lib/sidecar";
 import { consumeSseResponse } from "../../lib/sse";
+import { getSettings } from "../../lib/api";
+import { useToast } from "../Toast";
 
 function extractMinutesTitle(summary: string): string | null {
     const raw = String(summary || "").trim();
@@ -41,9 +43,37 @@ function extractMinutesTitle(summary: string): string | null {
  */
 export function useSummarize() {
     const lockRef = useRef(false);
+    const { showToast } = useToast();
 
     const summarize = async () => {
         if (lockRef.current) return;
+
+        // AI is OPTIONAL — an STT-only user may never have configured it. Catch
+        // that here with a friendly nudge instead of letting them hit a cryptic
+        // backend error after the tab already flipped to the (empty) summary.
+        try {
+            const settings = await getSettings();
+            const provider = settings.llm_provider || "openai";
+            const hasKey = !!(settings.llm_api_key && settings.llm_api_key.trim());
+            const hasModel = !!(settings.llm_model && settings.llm_model.trim());
+            const keyOptionalProvider = provider === "gemini" || provider === "compatible";
+            // Clearly "skipped AI entirely" = no key AND no model.
+            if (!hasKey && !hasModel && !keyOptionalProvider) {
+                const uiLang = useAppStore.getState().lang;
+                showToast(
+                    uiLang === "vi"
+                        ? 'Chưa cấu hình Trợ lý AI (tùy chọn). Vào Cài đặt để bật tính năng tạo biên bản tự động.'
+                        : 'AI Assistant not set up (optional). Open Settings to enable auto-generated minutes.',
+                    "info",
+                );
+                useAppStore.getState().setSettingsOpen(true);
+                return;
+            }
+        } catch {
+            // Settings fetch failed — fall through and let the normal flow
+            // surface whatever the backend reports.
+        }
+
         lockRef.current = true;
         // Safety timeout: auto-release lock after 5 minutes to prevent permanent UI lock
         const lockTimeout = setTimeout(() => { lockRef.current = false; }, 5 * 60 * 1000);

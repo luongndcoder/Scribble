@@ -361,6 +361,18 @@ body.electron-app .sub-tabs {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
+/* Sidecar is up but the internet dropped — amber warning, distinct from the
+   blue "starting" (sidecar warming) and the green "ready". */
+.backend-status-chip.network-offline {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+.backend-status-chip.network-offline .status-dot {
+  animation: pulse 1.3s ease-in-out infinite;
+}
+
 /* ─── Startup Banner (non-blocking) ─── */
 .startup-banner {
   position: fixed;
@@ -654,6 +666,17 @@ body.electron-app .sub-tabs {
   color: #fff;
   font-weight: 700;
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+}
+
+/* Locked (AI not configured + no existing summary) — dimmed but still
+   clickable; clicking routes to Settings. A lock affordance via the title. */
+.sub-tab.locked {
+  opacity: 0.5;
+}
+
+.sub-tab.locked:hover {
+  background: rgba(245, 158, 11, 0.1);
+  color: #b45309;
 }
 
 /* ─── Detail Panes ─── */
@@ -2018,31 +2041,35 @@ body.electron-app .sub-tabs {
   opacity: 0.3;
 }
 
+/* Secondary ghost control — same visual tier as the config segment. */
 .rec-download-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  background: var(--gray-100);
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  background: var(--white);
   color: var(--gray-700);
-  border: none;
+  border: 1px solid var(--border);
   border-radius: var(--radius-full);
   font-family: var(--font);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all var(--duration);
+  transition: background 150ms var(--ease), color 150ms var(--ease), border-color 150ms var(--ease);
   flex-shrink: 0;
 }
 
 .rec-download-btn:hover {
-  background: #dbeafe;
-  color: #2563eb;
+  background: var(--blue-50);
+  color: var(--blue-600);
+  border-color: #bfdbfe;
 }
 
 .rec-download-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+  background: var(--gray-50);
 }
 
 .rec-timer {
@@ -2060,13 +2087,22 @@ body.electron-app .sub-tabs {
   color: var(--gray-600);
 }
 
+/* ── Post-recording action bar — 2-tier hierarchy ──
+   The summarize group is now: [ light config segment ]  ·gap·  [ solid CTA ].
+   Config (language + template) recedes as secondary ghost controls so the
+   primary "Create Minutes" action reads as THE thing to do, instead of being
+   buried inside a dark segmented control alongside two dropdowns. */
 .summarize-group {
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
-  border-radius: var(--radius-full, 20px);
-  overflow: visible;
-  gap: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The two config selects form ONE connected segment (shared inner divider). */
+.summary-config-segment {
+  display: flex;
+  align-items: center;
 }
 
 .summarize-group .custom-select {
@@ -2078,53 +2114,44 @@ body.electron-app .sub-tabs {
   z-index: 200;
 }
 
-/* First select: rounded left only */
-.summarize-group .custom-select:first-child .custom-select-trigger {
-  background: var(--primary, #6366f1);
-  color: var(--white, #fff);
-  border: none;
-  border-radius: var(--radius-full, 20px) 0 0 var(--radius-full, 20px);
-  font-weight: 600;
-  font-size: 0.78rem;
-  padding: 5px 10px;
-  gap: 5px;
-}
-
-/* Middle select: no rounding */
+.summarize-group .summary-lang-select .custom-select-trigger,
 .summarize-group .summary-template-select .custom-select-trigger {
-  background: var(--primary, #6366f1);
-  color: var(--white, #fff);
-  border: none;
-  border-radius: 0;
-  border-left: 1px solid rgba(255,255,255,0.2);
+  background: var(--white);
+  color: var(--gray-700);
+  border: 1px solid var(--border);
   font-weight: 600;
-  font-size: 0.78rem;
-  padding: 5px 10px;
-  gap: 5px;
+  font-size: 0.8rem;
+  padding: 0 12px;
+  height: 34px;
+  gap: 6px;
+  transition: background 150ms var(--ease), border-color 150ms var(--ease);
 }
 
-.summarize-group .custom-select-trigger:hover {
-  background: var(--primary-hover, #5558e6);
-  border: none;
+/* Left half of the segment — round outer corners only. */
+.summarize-group .summary-lang-select .custom-select-trigger {
+  border-radius: var(--radius-full) 0 0 var(--radius-full);
+  border-right: none;
 }
 
+/* Right half — round outer corners; its left border is the segment divider. */
+.summarize-group .summary-template-select .custom-select-trigger {
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+}
+
+.summarize-group .summary-lang-select .custom-select-trigger:hover,
 .summarize-group .summary-template-select .custom-select-trigger:hover {
-  background: var(--primary-hover, #5558e6);
-  border-left: 1px solid rgba(255,255,255,0.2);
+  background: var(--gray-50);
+  border-color: var(--gray-300);
 }
 
 .summarize-group .custom-select.open .custom-select-trigger {
-  border: none;
+  background: var(--gray-50);
+  border-color: var(--gray-900);
   box-shadow: none;
 }
 
 .summarize-group .custom-select-chevron {
-  color: rgba(255,255,255,0.7);
-}
-
-.summarize-group .rec-summarize-btn {
-  border-radius: 0 var(--radius-full, 20px) var(--radius-full, 20px) 0;
-  border-left: 1px solid rgba(255,255,255,0.2);
+  color: var(--gray-400);
 }
 
 /* Custom prompt textarea */
@@ -2152,38 +2179,189 @@ body.electron-app .sub-tabs {
   color: var(--text-muted, #94a3b8);
 }
 
+/* Primary CTA — the one action the user came here for. Solid slate, lifted
+   shadow, gentle hover rise so it clearly outranks the ghost config controls. */
 .rec-summarize-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
+  gap: 6px;
+  height: 34px;
+  padding: 0 16px;
   background: var(--primary);
   color: var(--white);
   border: none;
   border-radius: var(--radius-full);
   font-family: var(--font);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 600;
+  letter-spacing: 0.01em;
   cursor: pointer;
-  transition: opacity var(--duration);
   white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25), 0 2px 8px rgba(15, 23, 42, 0.12);
+  transition: transform 160ms var(--ease), box-shadow 160ms var(--ease), background 160ms var(--ease);
+}
+
+/* Sparkle tinted amber — a small "AI generation" signal that pops on slate. */
+.rec-summarize-btn:not(.loading) svg {
+  color: #fbbf24;
 }
 
 .rec-summarize-btn:hover {
-  opacity: 0.85;
+  transform: translateY(-1px);
+  background: var(--gray-800);
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.28), 0 6px 18px rgba(15, 23, 42, 0.18);
+}
+
+.rec-summarize-btn:active {
+  transform: translateY(0);
 }
 
 .rec-summarize-btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
 }
 
 .rec-summarize-btn.loading {
   pointer-events: none;
 }
 
+/* AI not configured — the CTA stays clickable (routes to Settings) but drops
+   the bold solid look so it reads as "needs setup", not "ready". The sparkle
+   greys out; hover is a gentle nudge rather than the primary lift. */
+.rec-summarize-btn.needs-setup {
+  background: var(--white);
+  color: var(--gray-600);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.rec-summarize-btn.needs-setup svg {
+  color: var(--gray-400);
+}
+
+.rec-summarize-btn.needs-setup:hover {
+  transform: none;
+  background: var(--gray-50);
+  border-color: var(--gray-300);
+  box-shadow: none;
+}
+
 .rec-btn-spinner {
   animation: spin 0.8s linear infinite;
+}
+
+/* ── Minutes options popup ─────────────────────────────────────────────────
+   Small dialog opened by the "Create Minutes" CTA — holds the language +
+   template controls that used to live permanently in the bar. */
+.minutes-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  padding: 24px;
+  animation: fadeIn 0.16s ease;
+}
+
+.minutes-modal {
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22), 0 4px 14px rgba(0, 0, 0, 0.08);
+  width: 100%;
+  max-width: 380px;
+  overflow: visible; /* let the select dropdowns escape the card */
+  animation: chipFadeIn 0.18s var(--ease);
+}
+
+.minutes-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.minutes-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.minutes-modal-title svg {
+  color: #fbbf24;
+}
+
+.minutes-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 150ms var(--ease);
+}
+
+.minutes-modal-close:hover {
+  background: var(--gray-100);
+}
+
+.minutes-modal-body {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.minutes-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.minutes-modal-field > label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gray-500);
+}
+
+.minutes-modal-field .custom-select {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Open the select dropdowns DOWNWARD inside the modal (default opens upward,
+   which would clip above the dialog). */
+.minutes-modal .custom-select-dropdown {
+  bottom: auto;
+  top: calc(100% + 6px);
+  z-index: 320;
+  animation: dropdownSlideDown 160ms var(--ease);
+}
+
+.minutes-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.minutes-modal-confirm svg {
+  color: #fbbf24;
 }
 
 /* ─── Settings Panel (Full-page slide-over) ─── */
@@ -2376,12 +2554,19 @@ body.electron-app .sub-tabs {
    diagnostic action. Right-aligned, plain button now, matches the
    density of the rest of the panel. */
 .settings-test-section {
-  /* Override the 2-col grid for this section — single column, compact */
+  /* Vertical stack: head row (label + button) on top, results below. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.settings-test-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 14px;
   flex-wrap: wrap;
 }
 
@@ -2430,41 +2615,69 @@ body.electron-app .sub-tabs {
 .settings-test-results {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 6px;
-  /* Inside the flex-wrap settings-test-section, results span the full row
-     so they appear UNDER the right-aligned button rather than next to it. */
-  flex-basis: 100%;
+  gap: 8px;
 }
 
+/* Result row: [status badge] [category] [message] — left-aligned with gaps. */
 .settings-test-result-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  background: var(--gray-50);
+  gap: 10px;
+  padding: 9px 12px;
   border-radius: var(--radius-sm);
   font-size: 0.82rem;
+  border: 1px solid transparent;
+}
+
+.settings-test-result-row.ok {
+  background: var(--green-50);
+  border-color: #bbf7d0;
+}
+
+.settings-test-result-row.fail {
+  background: var(--red-50);
+  border-color: #fecaca;
+}
+
+/* Circular status badge — colored fill, white glyph. */
+.settings-test-result-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  color: #fff;
+}
+
+.settings-test-result-row.ok .settings-test-result-icon {
+  background: var(--green-500);
+}
+
+.settings-test-result-row.fail .settings-test-result-icon {
+  background: var(--red-500);
 }
 
 .settings-test-result-label {
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.settings-test-result-value {
+  font-weight: 700;
   color: var(--text);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  flex-shrink: 0;
+  min-width: 64px;
+}
+
+.settings-test-result-msg {
+  flex: 1;
+  min-width: 0;
   font-weight: 500;
+  line-height: 1.4;
 }
 
-.settings-test-result-value.ok {
-  color: #166534;
+.settings-test-result-row.ok .settings-test-result-msg {
+  color: #15803d;
 }
 
-.settings-test-result-value.fail {
+.settings-test-result-row.fail .settings-test-result-msg {
   color: var(--red-600);
 }
 
@@ -2736,6 +2949,28 @@ body.electron-app .sub-tabs {
   color: #d97706;
 }
 
+/* Optional & unset — neutral, NOT a warning. Used where a field is genuinely
+   optional (e.g. the AI assistant) so STT-only users aren't nudged to fill it. */
+.config-status-badge.optional-unset {
+  background: var(--gray-100);
+  color: var(--gray-500);
+}
+
+/* "Optional" pill in a section header title row. */
+.settings-section-optional-pill {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gray-500);
+  background: var(--gray-100);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  vertical-align: middle;
+}
+
 /* Settings panel dropdowns open downward */
 .settings-panel .custom-select-dropdown {
   bottom: auto;
@@ -2790,6 +3025,16 @@ body.electron-app .sub-tabs {
 .status-dot.loading {
   background: var(--amber-500);
   animation: pulse 1s infinite;
+}
+
+.status-dot.starting {
+  background: var(--blue-500);
+  box-shadow: 0 0 6px var(--blue-500);
+}
+
+.status-dot.network-offline {
+  background: var(--amber-500);
+  box-shadow: 0 0 6px var(--amber-500);
 }
 
 .radio-cards {
@@ -3423,15 +3668,17 @@ body.electron-app .draft-recovery-banner {
 }
 
 .audio-source-select .custom-select-trigger {
-  padding: 7px 12px;
+  height: 34px;
+  padding: 0 12px;
   font-size: 0.8rem;
+  border-radius: var(--radius-full);
 }
 
 .bar-divider {
   width: 1px;
-  height: 20px;
+  height: 22px;
   background: var(--border);
-  margin: 0 4px;
+  margin: 0 2px;
 }
 
 /* ─── Custom Select Component ─── */
@@ -3561,17 +3808,36 @@ body.electron-app .draft-recovery-banner {
   color: #92400e;
 }
 
+/* Contained control so [icon · "Dịch cabin" · toggle] reads as ONE unit,
+   balancing the white select pills on either side. */
 .translation-toggle-wrap {
   display: flex;
   align-items: center;
   gap: 6px;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-secondary);
+  transition: border-color 150ms var(--ease);
+}
+
+/* Brand-tint the cabin-translate icon when the feature is ON. */
+.translation-toggle-wrap:has(input:checked) {
+  border-color: var(--gray-300);
+  color: var(--text);
 }
 
 .translation-toggle-wrap svg {
   color: var(--gray-400);
+  transition: color 150ms var(--ease);
+}
+
+.translation-toggle-wrap:has(input:checked) svg {
+  color: var(--blue-500);
 }
 
 .toggle-sm {
@@ -3585,8 +3851,10 @@ body.electron-app .draft-recovery-banner {
 }
 
 .translation-lang-select .custom-select-trigger {
-  padding: 6px 10px;
+  height: 34px;
+  padding: 0 12px;
   font-size: 0.8rem;
+  border-radius: var(--radius-full);
 }
 
 /* ─── 2-Column Transcript Layout ─── */
@@ -4724,15 +4992,37 @@ body.electron-app .draft-recovery-banner {
 .update-modal-btn.ghost:hover { background: var(--gray-50, #f8fafc); color: var(--text, #0f172a); }
 
 /* ─── Settings: Update controls ──────────────────────────────────────── */
+/* Flatten the update controls into a single divided list instead of stacked
+   gray boxes-in-a-box. The section card already provides the chrome; rows just
+   need a hairline divider, so the block reads compact and tidy. */
+.settings-update-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--gray-50);
+  padding: 0 12px;
+}
+
 .settings-update-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--gray-200, #e2e8f0);
-  border-radius: 8px;
-  background: var(--gray-50, #f8fafc);
+  padding: 9px 0;
+  border-top: 1px solid var(--border-light);
+}
+
+/* First row sits flush with the list top — no leading divider. */
+.settings-update-list > .settings-update-row:first-child {
+  border-top: none;
+}
+
+/* Status line (e.g. "Bạn đang dùng bản mới nhất") sits inside the list too;
+   when it precedes a row, that row's divider still reads correctly. */
+.settings-update-list > .settings-update-status {
+  margin-top: 0;
+  padding: 0 0 9px;
 }
 .settings-update-row .label {
   font-size: 13px;

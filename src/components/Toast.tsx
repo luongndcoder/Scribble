@@ -49,13 +49,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         const id = ++_nextId;
         setToasts((prev) => [...prev, { id, message, type }]);
 
+        // Errors get a longer dwell time — actionable messages (budget
+        // exhausted, key invalid) need reading time, not a 3.5s glance.
+        const dwellMs = type === 'error' ? 7000 : 3500;
         const exitTimer = setTimeout(() => {
             setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)));
-        }, 3500);
+        }, dwellMs);
         const removeTimer = setTimeout(() => {
             setToasts((prev) => prev.filter((t) => t.id !== id));
             timersRef.current.delete(id);
-        }, 3800);
+        }, dwellMs + 300);
 
         timersRef.current.set(id, { exit: exitTimer, remove: removeTimer });
     }, []);

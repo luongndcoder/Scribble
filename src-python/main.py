@@ -659,6 +659,39 @@ async def soniox_stream_ws(websocket: WebSocket):
                 # Stream ended — flush any pending translation
                 break
             try:
+                # Terminal error from Soniox SDK (e.g. 402 budget exhausted,
+                # auth failure). Surface as a structured error payload so the
+                # frontend can stop recording + toast — NOT as transcript text.
+                # Before fix v1.2.15: this branch was missing, so the error
+                # text leaked through as a regular "System" speaker segment.
+                if result.get("error"):
+                    err_text = result.get("text", "STT error")
+                    try:
+                        await websocket.send_json({
+                            "error": True,
+                            "terminal": True,
+                            "text": err_text,
+                            "is_final": True,
+                            "speaker": "System",
+                            "speaker_id": -1,
+                        })
+                    except Exception:
+                        pass
+                    log.warning("[ws:soniox-stream] Terminal error sent to FE: %s", err_text)
+                    break  # Stream is dead — stop consuming the queue.
+                # Reconnect heartbeat — forward as info so FE shows
+                # "🔄 Reconnecting…" instead of injecting a transcript part.
+                if result.get("info") or result.get("type") == "info":
+                    try:
+                        await websocket.send_json({
+                            "type": "info",
+                            "info": True,
+                            "text": result.get("text", "Reconnecting..."),
+                            "is_final": False,
+                        })
+                    except Exception:
+                        pass
+                    continue
                 msg = {
                     "text": result["text"],
                     "is_final": result["is_final"],

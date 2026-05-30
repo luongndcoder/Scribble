@@ -35,7 +35,8 @@ const translations: Record<string, Record<string, string>> = {
 
         // ── AI (LLM) ──
         ai_section: 'Trợ lý AI',
-        ai_hint: 'Cấu hình AI để tóm tắt cuộc họp',
+        ai_hint: 'Tùy chọn — chỉ cần khi muốn tự động tạo biên bản. Vẫn ghi âm & xem transcript bình thường nếu bỏ qua.',
+        optional_label: 'Tùy chọn',
         ai_access_key: 'Mã truy cập',
         ai_base_url: 'Địa chỉ máy chủ',
         ai_url_hint: 'Hỗ trợ OpenAI, Gemini, Claude, v.v.',
@@ -112,7 +113,8 @@ const translations: Record<string, Record<string, string>> = {
 
         // ── AI (LLM) ──
         ai_section: 'AI Assistant',
-        ai_hint: 'For generating meeting summaries',
+        ai_hint: 'Optional — only needed for auto-generating minutes. You can still record & view transcripts without it.',
+        optional_label: 'Optional',
         ai_access_key: 'Access Key',
         ai_base_url: 'Server URL',
         ai_url_hint: 'Supports OpenAI, Gemini, Claude, etc.',

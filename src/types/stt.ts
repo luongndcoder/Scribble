@@ -27,6 +27,12 @@ export interface SttWsMessage {
      *  may send either `error: "<message string>"` (legacy shape) or
      *  `error: true` alongside `text: "..."` (Soniox path). Accept both. */
     error?: string | boolean;
+    /** `terminal: true` distinguishes a fatal STT error (stream is dead — stop
+     *  recording + toast) from a transient connection error (which falls back
+     *  to chunk mode). Sent by `/ws/soniox-stream` for Soniox 402, auth fail,
+     *  etc. Older sidecars omit this field — treat any onTerminalError handler
+     *  presence + `error` truthy as terminal for backwards-compat. */
+    terminal?: boolean;
     /** Non-terminal status heartbeat from backend (e.g. Soniox auto-reconnect
      *  after a session-duration cap). Render as interim banner, NOT as a
      *  transcript part. */
@@ -39,8 +45,12 @@ export interface SttWsMessage {
 }
 
 export interface DiagnoseResult {
-    stt: { status: string; message: string };
-    llm: { status: string; message: string };
+    stt: { status: string; message: string; offline?: boolean };
+    llm: { status: string; message: string; offline?: boolean };
+    /** Present when the backend short-circuited because the machine is offline
+     *  (or a provider raised a DNS/unreachable error). */
+    network?: { online: boolean };
+    backend?: string;
 }
 
 export interface SettingsData {

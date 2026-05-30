@@ -16,7 +16,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
-import { getSettings } from '../lib/api';
+import { getSettings, detectOfflineAfterFailure, looksLikeNetworkError } from '../lib/api';
 import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import {
     cancelAudioUpload,
@@ -146,6 +146,29 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
         jobIdRef.current = null;
         sseAbortRef.current = null;
         cancelledRef.current = false;
+    };
+
+    // Land on the error step, but first force-probe the network so we can tell
+    // the user the REAL cause: "mất mạng" vs a genuine pipeline error. Without
+    // this, a wifi drop mid-upload showed a confusing raw error and the offline
+    // banner never appeared (nothing flipped networkOnline = false actively).
+    const failWith = async (rawMsg: string) => {
+        // Treat as a network failure if EITHER a live probe says we're offline
+        // now, OR the raw backend error string itself looks like a DNS/offline
+        // error (the net may have already recovered by the time the job gave
+        // up, so the string check is a needed second signal).
+        const offline = await detectOfflineAfterFailure(useAppStore.getState().setNetworkOnline);
+        const isNetwork = offline === true || looksLikeNetworkError(rawMsg);
+        if (isNetwork) {
+            setErrorMessage(
+                lang === 'vi'
+                    ? 'Mất kết nối Internet giữa chừng. Kiểm tra mạng rồi bấm "Thử lại".'
+                    : 'Internet connection lost mid-process. Check your network and press "Try again".',
+            );
+        } else {
+            setErrorMessage(rawMsg);
+        }
+        setStep('error');
     };
 
     // Reset whenever the modal is opened fresh.
@@ -294,8 +317,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                 onClose();
                 return;
             }
-            setErrorMessage(msg);
-            setStep('error');
+            await failWith(msg);
             return;
         }
 
@@ -329,8 +351,11 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                             setStep('done');
                             return;
                         }
-                        setErrorMessage(state.error || tr.error);
-                        setStep('error');
+                        // Backend job failed — may be a network error bubbled
+                        // up from a Soniox upload that exhausted retries. Route
+                        // through failWith so a lost-internet cause shows the
+                        // clean "mất mạng" message + flips the offline banner.
+                        void failWith(state.error || tr.error);
                         return;
                     }
                     if (state.status === 'cancelled') {
@@ -365,8 +390,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                 return;
             }
             const msg = err instanceof Error ? err.message : String(err);
-            setErrorMessage(msg);
-            setStep('error');
+            await failWith(msg);
         } finally {
             sseAbortRef.current = null;
         }

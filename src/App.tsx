@@ -10,6 +10,7 @@ import { ToastProvider } from './components/Toast';
 import { UpdateChecker } from './components/UpdateChecker';
 import { StartupStatusBar } from './components/StartupStatusBar';
 import { SIDECAR_HTTP_BASES } from './lib/sidecar';
+import { getSettings } from './lib/api';
 import './index.css';
 
 const queryClient = new QueryClient();
@@ -65,7 +66,7 @@ function handleTopnavMouseDown(e: React.MouseEvent<HTMLElement>) {
 }
 
 function AppInner() {
-  const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline, setNetworkOnline } = useAppStore();
+  const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline, setNetworkOnline, networkOnline, setAiConfigured } = useAppStore();
   const [backendStatus, setBackendStatusLocal] = useState<'online' | 'offline'>('offline');
   // Mirror local backend state into the global store so unrelated components
   // (MeetingList action buttons, RecordingBar) can gate themselves without
@@ -98,14 +99,27 @@ function AppInner() {
     return () => clearInterval(id);
   }, [isOffline]);
 
+  // Chip reflects TWO independent signals: the local sidecar (backendStatus)
+  // AND internet reachability (networkOnline). "Ready" must mean both are up —
+  // otherwise the user sees a green "Sẵn sàng" while uploads silently fail
+  // because wifi dropped. networkOnline === null = unknown (sidecar down or
+  // not probed yet) → don't raise a false offline alarm.
+  const chipState: 'online' | 'network-offline' | 'starting' =
+    backendStatus !== 'online'
+      ? 'starting'
+      : (networkOnline === false ? 'network-offline' : 'online');
+
   const backendLabel = useMemo(() => {
-    if (backendStatus === 'online') {
+    if (chipState === 'online') {
       return lang === 'vi' ? '✓ Sẵn sàng' : '✓ Ready';
+    }
+    if (chipState === 'network-offline') {
+      return lang === 'vi' ? '⚠ Mất mạng' : '⚠ Offline';
     }
     // Elapsed time lives in the bottom status strip — no need to also
     // surface it here (duplicate signal, eyes have to scan two corners).
     return lang === 'vi' ? 'Đang khởi động' : 'Starting';
-  }, [backendStatus, lang]);
+  }, [chipState, lang]);
 
   useEffect(() => {
     if (window.__TAURI_INTERNALS__) {
@@ -214,6 +228,29 @@ function AppInner() {
     return () => { active = false; };
   }, []);
 
+  // Resolve whether the AI assistant is configured enough to summarize. Shared
+  // via the store so RecordingBar (CTA) and MeetingDetail (Minutes tab) can
+  // gate themselves consistently. Re-checks once the sidecar is up and again
+  // whenever the Settings panel closes (the user may have just added/removed
+  // AI credentials).
+  useEffect(() => {
+    if (backendStatus !== 'online' || settingsOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await getSettings();
+        if (cancelled) return;
+        const hasKey = !!(s.llm_api_key && String(s.llm_api_key).trim());
+        const hasModel = !!(s.llm_model && String(s.llm_model).trim());
+        const hasBaseUrl = !!(s.llm_base_url && String(s.llm_base_url).trim());
+        const provider = s.llm_provider || 'openai';
+        const credOk = hasKey || (provider === 'compatible' && hasBaseUrl);
+        setAiConfigured(credOk && hasModel);
+      } catch { /* keep previous value on transient failure */ }
+    })();
+    return () => { cancelled = true; };
+  }, [backendStatus, settingsOpen, setAiConfigured]);
+
   return (
       <QueryClientProvider client={queryClient}>
         <div className={`app ${isOffline ? 'app--offline' : ''} ${IS_MACOS ? 'app--macos' : ''}`}>
@@ -241,12 +278,12 @@ function AppInner() {
               </div>
               <div className="topnav-right" data-tauri-drag-region>
                 <div
-                  className={`backend-status-chip ${backendStatus}`}
+                  className={`backend-status-chip ${chipState}`}
                   title={backendLabel}
                   aria-live="polite"
                   data-tauri-drag-region
                 >
-                  <span className={`status-dot ${backendStatus === 'online' ? 'online' : 'offline'}`} />
+                  <span className={`status-dot ${chipState}`} />
                   <span>{backendLabel}</span>
                 </div>
                 {/* Language + Settings stay enabled during startup — users

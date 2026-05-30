@@ -42,6 +42,66 @@ export const checkHealth = () => request<HealthResponse>('/health');
 /** Force a fresh network probe — use after a suspected outage, NOT in poll loops. */
 export const pingNetwork = () => request<HealthNetwork>('/ping-network');
 
+/** Markers of a DNS/offline/unreachable error string — mirrors the backend's
+ *  `_NETWORK_ERROR_MARKERS` in api/diagnose.py. Used to classify a raw error
+ *  message bubbled up from a failed backend job (Soniox unreachable, etc.). */
+const _NETWORK_ERROR_MARKERS = [
+    'nodename nor servname',
+    'name or service not known',
+    'getaddrinfo failed',
+    'temporary failure in name resolution',
+    'errno 8',
+    'errno -2',
+    'errno -3',
+    '11001',
+    'failed to establish a new connection',
+    'max retries exceeded',
+    'connection refused',
+    'network is unreachable',
+    'no route to host',
+    'name resolution',
+];
+/** True when a raw error string looks like a lost-internet / DNS failure. */
+export function looksLikeNetworkError(msg: string | null | undefined): boolean {
+    if (!msg) return false;
+    const lower = msg.toLowerCase();
+    return _NETWORK_ERROR_MARKERS.some((m) => lower.includes(m));
+}
+
+/**
+ * Call AFTER an API/SSE request fails to decide whether the cause was a lost
+ * internet connection. Force-probes /ping-network so the offline banner can
+ * appear within ~1 probe instead of waiting up to 20s for the passive /health
+ * poll cadence. Side-effect: writes the result into the global store via the
+ * injected setter so any mounted <NetworkOfflineBanner/> reacts immediately.
+ *
+ * Returns true if confirmed offline, false if online, null if undetermined
+ * (the sidecar itself was unreachable — a different failure surfaced elsewhere).
+ *
+ * `setNetworkOnline` is injected (not imported) to keep this lib free of a
+ * direct store dependency and avoid a circular import.
+ */
+export async function detectOfflineAfterFailure(
+    setNetworkOnline: (v: boolean | null) => void,
+): Promise<boolean | null> {
+    // Fast path: the webview's own connectivity flag. When the OS says we're
+    // offline, trust it without a round-trip (the sidecar probe would just
+    // confirm it after a 2s timeout anyway).
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setNetworkOnline(false);
+        return true;
+    }
+    try {
+        const n = await pingNetwork();
+        setNetworkOnline(n.online);
+        return n.online ? false : true;
+    } catch {
+        // Sidecar unreachable — can't attribute the failure to the network.
+        // Leave the store value untouched; backend-status handling owns this.
+        return null;
+    }
+}
+
 // ─── Transcription ───
 export async function transcribeDiarize(audioBlob: Blob): Promise<{
     text: string;

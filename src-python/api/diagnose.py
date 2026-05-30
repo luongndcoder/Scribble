@@ -53,9 +53,21 @@ _network_cache: dict = {
 
 
 async def _probe_network_once() -> None:
-    """Single TCP connect → 1.1.1.1:443 — writes result into _network_cache."""
+    """Deduped probe for the poll loop — skips if another probe is in-flight.
+
+    Use for /health (high-frequency, fine to coalesce). For an explicit
+    re-check that MUST return a fresh value, call _do_probe() directly."""
     if _network_cache["checking"]:
         return
+    await _do_probe()
+
+
+async def _do_probe() -> None:
+    """Single TCP connect → 1.1.1.1:443 — writes result into _network_cache.
+
+    Always runs a real probe (no dedup guard). Concurrent calls are safe: the
+    cache writes are idempotent and last-write-wins is acceptable for a
+    reachability flag."""
     _network_cache["checking"] = True
     started = time.monotonic()
     try:
@@ -111,11 +123,52 @@ async def health():
 
 @router.get("/ping-network")
 async def ping_network():
-    """Force a fresh network probe (bypass cache) — used when the frontend
-    explicitly wants to re-check after a suspected outage. NEVER call from
-    polling loops; use /health for that."""
-    await _probe_network_once()
+    """Force a fresh network probe (bypass cache AND the in-flight dedup
+    guard) — used when the frontend explicitly wants to re-check after a
+    suspected outage (e.g. an upload chunk just failed). NEVER call from
+    polling loops; use /health for that.
+
+    Calls _do_probe() directly so the result is GUARANTEED fresh even if a
+    /health background probe happens to be running at the same moment —
+    otherwise _probe_network_once() would early-return on the `checking`
+    guard and we'd hand back a stale `online: true`."""
+    await _do_probe()
     return await _get_network_status()
+
+
+# ─── Error classification ──────────────────────────────────────────────────
+# When the machine is offline, provider SDKs raise raw DNS/socket errors like
+# "[Errno 8] nodename nor servname provided, or not known" (macOS),
+# "[Errno -2] Name or service not known" (Linux), or "getaddrinfo failed"
+# (Windows). Leaking these into the UI is noise — the real cause is "no
+# internet". Detect that class so /diagnose can show a clean offline message.
+_NETWORK_ERROR_MARKERS = (
+    "nodename nor servname",      # macOS getaddrinfo EAI_NONAME
+    "name or service not known",  # Linux EAI_NONAME
+    "getaddrinfo failed",         # Windows
+    "temporary failure in name resolution",
+    "errno 8",                    # EAI_NONAME numeric (macOS)
+    "errno -2",                   # EAI_NONAME numeric (Linux)
+    "errno -3",                   # EAI_AGAIN (DNS temp fail)
+    "11001",                      # Windows WSAHOST_NOT_FOUND
+    "failed to establish a new connection",
+    "max retries exceeded",
+    "connection refused",
+    "network is unreachable",
+    "no route to host",
+    "name resolution",
+)
+
+
+def _is_network_error(exc: Exception) -> bool:
+    """True if `exc` looks like an offline / DNS-resolution / unreachable error
+    rather than an auth or server-side problem."""
+    import socket
+    # socket.gaierror is the canonical DNS resolution failure.
+    if isinstance(exc, (socket.gaierror, ConnectionError)):
+        return True
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _NETWORK_ERROR_MARKERS)
 
 
 @router.get("/diarizer-status")
@@ -152,6 +205,21 @@ async def diagnose(lang: str = "vi"):
 
     stt_provider = db.get_setting("stt_provider") or "nvidia"
 
+    # ── Offline short-circuit ──────────────────────────────────────────────
+    # Probe the network FIRST (force-fresh via _do_probe, not cached). If the
+    # machine is offline, every provider check below would just raise a raw
+    # DNS error. Return one clean "no internet" message for both STT + LLM.
+    await _do_probe()
+    if _network_cache["online"] is False:
+        offline_msg = t("network_offline", lang)
+        log.info("STATUS: diagnose short-circuit — network offline")
+        return {
+            "stt": {"status": "error", "message": offline_msg, "offline": True},
+            "llm": {"status": "error", "message": offline_msg, "offline": True},
+            "backend": stt_provider,
+            "network": {"online": False},
+        }
+
     if stt_provider == "soniox":
         soniox_key = db.get_setting("soniox_api_key") or os.getenv("SONIOX_API_KEY", "")
         if not soniox_key:
@@ -166,7 +234,10 @@ async def diagnose(lang: str = "vi"):
                 await loop.run_in_executor(None, _test_soniox)
                 results["stt"] = {"status": "ok", "message": t("soniox_connected", lang)}
             except Exception as e:
-                results["stt"] = {"status": "error", "message": f"{t('soniox_connect_fail', lang)}: {str(e)[:80]}"}
+                if _is_network_error(e):
+                    results["stt"] = {"status": "error", "message": t("network_offline", lang), "offline": True}
+                else:
+                    results["stt"] = {"status": "error", "message": f"{t('soniox_connect_fail', lang)}: {str(e)[:80]}"}
     else:
         nvidia_key = db.get_setting("nvidia_api_key") or os.getenv("NVIDIA_API_KEY", "")
         if not nvidia_key:
@@ -192,7 +263,9 @@ async def diagnose(lang: str = "vi"):
                 results["stt"] = {"status": "ok", "message": t("nvidia_connected", lang)}
             except Exception as e:
                 err_str = str(e)
-                if "TimeoutError" in type(e).__name__ or "timed out" in err_str.lower():
+                if _is_network_error(e):
+                    results["stt"] = {"status": "error", "message": t("network_offline", lang), "offline": True}
+                elif "TimeoutError" in type(e).__name__ or "timed out" in err_str.lower():
                     results["stt"] = {"status": "error", "message": t("nvidia_connect_fail", lang) + ": Connection timed out (10s)"}
                 else:
                     results["stt"] = {"status": "error", "message": f"{t('nvidia_connect_fail', lang)}: {err_str[:80]}"}
@@ -222,8 +295,12 @@ async def diagnose(lang: str = "vi"):
                     results["llm"] = {"status": "ok", "message": t("llm_connected", lang)}
                 else:
                     results["llm"] = {"status": "error", "message": t("llm_key_invalid", lang)}
-        except Exception:
-            results["llm"] = {"status": "error", "message": t("llm_connect_fail", lang)}
+        except Exception as e:
+            if _is_network_error(e):
+                results["llm"] = {"status": "error", "message": t("network_offline", lang), "offline": True}
+            else:
+                results["llm"] = {"status": "error", "message": t("llm_connect_fail", lang)}
 
     results["backend"] = stt_provider
+    results["network"] = {"online": True}
     return results

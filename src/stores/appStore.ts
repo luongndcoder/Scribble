@@ -65,6 +65,11 @@ interface AppState {
      *  null = unknown yet, true = online, false = no internet. Used to surface
      *  a banner during long uploads when the user's wifi drops. */
     networkOnline: boolean | null;
+    /** Whether the AI assistant (LLM) is configured enough to summarize:
+     *  credential (key, or compatible+baseURL) AND a model. Drives the
+     *  enable/disable of all minutes-related actions. Default true to avoid a
+     *  flash-disable before the first settings read resolves. */
+    aiConfigured: boolean;
 
     // Meetings
     meetings: Meeting[];
@@ -97,6 +102,7 @@ interface AppState {
     setLang: (v: 'vi' | 'en') => void;
     setBackendOnline: (v: boolean) => void;
     setNetworkOnline: (v: boolean | null) => void;
+    setAiConfigured: (v: boolean) => void;
     setMeetings: (m: Meeting[]) => void;
     setCurrentMeetingId: (id: number | null) => void;
     setTransientSummary: (v: string) => void;
@@ -130,6 +136,7 @@ export const useAppStore = create<AppState>((set) => ({
     lang: 'vi',
     backendOnline: false,
     networkOnline: null,
+    aiConfigured: true,
     meetings: [],
     currentMeetingId: null,
     transientSummary: '',
@@ -249,6 +256,7 @@ export const useAppStore = create<AppState>((set) => ({
     setLang: (v) => set({ lang: v }),
     setBackendOnline: (v) => set({ backendOnline: v }),
     setNetworkOnline: (v) => set({ networkOnline: v }),
+    setAiConfigured: (v) => set({ aiConfigured: v }),
     setMeetings: (m) => set({ meetings: m }),
     setCurrentMeetingId: (id) => set({ currentMeetingId: id }),
     setTransientSummary: (v) => set({ transientSummary: v }),

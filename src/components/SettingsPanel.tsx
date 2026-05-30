@@ -171,11 +171,22 @@ export function SettingsPanel() {
             try {
                 const r = await diagnose(lang, controller.signal);
                 clearTimeout(timeout);
+                // Offline: backend short-circuits both checks with the same
+                // clean message. Surface it once as a toast so the user isn't
+                // staring at two identical "no internet" rows.
+                if (r.network?.online === false) {
+                    const offlineMsg = lang === 'vi'
+                        ? 'Không có kết nối mạng — kiểm tra Internet rồi thử lại'
+                        : 'No internet connection — check your network and retry';
+                    showToast(offlineMsg, 'error');
+                }
                 setSttResult({ ok: r.stt?.status === 'ok', msg: r.stt?.message || 'Error' });
                 setLlmResult({ ok: r.llm?.status === 'ok', msg: r.llm?.message || 'Error' });
             } catch (e: unknown) {
                 clearTimeout(timeout);
-                const msg = (e instanceof DOMException && e.name === 'AbortError') ? 'Timeout (15s)' : 'Cannot connect';
+                const msg = (e instanceof DOMException && e.name === 'AbortError')
+                    ? (lang === 'vi' ? 'Quá thời gian (15s)' : 'Timeout (15s)')
+                    : (lang === 'vi' ? 'Không kết nối được' : 'Cannot connect');
                 setSttResult({ ok: false, msg });
                 setLlmResult({ ok: false, msg });
             }
@@ -240,13 +251,52 @@ export function SettingsPanel() {
     const hasApiKey = currentApiKey.length > 0;
     const hasLlmKey = llmKey.length > 0;
     const hasLlmModel = llmModel.length > 0;
+    // Model can only be picked once the prerequisite credential is present:
+    // an API key for hosted providers, or a Base URL for the OpenAI-compatible
+    // self-host case (key optional there). Without it, fetching models would
+    // 401 — so the Model field is disabled until then.
+    const canConfigureModel = llmProvider === 'compatible'
+        ? llmUrl.trim().length > 0
+        : hasLlmKey;
 
-    const ConfigBadge = ({ ok }: { ok: boolean }) => (
-        <span className={`config-status-badge ${ok ? 'configured' : 'missing'}`}>
-            {ok
-                ? (lang === 'vi' ? '✓ Đã cấu hình' : '✓ Configured')
-                : (lang === 'vi' ? '⚠ Chưa cấu hình' : '⚠ Not set')}
-        </span>
+    const ConfigBadge = ({ ok, optional = false }: { ok: boolean; optional?: boolean }) => {
+        if (ok) {
+            return (
+                <span className="config-status-badge configured">
+                    {lang === 'vi' ? '✓ Đã cấu hình' : '✓ Configured'}
+                </span>
+            );
+        }
+        // Optional + unset → neutral "Tùy chọn", not an alarming warning.
+        if (optional) {
+            return (
+                <span className="config-status-badge optional-unset">
+                    {t('optional_label', lang)}
+                </span>
+            );
+        }
+        return (
+            <span className="config-status-badge missing">
+                {lang === 'vi' ? '⚠ Chưa cấu hình' : '⚠ Not set'}
+            </span>
+        );
+    };
+
+    // One connection-test result row: a colored status badge, the category
+    // (Giọng nói / Trợ lý AI), then the message — left-aligned with real gaps
+    // so nothing crowds the icon and long messages wrap cleanly.
+    const renderTestRow = (label: string, result: { ok: boolean; msg: string }) => (
+        <div className={`settings-test-result-row ${result.ok ? 'ok' : 'fail'}`}>
+            <span className="settings-test-result-icon" aria-hidden>
+                {result.ok ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                )}
+            </span>
+            <span className="settings-test-result-label">{label}</span>
+            <span className="settings-test-result-msg">{result.msg}</span>
+        </div>
     );
 
     return (
@@ -412,6 +462,7 @@ export function SettingsPanel() {
                                     <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
                                 </svg>
                                 <span>{t('ai_section', lang)}</span>
+                                <span className="settings-section-optional-pill">{t('optional_label', lang)}</span>
                             </div>
                             <div className="settings-section-desc">{t('ai_hint', lang)}</div>
                         </div>
@@ -438,7 +489,7 @@ export function SettingsPanel() {
                         <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 API Key
-                                <ConfigBadge ok={hasLlmKey} />
+                                <ConfigBadge ok={hasLlmKey} optional />
                             </div>
                             <div className="setting-input-wrap">
                                 <input type={showLlmKey ? 'text' : 'password'} className="setting-input" value={llmKey} onChange={(e) => { setLlmKey(e.target.value); setLlmModelOptions([]); }} placeholder="sk-xxx" />
@@ -460,31 +511,39 @@ export function SettingsPanel() {
                             </div>
                         )}
 
-                        {/* Model — auto fetch on click */}
+                        {/* Model — disabled until the credential exists; auto-fetches on open */}
                         <div className="setting-group">
                             <div className="setting-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', textTransform: 'uppercase' }}>
-                                <span>Model <ConfigBadge ok={hasLlmModel} /></span>
+                                <span>Model <ConfigBadge ok={hasLlmModel && canConfigureModel} optional /></span>
                             </div>
                             <CustomSelect
                                 options={fetchingModels
                                     ? [{ value: '', label: lang === 'vi' ? 'Đang tải...' : 'Loading...' }]
-                                    : (llmModelOptions.length > 0
-                                        ? llmModelOptions.map(m => ({ value: m, label: m }))
-                                        : (llmModel ? [{ value: llmModel, label: llmModel }] : [{ value: '', label: lang === 'vi' ? '-- Bấm để tải model --' : '-- Click to load --' }]))
+                                    : !canConfigureModel
+                                        ? [{ value: '', label: llmProvider === 'compatible'
+                                            ? (lang === 'vi' ? '-- Nhập Base URL trước --' : '-- Enter Base URL first --')
+                                            : (lang === 'vi' ? '-- Nhập API Key trước --' : '-- Enter API Key first --') }]
+                                        : (llmModelOptions.length > 0
+                                            ? llmModelOptions.map(m => ({ value: m, label: m }))
+                                            : (llmModel ? [{ value: llmModel, label: llmModel }] : [{ value: '', label: lang === 'vi' ? '-- Bấm để tải model --' : '-- Click to load --' }]))
                                 }
-                                value={fetchingModels ? '' : llmModel}
+                                value={fetchingModels ? '' : (canConfigureModel ? llmModel : '')}
                                 onChange={setLlmModel}
-                                disabled={fetchingModels}
+                                disabled={fetchingModels || !canConfigureModel}
                                 onOpen={() => {
-                                    if (llmModelOptions.length === 0 && !fetchingModels) {
+                                    if (canConfigureModel && llmModelOptions.length === 0 && !fetchingModels) {
                                         handleFetchModels();
                                     }
                                 }}
                             />
                             <div className="setting-hint" style={{ marginTop: '6px' }}>
-                                {llmModelOptions.length > 0
-                                    ? `${llmModelOptions.length} ${lang === 'vi' ? 'model khả dụng' : 'models available'}`
-                                    : t('ai_model_hint', lang)}
+                                {!canConfigureModel
+                                    ? (llmProvider === 'compatible'
+                                        ? (lang === 'vi' ? 'Nhập Base URL để chọn model' : 'Enter Base URL to pick a model')
+                                        : (lang === 'vi' ? 'Nhập API Key để chọn model' : 'Enter API Key to pick a model'))
+                                    : llmModelOptions.length > 0
+                                        ? `${llmModelOptions.length} ${lang === 'vi' ? 'model khả dụng' : 'models available'}`
+                                        : t('ai_model_hint', lang)}
                             </div>
                         </div>
                     </div>
@@ -492,49 +551,29 @@ export function SettingsPanel() {
 
                     {/* ── Unified Test Connection (spans both grid cols) ── */}
                     <div className="settings-section settings-test-section span-full">
-                        <span className="settings-test-label">
-                            {lang === 'vi'
-                                ? 'Kiểm tra API key đã hoạt động chưa'
-                                : 'Verify your API keys'}
-                        </span>
-                        <button className="settings-test-btn" onClick={testAll} disabled={testRunning}>
-                            {testRunning ? (
-                                <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                                </svg>
-                            ) : (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
-                                </svg>
-                            )}
-                            <span>{testRunning ? t('testing', lang) : t('test_all_connections', lang)}</span>
-                        </button>
+                        <div className="settings-test-head">
+                            <span className="settings-test-label">
+                                {lang === 'vi'
+                                    ? 'Kiểm tra API key đã hoạt động chưa'
+                                    : 'Verify your API keys'}
+                            </span>
+                            <button className="settings-test-btn" onClick={testAll} disabled={testRunning}>
+                                {testRunning ? (
+                                    <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                                    </svg>
+                                ) : (
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+                                    </svg>
+                                )}
+                                <span>{testRunning ? t('testing', lang) : t('test_all_connections', lang)}</span>
+                            </button>
+                        </div>
                         {(sttResult || llmResult) && (
                             <div className="settings-test-results">
-                                {sttResult && (
-                                    <div className="settings-test-result-row">
-                                        <span className="settings-test-result-label">{t('test_result_stt', lang)}</span>
-                                        <span className={`settings-test-result-value ${sttResult.ok ? 'ok' : 'fail'}`}>
-                                            {sttResult.ok
-                                                ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                                                : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                                            }
-                                            {sttResult.msg}
-                                        </span>
-                                    </div>
-                                )}
-                                {llmResult && (
-                                    <div className="settings-test-result-row">
-                                        <span className="settings-test-result-label">{t('test_result_llm', lang)}</span>
-                                        <span className={`settings-test-result-value ${llmResult.ok ? 'ok' : 'fail'}`}>
-                                            {llmResult.ok
-                                                ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                                                : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                                            }
-                                            {llmResult.msg}
-                                        </span>
-                                    </div>
-                                )}
+                                {sttResult && renderTestRow(t('test_result_stt', lang), sttResult)}
+                                {llmResult && renderTestRow(t('test_result_llm', lang), llmResult)}
                             </div>
                         )}
                     </div>
@@ -555,6 +594,7 @@ export function SettingsPanel() {
                             </div>
                         </div>
 
+                        <div className="settings-update-list">
                         <div className="settings-update-row">
                             <div>
                                 <div className="label">
@@ -598,7 +638,7 @@ export function SettingsPanel() {
                             </div>
                         )}
 
-                        <div className="settings-update-row" style={{ marginTop: 8 }}>
+                        <div className="settings-update-row">
                             <div>
                                 <div className="label">
                                     {lang === 'vi' ? 'Tự động kiểm tra' : 'Auto-check'}
@@ -620,7 +660,7 @@ export function SettingsPanel() {
                         </div>
 
                         {updaterSkippedVersion && (
-                            <div className="settings-update-row" style={{ marginTop: 8 }}>
+                            <div className="settings-update-row">
                                 <div>
                                     <div className="label">
                                         {lang === 'vi'
@@ -641,6 +681,7 @@ export function SettingsPanel() {
                                 </button>
                             </div>
                         )}
+                        </div>
                     </div>
                 </div>
 
