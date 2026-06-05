@@ -31,6 +31,8 @@ futures-util = "0.3"
 dirs = "5"
 ringbuf = "0.4"
 uuid = { version = "1", features = ["v4"] }
+zstd = "0.13"
+tar = "0.4"
 
 # macOS: CoreAudio process tap via cidre (same as Meetily)
 [target.'cfg(target_os = "macos")'.dependencies]

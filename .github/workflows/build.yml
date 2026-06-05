@@ -68,7 +68,7 @@ jobs:
           find src-python/dist/scribble-sidecar/_internal -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
           find src-python/dist/scribble-sidecar/_internal -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
           # Compress
-          tar -czf src-tauri/binaries/sidecar-dist.tar.gz -C src-python/dist scribble-sidecar
+          tar --zstd -cf src-tauri/binaries/sidecar-dist.tar.zst -C src-python/dist scribble-sidecar
           # Create launcher shim
           cat > src-tauri/binaries/scribble-sidecar-x86_64-pc-windows-msvc.exe << 'WINEOF'
           @echo off

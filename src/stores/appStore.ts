@@ -29,6 +29,7 @@ export interface Meeting {
     audio_duration: number;
     created_at: string;
     status?: string;
+    audio_path?: string;
     /** v1.2.13: number of Soniox chunks still in status='failed' for this
      *  meeting. When > 0, MeetingDetail shows a "Thử lại" banner. */
     failed_chunks_count?: number;

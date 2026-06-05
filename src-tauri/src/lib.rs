@@ -802,6 +802,20 @@ async fn stop_system_audio(app: tauri::AppHandle) -> Result<String, String> {
 
 // ─── Sidecar Management ─────────────────────────────────────────────────────
 
+// Extract a .tar.zst archive in-process (no system tar/zstd dependency).
+// Uniform across Windows / macOS / Ubuntu — GNU tar on Linux would otherwise
+// need a system `zstd` binary that isn't always installed.
+fn extract_tar_zst(archive: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
+    let file = std::fs::File::open(archive)?;
+    let reader = std::io::BufReader::new(file);
+    let decoder = zstd::stream::read::Decoder::new(reader)?;
+    let mut tar = tar::Archive::new(decoder);
+    tar.set_preserve_permissions(true);
+    tar.set_overwrite(true);
+    tar.unpack(dest)?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     let state = app.state::<Mutex<SidecarState>>();
@@ -873,13 +887,13 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
     // Find tar.gz in app bundle
     let tar_candidates = vec![
         // macOS .app bundle
-        exe_dir.join("../Resources/binaries/sidecar-dist.tar.gz"),
-        exe_dir.join("../Resources/sidecar-dist.tar.gz"),
+        exe_dir.join("../Resources/binaries/sidecar-dist.tar.zst"),
+        exe_dir.join("../Resources/sidecar-dist.tar.zst"),
         // Windows installer / Linux: resources next to exe
-        exe_dir.join("binaries/sidecar-dist.tar.gz"),
-        exe_dir.join("sidecar-dist.tar.gz"),
+        exe_dir.join("binaries/sidecar-dist.tar.zst"),
+        exe_dir.join("sidecar-dist.tar.zst"),
         // Linux deb: /usr/lib/<app>/binaries/
-        exe_dir.join("../lib/scribble/binaries/sidecar-dist.tar.gz"),
+        exe_dir.join("../lib/scribble/binaries/sidecar-dist.tar.zst"),
     ];
     let tar_path = tar_candidates.iter().find(|p| p.exists()).cloned();
 
@@ -906,12 +920,10 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
             println!("[sidecar] Extracting sidecar from {:?} to {:?}...", tar, cache_dir);
             let _ = std::fs::remove_dir_all(&cache_dir);
             let _ = std::fs::create_dir_all(&cache_dir);
-            let status = std::process::Command::new("tar")
-                .args(["-xzf", &tar.to_string_lossy(), "-C", &cache_dir.to_string_lossy()])
-                .status();
-            match status {
-                Ok(s) if s.success() => {
-                    // Make binary executable
+            match extract_tar_zst(tar, &cache_dir) {
+                Ok(()) => {
+                    // Make binary executable (archive should already carry the
+                    // exec bit; this is a defensive fallback).
                     #[cfg(unix)]
                     {
                         let _ = std::process::Command::new("chmod")
@@ -924,8 +936,7 @@ async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                     println!("[sidecar] Extraction complete (key={}): {:?}", cache_key, cached_bin);
                 }
-                Ok(s) => println!("[sidecar] tar exited with {}", s),
-                Err(e) => println!("[sidecar] tar failed: {}", e),
+                Err(e) => println!("[sidecar] extraction failed: {}", e),
             }
         } else {
             println!("[sidecar] Using cached sidecar at {:?}", cached_bin);
@@ -1025,12 +1036,42 @@ async fn save_audio_file(bytes: Vec<u8>, filename: String) -> Result<String, Str
     Ok(save_path.to_string_lossy().to_string())
 }
 
+/// Extract the file extension (no dot, lowercased) advertised by the server's
+/// Content-Disposition header, e.g. `attachment; filename="meeting_7.m4a"`
+/// -> `Some("m4a")`. Returns None when the header is absent or has no value.
+fn ext_from_content_disposition(resp: &reqwest::Response) -> Option<String> {
+    let cd = resp
+        .headers()
+        .get(reqwest::header::CONTENT_DISPOSITION)?
+        .to_str()
+        .ok()?;
+    let after = cd.split("filename=").nth(1)?.trim();
+    let name = if let Some(stripped) = after.strip_prefix('"') {
+        stripped.split('"').next().unwrap_or("").to_string()
+    } else {
+        after.split(';').next().unwrap_or("").trim().to_string()
+    };
+    let ext = std::path::Path::new(&name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())?;
+    if ext.is_empty() { None } else { Some(ext) }
+}
+
+/// Replace the extension of `filename` with `ext`, keeping the base name.
+fn with_extension(filename: &str, ext: &str) -> String {
+    let stem = std::path::Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(filename);
+    format!("{}.{}", stem, ext)
+}
+
 #[tauri::command]
 async fn download_and_save_file(url: String, filename: String) -> Result<String, String> {
     use std::path::PathBuf;
     let downloads_dir = dirs::download_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
-    let save_path = downloads_dir.join(&filename);
 
     // Build list of URLs to try (handles both absolute URLs and relative paths)
     let urls_to_try: Vec<String> = if url.starts_with("http://") || url.starts_with("https://") {
@@ -1062,6 +1103,17 @@ async fn download_and_save_file(url: String, filename: String) -> Result<String,
                     last_err = format!("HTTP {} from {}", response.status(), try_url);
                     continue;
                 }
+                // Honor the server's actual format. The backend transcodes to
+                // the requested format only when ffmpeg is available; otherwise
+                // it returns the source bytes under their TRUE extension via
+                // Content-Disposition. Saving those under the caller's ".mp3"
+                // name yields a file Windows refuses to play. Keep the caller's
+                // base name but use the server's real extension.
+                let effective_filename = match ext_from_content_disposition(&response) {
+                    Some(ext) => with_extension(&filename, &ext),
+                    None => filename.clone(),
+                };
+                let save_path = downloads_dir.join(&effective_filename);
                 match response.bytes().await {
                     Ok(bytes) => {
                         std::fs::write(&save_path, &bytes)

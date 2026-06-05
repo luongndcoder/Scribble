@@ -140,6 +140,8 @@ export const summarize = (meetingId: number, language: string) =>
 // ─── Meetings CRUD ───
 export const getMeetings = () => request<Meeting[]>('/meetings');
 export const getMeeting = (id: number) => request<Meeting>(`/meetings/${id}`);
+export const meetingAudioStreamUrl = (id: number) =>
+    sidecarUrl(SIDECAR_HTTP_BASES[0], `/meetings/${id}/audio/stream`);
 export const createMeeting = (data: Partial<Meeting>) =>
     request<{ id: number }>('/meetings', {
         method: 'POST',

@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { TranscriptPart, Meeting, useAppStore } from '../stores/appStore';
-import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile, retryFailedChunks } from '../lib/api';
+import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile, retryFailedChunks, meetingAudioStreamUrl } from '../lib/api';
+import AudioPlayer from './AudioPlayer';
 import { subscribeJobEvents } from '../lib/upload-audio';
 import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
@@ -437,6 +438,7 @@ export function MeetingDetail() {
     const viewingMeetingId = currentMeetingId || draftId;
 
     const transcriptRef = useRef<HTMLDivElement>(null);
+    const searchInputRef = useRef<HTMLInputElement>(null);
     const [meetingData, setMeetingData] = useState<Meeting | null>(null);
     const [meetingLoading, setMeetingLoading] = useState(false);
     const [editingSpeakerId, setEditingSpeakerId] = useState<number | null>(null);
@@ -488,6 +490,9 @@ export function MeetingDetail() {
     const MAX_WINDOW_SIZE = 400; // hard DOM cap — slides instead of growing
     const [topAnchorChunkId, setTopAnchorChunkId] = useState<string | null>(null);
     const [bottomAnchorChunkId, setBottomAnchorChunkId] = useState<string | null>(null);
+    const [transcriptSearch, setTranscriptSearch] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [searchOpen, setSearchOpen] = useState(false);
 
     // Reset both anchors when switching meetings — different meeting means
     // different transcriptParts identity, window must restart. The load effect
@@ -543,6 +548,40 @@ export function MeetingDetail() {
     );
     const hasOlderParts = visibleStartIdx > 0;
     const hasNewerParts = visibleEndIdx < transcriptParts.length;
+
+    // Transcript search (detail view). When a query is present we bypass the
+    // sliding-window and render every matching part (matches are usually few),
+    // so search covers the WHOLE transcript, not just the visible window.
+    const transcriptQuery = debouncedSearch.trim().toLowerCase();
+    const isTranscriptSearching = searchOpen && transcriptQuery.length > 0;
+    const searchMatchedRows = useMemo(() => {
+        if (!transcriptQuery) return [] as { part: TranscriptPart; absoluteIdx: number }[];
+        const rows: { part: TranscriptPart; absoluteIdx: number }[] = [];
+        transcriptParts.forEach((part, i) => {
+            const hay = `${part.text || ''}\n${part.translation || ''}\n${part.speaker || ''}`.toLowerCase();
+            if (hay.includes(transcriptQuery)) rows.push({ part, absoluteIdx: i });
+        });
+        return rows;
+    }, [transcriptParts, transcriptQuery]);
+
+    const transcriptRows = isTranscriptSearching
+        ? searchMatchedRows
+        : visibleParts.map((part, visibleIdx) => ({ part, absoluteIdx: visibleStartIdx + visibleIdx }));
+
+    // Debounce search input so filtering doesn't re-run on every keystroke.
+    useEffect(() => {
+        const t = setTimeout(() => setDebouncedSearch(transcriptSearch), 200);
+        return () => clearTimeout(t);
+    }, [transcriptSearch]);
+
+    const toggleTranscriptSearch = () => {
+        setSearchOpen((open) => {
+            const next = !open;
+            if (!next) setTranscriptSearch('');
+            else requestAnimationFrame(() => searchInputRef.current?.focus());
+            return next;
+        });
+    };
     // Tail-open mode — used by live auto-scroll to decide whether to follow
     // new parts (yes if user is at tail) vs stay put (no if they scrolled up).
     const isTailOpen = bottomAnchorChunkId === null;
@@ -989,6 +1028,15 @@ export function MeetingDetail() {
                     }
                 }
                 const normalized = collapseTranscriptSnapshots(parts);
+                // Older saved transcripts may lack chunkId on every part. The
+                // transcript windowing anchors on chunkId, so a missing chunkId
+                // makes the page-1 init fail → window falls back to the tail,
+                // hiding the meeting's opening behind a perpetual "loading older
+                // parts" spinner. Synthesize a stable unique chunkId by index
+                // for any part missing one.
+                normalized.parts.forEach((part, i) => {
+                    if (!part.chunkId) part.chunkId = `idx-${i}`;
+                });
                 setTranscriptParts(normalized.parts);
 
                 // Open a freshly-opened SAVED transcript at page 1 (the
@@ -1081,7 +1129,8 @@ export function MeetingDetail() {
                 Earlier these lived on two separate rows (~90px combined). */}
             <div className="detail-toolbar">
                 <button
-                    className="back-btn back-btn-compact"
+                    className={`back-btn back-btn-compact ${recording ? 'is-locked' : ''}`}
+                    title={recording ? (lang === 'vi' ? 'Đang ghi âm — bấm Dừng trước khi quay lại' : 'Recording — stop before going back') : undefined}
                     onClick={() => {
                         // v1.2.14 fix: block back navigation while recording.
                         // Leaving the detail view tears down RecordingBar →
@@ -1203,6 +1252,11 @@ export function MeetingDetail() {
                     </div>
                     <div className="pane-actions">
                         {transcriptParts.length > 0 && (
+                            <button className={`action-btn icon-only ${searchOpen ? 'active' : ''}`} onClick={toggleTranscriptSearch} title={lang === 'vi' ? 'Tìm trong transcript' : 'Search transcript'} aria-label={lang === 'vi' ? 'Tìm trong transcript' : 'Search transcript'}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+                            </button>
+                        )}
+                        {transcriptParts.length > 0 && (
                             <button className="action-btn icon-only" onClick={copyTranscript} title={lang === 'vi' ? 'Copy transcript' : 'Copy transcript'}>
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
@@ -1236,6 +1290,10 @@ export function MeetingDetail() {
                     </div>
                 </div>
 
+                {(currentMeetingId || draftId) && !recording && meetingData?.audio_path ? (
+                    <AudioPlayer src={meetingAudioStreamUrl((currentMeetingId || draftId) as number)} />
+                ) : null}
+
                 {transcriptParts.length === 0 && !recording ? (
                     <div className="welcome-state">
                         <div className="welcome-icon">
@@ -1263,6 +1321,27 @@ export function MeetingDetail() {
                         className={`transcript-list ${translationEnabled ? 'with-translation' : ''}`}
                         ref={transcriptRef}
                     >
+                        {searchOpen && (
+                            <div className="transcript-search">
+                                <svg className="transcript-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+                                <input
+                                    ref={searchInputRef}
+                                    className="transcript-search-input"
+                                    placeholder={lang === 'vi' ? 'Tìm trong transcript...' : 'Search transcript...'}
+                                    value={transcriptSearch}
+                                    onChange={(e) => setTranscriptSearch(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); toggleTranscriptSearch(); } }}
+                                />
+                                {isTranscriptSearching && (
+                                    <span className="transcript-search-count">
+                                        {searchMatchedRows.length} {lang === 'vi' ? 'kết quả' : 'results'}
+                                    </span>
+                                )}
+                                <button className="transcript-search-clear" onClick={toggleTranscriptSearch} aria-label={lang === 'vi' ? 'Đóng tìm kiếm' : 'Close search'}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                                </button>
+                            </div>
+                        )}
                         {/* v1.2.14: Internet-offline banner. Self-renders only
                             when the backend's TCP probe (1.1.1.1:443) flips to
                             offline — e.g. wifi drops mid-retry. Visible at the
@@ -1330,7 +1409,7 @@ export function MeetingDetail() {
                             Only one load per user-initiated scroll into the
                             sentinel — observer fires on transition only, plus
                             600ms cooldown safety net. */}
-                        {hasOlderParts && (
+                        {!isTranscriptSearching && hasOlderParts && (
                             <div
                                 ref={topSentinelRef}
                                 className="transcript-load-sentinel"
@@ -1344,12 +1423,11 @@ export function MeetingDetail() {
                                 </span>
                             </div>
                         )}
-                        {visibleParts.map((part, visibleIdx) => {
-                            // Absolute index in the full transcriptParts array — used
-                            // for callbacks that mutate the full store (edit / delete /
-                            // speaker rename). `visibleIdx` alone would mis-target items
-                            // whenever `hasOlderParts` is true.
-                            const absoluteIdx = visibleStartIdx + visibleIdx;
+                        {transcriptRows.map(({ part, absoluteIdx }) => {
+                            // absoluteIdx = index in the full transcriptParts array —
+                            // used by edit / delete / speaker-rename callbacks. In
+                            // search mode rows come from searchMatchedRows (whole
+                            // transcript); otherwise from the sliding window.
                             const speakerColor = SPEAKER_COLORS[part.speakerId % SPEAKER_COLORS.length];
                             const isLive = absoluteIdx === transcriptParts.length - 1 && recording;
                             // data-chunk-id powers the sliding-window scroll
@@ -1413,6 +1491,7 @@ export function MeetingDetail() {
                                     </div>
                                     <TranscriptSentences
                                         text={part.text}
+                                        highlight={transcriptQuery}
                                         translation={part.translation}
                                         translationEnabled={translationEnabled}
                                         isLive={isLive}
@@ -1430,7 +1509,12 @@ export function MeetingDetail() {
                         {/* Bottom sentinel — IntersectionObserver triggers
                             loadNewer when it reaches viewport. Same one-shot
                             transition + 600ms cooldown semantics as top. */}
-                        {hasNewerParts && (
+                        {isTranscriptSearching && searchMatchedRows.length === 0 && (
+                            <div className="transcript-search-empty">
+                                {lang === 'vi' ? 'Không tìm thấy đoạn nào khớp' : 'No matching parts found'}
+                            </div>
+                        )}
+                        {!isTranscriptSearching && hasNewerParts && (
                             <div
                                 ref={bottomSentinelRef}
                                 className="transcript-load-sentinel"
@@ -1517,13 +1601,32 @@ export function MeetingDetail() {
     );
 }
 
+// Wrap query matches in <mark> for transcript search highlighting (display mode only).
+function highlightText(text: string, query: string): React.ReactNode {
+    if (!query) return text;
+    const q = query.toLowerCase();
+    const lower = text.toLowerCase();
+    const out: React.ReactNode[] = [];
+    let i = 0;
+    let k = 0;
+    while (i < text.length) {
+        const idx = lower.indexOf(q, i);
+        if (idx < 0) { out.push(text.slice(i)); break; }
+        if (idx > i) out.push(text.slice(i, idx));
+        out.push(<mark className="transcript-hl" key={k++}>{text.slice(idx, idx + q.length)}</mark>);
+        i = idx + q.length;
+    }
+    return out;
+}
+
 const TranscriptSentences = memo(function TranscriptSentences({
     text,
     translation,
     translationEnabled,
     isLive,
     liveTranslationRef,
-    onSave
+    onSave,
+    highlight
 }: {
     text: string;
     translation?: string;
@@ -1531,6 +1634,7 @@ const TranscriptSentences = memo(function TranscriptSentences({
     isLive?: boolean;
     liveTranslationRef?: React.RefObject<HTMLDivElement | null>;
     onSave?: (newText: string) => void;
+    highlight?: string;
 }) {
     const lang = useAppStore((s) => s.lang);
     const [editMode, setEditMode] = useState(false);
@@ -1593,7 +1697,7 @@ const TranscriptSentences = memo(function TranscriptSentences({
                                     }} 
                                     style={onSave ? { cursor: 'text', flex: 1 } : undefined}
                                 >
-                                    {text}
+                                    {highlight ? highlightText(text, highlight) : text}
                                 </div>
                                 {deleteBtn}
                             </div>

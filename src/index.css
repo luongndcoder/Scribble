@@ -267,6 +267,10 @@ body.electron-app .sub-tabs {
   padding: 5px 16px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
+  /* Stay above modal overlays (e.g. upload modal z-index:200) so the window
+     drag region keeps working while a modal/upload is in progress. */
+  position: relative;
+  z-index: 1000;
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -1605,6 +1609,7 @@ body.electron-app .sub-tabs {
   transform: translateY(-1px);
 }
 
+
 .meeting-card-info {
   flex: 1;
   cursor: pointer;
@@ -1685,19 +1690,14 @@ body.electron-app .sub-tabs {
 
 .meeting-card-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 200ms var(--ease);
-}
-
-.meeting-card:hover .meeting-card-actions {
-  opacity: 1;
 }
 
 .card-action-btn {
-  width: 32px;
-  height: 32px;
+  position: relative;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-sm);
   border: none;
   background: transparent;
@@ -1707,6 +1707,119 @@ body.electron-app .sub-tabs {
   justify-content: center;
   cursor: pointer;
   transition: all var(--duration);
+}
+
+/* Fast custom tooltip (native title has ~1s delay) */
+.card-action-btn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-3px);
+  padding: 4px 8px;
+  background: var(--gray-900);
+  color: var(--white);
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 110ms var(--ease), transform 110ms var(--ease);
+  z-index: 300;
+}
+
+.card-action-btn[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.audio-player {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 6px 0 16px;
+  background: var(--indigo-50);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+}
+
+.audio-play-btn {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: var(--indigo-600);
+  color: var(--white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
+  transition: transform var(--duration) var(--ease), background var(--duration);
+}
+
+.audio-play-btn:hover {
+  background: var(--indigo-500);
+  transform: scale(1.05);
+}
+
+.audio-play-btn:active {
+  transform: scale(0.96);
+}
+
+.audio-time {
+  flex-shrink: 0;
+  min-width: 34px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.audio-time-total {
+  text-align: right;
+}
+
+.audio-seek {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(
+    to right,
+    var(--indigo-500) var(--audio-progress, 0%),
+    var(--gray-200) var(--audio-progress, 0%)
+  );
+  cursor: pointer;
+  outline: none;
+}
+
+.audio-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: var(--white);
+  border: 2px solid var(--indigo-600);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: transform var(--duration);
+}
+
+.audio-seek::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+.audio-seek:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .card-action-btn:hover {
@@ -5071,7 +5184,9 @@ body.electron-app .draft-recovery-banner {
   align-items: center;
   justify-content: center;
   z-index: 200;
-  padding: 24px;
+  /* Extra top padding keeps the card clear of the draggable topnav
+     (which floats above this overlay so the window stays draggable). */
+  padding: 56px 24px 24px;
   animation: fadeIn 0.18s ease;
 }
 
@@ -5357,4 +5472,101 @@ body.electron-app .draft-recovery-banner {
   padding: 10px 12px;
   border-radius: 8px;
   font-size: 12px;
+}
+
+
+/* ─── Transcript search (detail view) ─── */
+.transcript-search {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+}
+
+.transcript-search-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.transcript-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.transcript-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.transcript-search-count {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--indigo-600);
+  background: var(--indigo-50);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.transcript-search-clear {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration), color var(--duration);
+}
+
+.transcript-search-clear:hover {
+  background: var(--gray-100);
+  color: var(--text);
+}
+
+.transcript-search-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+mark.transcript-hl {
+  background: #fde68a;
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.action-btn.icon-only.active {
+  background: var(--indigo-50);
+  color: var(--indigo-600);
+  border-color: var(--indigo-500);
+}
+
+/* Lock config/navigation while recording (a stop saves a draft first). */
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.back-btn.is-locked {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

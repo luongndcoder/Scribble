@@ -143,8 +143,13 @@ export function MeetingList() {
     };
 
     const formatDuration = (s: number) => {
-        const m = Math.floor(s / 60), sec = Math.floor(s % 60);
-        return `${m}m ${sec}s`;
+        const total = Math.floor(s);
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const sec = total % 60;
+        if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+        if (m > 0) return sec > 0 ? `${m}m ${sec}s` : `${m}m`;
+        return `${sec}s`;
     };
 
     const fmtSec = (v: number | string | undefined) => {
@@ -164,22 +169,16 @@ export function MeetingList() {
     const hasMinutes = (meeting: Meeting) => String(meeting?.summary || '').trim().length > 0;
     const hasTranscript = (meeting: Meeting) => String(meeting?.transcript || '').trim().length > 0;
 
-    const buildTranscriptMarkdown = (meeting: Meeting): string => {
-        const title = safeFilenameBase(
-            String(meeting?.title || ''),
-            `meeting-${meeting?.id ?? 'unknown'}`
-        );
+    // Plain-text transcript — kept identical to MeetingDetail.exportTranscript
+    // so list & detail downloads produce the same .txt format:
+    //   [start - end] Speaker: text   (translation on next line, indented)
+    const buildTranscriptText = (meeting: Meeting): string => {
         const raw = String(meeting?.transcript || '').trim();
         if (!raw) return '';
-
-        const lines: string[] = [
-            `# ${lang === 'vi' ? 'Transcript cuộc họp' : 'Meeting Transcript'}: ${title}`,
-            '',
-        ];
-
         try {
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
+                const lines: string[] = [];
                 for (const part of parsed) {
                     if (!part || typeof part !== 'object') continue;
                     const p = part as Record<string, unknown>;
@@ -188,25 +187,17 @@ export function MeetingList() {
                     const speakerId = Number(p.speakerId ?? 0);
                     const fallbackSpeaker = `Speaker ${Number.isFinite(speakerId) ? speakerId + 1 : 1}`;
                     const speaker = String(p.speaker || fallbackSpeaker).trim() || fallbackSpeaker;
-                    const startTime = p.startTime as string | undefined;
-                    const endTime = p.endTime as string | undefined;
-                    const hasRange = String(startTime || '').trim() || String(endTime || '').trim();
-                    const range = hasRange
-                        ? ` (${fmtSec(startTime)} - ${fmtSec(endTime)})`
-                        : '';
-                    lines.push(`## ${speaker}${range}`);
-                    lines.push(text);
+                    const time = `[${fmtSec(p.startTime as string | undefined)} - ${fmtSec(p.endTime as string | undefined)}]`;
+                    let line = `${time} ${speaker}: ${text}`;
                     const translation = String(p.translation || '').trim();
-                    if (translation) lines.push(`> ${translation}`);
-                    lines.push('');
+                    if (translation) line += `\n    \u2192 ${translation}`;
+                    lines.push(line);
                 }
-                return lines.join('\n').trim();
+                return lines.join('\n\n').trim();
             }
         } catch { }
-
-        const rawLines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
-        if (!rawLines.length) return '';
-        return `${lines.join('\n')}\n${rawLines.map((line) => `- ${line}`).join('\n')}`.trim();
+        // Legacy plain-text transcript — return as-is.
+        return raw;
     };
 
     const startRename = (e: React.MouseEvent, meeting: Meeting) => {
@@ -268,9 +259,9 @@ export function MeetingList() {
         await runBusy('transcript', meeting.id, async () => {
             try {
                 const base = safeFilenameBase(String(meeting.title || ''), `meeting-${meeting.id}`);
-                const markdown = buildTranscriptMarkdown(meeting);
-                if (!markdown) return;
-                await downloadTextFile(`${base}-transcript.md`, markdown);
+                const content = buildTranscriptText(meeting);
+                if (!content) return;
+                await downloadTextFile(`${base}-transcript.txt`, content);
                 showToast(lang === 'vi' ? 'Đã tải transcript' : 'Transcript downloaded', 'success');
             } catch (err) {
                 showToast(lang === 'vi' ? 'Tải transcript thất bại' : 'Transcript download failed', 'error');
@@ -407,67 +398,26 @@ export function MeetingList() {
                                 {m.audio_duration > 0 && ` · ${formatDuration(m.audio_duration)}`}
                             </div>
                         </div>
-                        <div className="meeting-card-actions" style={{ opacity: 1 }}>
-                            <button
-                                className="card-action-btn"
-                                onClick={(e) => startRename(e, m)}
-                                disabled={isBusy('rename', m.id)}
-                                title={lang === 'vi' ? 'Đổi tên cuộc họp' : 'Rename meeting'}
-                                aria-label={lang === 'vi' ? 'Đổi tên cuộc họp' : 'Rename meeting'}
-                            >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M12 20h9" />
-                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                                </svg>
+                        <div className="meeting-card-actions">
+                            <button className="card-action-btn" data-tooltip={lang === 'vi' ? 'Đổi tên' : 'Rename'} aria-label={lang === 'vi' ? 'Đổi tên' : 'Rename'} disabled={isBusy('rename', m.id)}
+                                onClick={(e) => { e.stopPropagation(); startRename(e, m); }}>
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
                             </button>
-                            <button
-                                className={`card-action-btn${isBusy('audio', m.id) ? ' is-busy' : ''}`}
-                                onClick={(e) => void exportAudio(e, m)}
-                                disabled={isBusy('audio', m.id)}
-                                title={lang === 'vi' ? 'Tải file ghi âm' : 'Download audio'}
-                                aria-label={lang === 'vi' ? 'Tải file ghi âm' : 'Download audio'}
-                            >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                    <polyline points="7 10 12 15 17 10" />
-                                    <line x1="12" x2="12" y1="15" y2="3" />
-                                </svg>
+                            <button className="card-action-btn" data-tooltip={lang === 'vi' ? 'Tải ghi âm' : 'Download audio'} aria-label={lang === 'vi' ? 'Tải ghi âm' : 'Download audio'} disabled={isBusy('audio', m.id)}
+                                onClick={(e) => { e.stopPropagation(); void exportAudio(e, m); }}>
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" x2="12" y1="15" y2="3" /></svg>
                             </button>
-                            <button
-                                className={`card-action-btn${isBusy('minutes', m.id) ? ' is-busy' : ''}`}
-                                onClick={(e) => void exportMinutes(e, m)}
-                                disabled={isBusy('minutes', m.id) || !hasMinutes(m)}
-                                title={lang === 'vi' ? 'Export biên bản' : 'Export minutes'}
-                                aria-label={lang === 'vi' ? 'Export biên bản' : 'Export minutes'}
-                            >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                    <path d="M14 2v6h6" />
-                                    <path d="M8 13h8" />
-                                    <path d="M8 17h8" />
-                                </svg>
+                            <button className="card-action-btn" data-tooltip={lang === 'vi' ? 'Tải biên bản' : 'Export minutes'} aria-label={lang === 'vi' ? 'Tải biên bản' : 'Export minutes'} disabled={isBusy('minutes', m.id) || !hasMinutes(m)}
+                                onClick={(e) => { e.stopPropagation(); void exportMinutes(e, m); }}>
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h8" /></svg>
                             </button>
-                            <button
-                                className={`card-action-btn${isBusy('transcript', m.id) ? ' is-busy' : ''}`}
-                                onClick={(e) => void exportTranscript(e, m)}
-                                disabled={isBusy('transcript', m.id) || !hasTranscript(m)}
-                                title={lang === 'vi' ? 'Export transcript' : 'Export transcript'}
-                                aria-label={lang === 'vi' ? 'Export transcript' : 'Export transcript'}
-                            >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M4 6h16" />
-                                    <path d="M4 12h16" />
-                                    <path d="M4 18h10" />
-                                </svg>
+                            <button className="card-action-btn" data-tooltip={lang === 'vi' ? 'Tải transcript' : 'Export transcript'} aria-label={lang === 'vi' ? 'Tải transcript' : 'Export transcript'} disabled={isBusy('transcript', m.id) || !hasTranscript(m)}
+                                onClick={(e) => { e.stopPropagation(); void exportTranscript(e, m); }}>
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h10" /></svg>
                             </button>
-                            <button className="card-action-btn card-delete-btn" onClick={(e) => handleDelete(e, m.id)}
-                                disabled={isBusy('delete', m.id)}
-                                aria-label="Delete">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                                    strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M3 6h18" /><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                                </svg>
+                            <button className="card-action-btn card-delete-btn" data-tooltip={lang === 'vi' ? 'Xoá' : 'Delete'} aria-label={lang === 'vi' ? 'Xoá' : 'Delete'} disabled={isBusy('delete', m.id)}
+                                onClick={(e) => { e.stopPropagation(); handleDelete(e, m.id); }}>
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /></svg>
                             </button>
                         </div>
                     </div>

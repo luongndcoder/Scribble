@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:8765 http://127.0.0.1:8765 ws://localhost:8765 ws://127.0.0.1:8765; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' blob:; img-src 'self' data: blob:"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:8765 http://127.0.0.1:8765 ws://localhost:8765 ws://127.0.0.1:8765; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; media-src 'self' blob: http://localhost:8765 http://127.0.0.1:8765; img-src 'self' data: blob:"
     }
   },
   "plugins": {
@@ -50,7 +50,7 @@
       "binaries/scribble-sidecar"
     ],
     "resources": [
-      "binaries/sidecar-dist.tar.gz"
+      "binaries/sidecar-dist.tar.zst"
     ],
     "macOS": {
       "entitlements": "entitlements.plist",

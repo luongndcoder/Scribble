@@ -55,12 +55,12 @@ find "$DIST_INT" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || tr
 find "$DIST_INT" -name "*.pyc" -delete 2>/dev/null || true
 find "$DIST_INT" -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
 
-# ── Compress into tar.gz for small app bundle ──
+# ── Compress into tar.zst (fast decompress at first launch) ──
 echo "📦 Compressing sidecar-dist..."
 STRIPPED_SIZE=$(du -sh "$SIDECAR_DIST" | cut -f1)
 echo "   Uncompressed: $STRIPPED_SIZE"
-tar -czf "$BINARIES_DIR/sidecar-dist.tar.gz" -C "$SIDECAR_DIR/dist" scribble-sidecar
-COMPRESSED_SIZE=$(du -sh "$BINARIES_DIR/sidecar-dist.tar.gz" | cut -f1)
+tar --zstd -cf "$BINARIES_DIR/sidecar-dist.tar.zst" -C "$SIDECAR_DIR/dist" scribble-sidecar
+COMPRESSED_SIZE=$(du -sh "$BINARIES_DIR/sidecar-dist.tar.zst" | cut -f1)
 echo "   Compressed:   $COMPRESSED_SIZE"
 
 # Clean raw directory — only ship compressed
