@@ -10,25 +10,31 @@ Thêm provider STT thứ 3 `"local"` cạnh `nvidia` (Riva) + `soniox`. Cloud v�
 
 **Rollout:** Phase 1 = **Tier C cross-platform** (PhoWhisper-base ONNX qua onnxruntime — đã là dependency). Phase 2 = Tier A (MLX, macOS arm). Phase 3 = Tier B (nemotron→ONNX + CUDA). Plan này chi tiết **Phase 1**; Phase 2/3 chỉ outline.
 
+## Decisions locked (2026-06-06)
+
+- **Runtime Tier C = sherpa-onnx** (không hand-roll Whisper ONNX). `pip install sherpa-onnx` → native wheel mỗi OS, tự bundle onnxruntime, self-contained (~2-4MB). API: `OfflineRecognizer.from_transducer(...)` → engine chỉ là wrapper mỏng.
+- **Model Tier C = `sherpa-onnx-zipformer-vi-30M-int8-2026-02-09`** (32MB, WER 7.97% VLSP2025, offline transducer). License **cc-by-nc-nd-4.0** → free app OK, **bắt buộc attribution trong About + README**; không sửa model; KHÔNG dùng cho bản thương mại (đổi sang k2-fsa Apache nếu cần).
+- **Bundle Tier C vào installer** (mặc định, zero-setup) + **giữ registry/download path cho Tier A/B + update model sau** → Phase 1 **không cần Rust download** (defer sang Phase 2/3). Tier C resolve: bundled dir trước → download override sau.
+- **Realtime Tier C = batch-only + fallback cloud** (4b-2; sherpa không có model streaming VN).
+
 ## Verified facts (research)
 
-- `nemotron-3.5-asr-streaming-0.6b`: ✅ hỗ trợ tiếng Việt (vi-VN), RNNT + Cache-Aware FastConformer, 16kHz mono, license OpenMDW-1.1 (commercial OK), MLX 8-bit 756MB. **Không có diarization** → giữ CAM++ song song.
-- PhoWhisper-base (vinai): WER tiếng Việt 16–19, ~140MB, batch (Whisper-class).
-- `onnxruntime>=1.17.0` đã có trong `requirements.txt`. `extract_tar_zst` + version-keyed cache đã có trong `lib.rs`.
+- `sherpa-onnx`: wheel per-OS bundle onnxruntime 1.17.1; input 16kHz mono float32 (khớp ffmpeg pipeline); model dir = `tokens.txt + encoder.int8.onnx + decoder.onnx + joiner.int8.onnx + bpe.model`; PyInstaller cần `collect_dynamic_libs('sherpa_onnx')` + hidden import.
+- `nemotron-3.5-asr-streaming-0.6b` (Tier A/B sau): ✅ tiếng Việt, RNNT + Cache-Aware FastConformer, MLX 8-bit 756MB, license OpenMDW-1.1. **Không diarization** → giữ CAM++ song song.
+- `onnxruntime>=1.17.0` đã có; `extract_tar_zst` + version-cache có sẵn trong `lib.rs` (dùng cho Tier A/B download).
 
 ## Architecture (Phase 1)
 
 ### Modules mới (Python)
 - `src-python/local/__init__.py`
 - `src-python/local/device_detect.py` — `detect_tier() -> "A"|"B"|"C"` + `DeviceInfo{tier, os, arch, has_cuda, reason}`. Override qua setting `local_model_tier` (`auto|A|B|C`). Tier B detect = `"CUDAExecutionProvider" in onnxruntime.get_available_providers()`.
-- `src-python/local/model_registry.py` — `MODEL_REGISTRY` dict (tier → `ModelSpec{model_id, version, url, sha256, size_bytes, archive}`), `resolve(tier, override)`, `model_path_or_none(spec) -> Path|None` (đọc cache, không tải).
-- `src-python/local_stt.py` — `LocalSTTEngine` (base) + `PhoWhisperOnnxEngine` (load onnxruntime session, `transcribe_pcm(pcm, lang) -> str`) + `transcribe_local_file(path, language) -> str` (batch contract, không cần api_key). **KHÔNG có `LocalStreamingSTT` ở Phase 1** (4b-2). Tái dùng `filter_hallucinations` / `normalize_vietnamese_text` từ `stt.py`.
+- `src-python/local/model_registry.py` — `MODEL_REGISTRY` dict (tier → `ModelSpec{model_id, version, files, url, sha256, size_bytes, archive, license}`), `resolve(tier, override)`, `bundled_model_dir(spec) -> Path|None` (tìm model bundle kèm sidecar trước), `model_path_or_none(spec) -> Path|None` (bundled → download cache → None).
+- `src-python/local_stt.py` — `LocalSTTEngine` (base) + `SherpaOnnxEngine` (wrap `sherpa_onnx.OfflineRecognizer.from_transducer`, `transcribe_pcm(pcm_float32, lang) -> str`) + `transcribe_local_file(path, language) -> str` (batch contract, no api_key). **KHÔNG streaming ở Phase 1** (4b-2). Engine load 1 lần (singleton theo model_dir). Tái dùng `filter_hallucinations`/`normalize_vietnamese_text`/`_strip_wav_header` từ `stt.py`; PCM int16→float32 bằng numpy (KHÔNG thêm `soundfile`).
 
-### Download/cache — đặt ở Rust `lib.rs`
-Lý do: sidecar không thể tự phục vụ STT khi model chưa có; tái dùng `reqwest` + `extract_tar_zst` + version-cache pattern; progress/resume/retry là first-class ở Rust; path cross-OS chuẩn hóa sẵn (`dirs::home_dir`).
-- Cache: `~/.voicescribe/models/<tier>/<model_id>/` + `.version` (key `model_id-version`), đối xứng `~/.voicescribe/sidecar/`.
-- Tauri commands mới: `ensure_local_model(tier) -> ModelStatus` (download → sha256 verify → extract → emit `local-model-progress`), `local_model_status(tier) -> ModelStatus{installed, downloading, progress, version, path}`.
-- Python chỉ **đọc** path; thiếu → trả lỗi rõ ràng "model chưa tải".
+### Model delivery — Tier C BUNDLE (Phase 1); Rust download cho Tier A/B (defer Phase 2/3)
+- **Tier C (Phase 1):** model dir bundle vào sidecar PyInstaller (`scribble-sidecar.spec` `datas`). `model_path_or_none` resolve bundled dir trước → luôn có sẵn, offline ngay, không cần mạng/UI download.
+- **Tier A/B (Phase 2/3):** giữ thiết kế Rust `lib.rs` download (reqwest + `extract_tar_zst` + sha256 + version-cache `~/.voicescribe/models/<tier>/`), Tauri `ensure_local_model`/`local_model_status` + emit `local-model-progress`. KHÔNG implement ở Phase 1.
+- Registry vẫn giữ url/sha256 cho Tier C để cho phép **override/update model** qua download sau này (không bắt buộc Phase 1).
 
 ### Tích hợp (KHÔNG đổi WS payload contract)
 - **Batch** `services/upload_pipeline.py` `:457` và `:1465-1467`: mở validation `{nvidia, soniox}` → `{nvidia, soniox, local}`; branch `local` → `transcribe_local_file` (no key). CAM++ diarization (`:1524`) giữ nguyên chạy song song.
@@ -79,12 +85,12 @@ SQLite key-value, **additive, no migration**. Keys mới (default-on-read): `stt
 | 01 ✅ | `phase-01-test-device-detect.md` (13 tests RED) | — |
 | 02 ✅ | `phase-02-test-review-device-detect.md` (approved) | 01 |
 | 03 ✅ | `phase-03-impl-device-detect.md` (GREEN 13/13) | 02 |
-| 04 | `phase-04-test-model-registry.md` | 03 |
-| 05 | `phase-05-test-review-model-registry.md` | 04 |
-| 06 | `phase-06-impl-model-registry.md` | 05 |
-| 07 | `phase-07-test-local-engine.md` | 06 |
-| 08 | `phase-08-test-review-local-engine.md` | 07 |
-| 09 | `phase-09-impl-local-engine.md` | 08 |
+| 04 ✅ | `phase-04-test-model-registry.md` (10 tests RED) | 03 |
+| 05 ✅ | `phase-05-test-review-model-registry.md` (approved via runtime/bundle decisions) | 04 |
+| 06 ✅ | `phase-06-impl-model-registry.md` (GREEN; bundled resolve, Rust deferred) | 05 |
+| 07 ✅ | `phase-07-test-local-engine.md` (5 tests RED) | 06 |
+| 08 ✅ | `phase-08-test-review-local-engine.md` (approved via sherpa decision) | 07 |
+| 09 ✅ | `phase-09-impl-local-engine.md` (GREEN; sherpa wrapper) | 08 |
 | 10 | `phase-10-test-routing.md` | 09 |
 | 11 | `phase-11-test-review-routing.md` | 10 |
 | 12 | `phase-12-impl-routing.md` | 11 |
@@ -130,7 +136,11 @@ Additive → rollback = ẩn tab "Local" + revert validation set về `{nvidia, 
 
 ## Build/CI Impact (Phase 1)
 
-Chỉ thêm bước release artifact `phowhisper-base-onnx.tar.zst` + sha256 lên GitHub Release `local-models-v1`. `onnxruntime` đã có. PyInstaller spec **không đổi** (model không bundle).
+- `requirements.txt` += `sherpa-onnx` (prod dep, bundled vào sidecar; wheel ~2-4MB/OS, tự kèm onnxruntime).
+- `scribble-sidecar.spec`: (a) bundle model dir `sherpa-onnx-zipformer-vi-30M-int8-2026-02-09/` vào `datas`; (b) `collect_dynamic_libs('sherpa_onnx')` + `hiddenimports=['sherpa_onnx']`.
+- Tải model 1 lần lúc setup build (download từ k2-fsa release URL, lưu vào `src-python/models/local/`), commit-ignore hoặc fetch trong build script.
+- Attribution cc-by-nc-nd-4.0: thêm dòng credit `hynt/Zipformer-30M-RNNT-6000h` vào README + About UI.
+- Installer +~35MB (sherpa wheel + model). Tier A/B artifact + Rust download: Phase 2/3.
 
 ## Phase 2 / 3 — Outline
 
@@ -139,6 +149,7 @@ Chỉ thêm bước release artifact `phowhisper-base-onnx.tar.zst` + sha256 lê
 
 ## Unresolved Questions
 
-1. PhoWhisper-base ONNX: dùng artifact có sẵn (HF repo nào?) hay tự export build-time bằng `optimum`/onnx? Cần xác nhận nguồn + license trước Slice C impl.
-2. Local hỗ trợ ngôn ngữ ngoài vi/en ở Phase 1? (PhoWhisper tối ưu vi → đề xuất Phase 1 chỉ vi + en).
-3. Resume download (HTTP Range) bắt buộc Phase 1 hay defer (retry-from-scratch đủ cho ~140MB)?
+1. ~~Nguồn PhoWhisper ONNX~~ → RESOLVED: dùng sherpa-onnx + model `sherpa-onnx-zipformer-vi-30M-int8-2026-02-09` (k2-fsa release URL).
+2. **Tier C model là Vietnamese-only.** → Phase 1 local STT chỉ hỗ trợ **tiếng Việt**; ngôn ngữ khác khi chọn `local` → fallback cloud (hoặc disable + thông báo). Cần phản ánh trong UI Slice E.
+3. ~~Resume download~~ → N/A Phase 1 (Tier C bundle, không download). Để dành Tier A/B.
+4. Verify license k2-fsa `zipformer-vi-2025-04-20` (Apache?) — chỉ cần khi chuyển bản thương mại.

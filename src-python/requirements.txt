@@ -11,6 +11,10 @@ requests
 soniox>=2.0.0
 python-docx>=1.1.2
 onnxruntime>=1.17.0
+# Local/offline STT (Tier C) — sherpa-onnx ships per-OS native wheels that
+# bundle their own onnxruntime; the Vietnamese Zipformer model dir is bundled
+# separately into the sidecar via scribble-sidecar.spec (datas).
+sherpa-onnx>=1.13.0
 # imageio-ffmpeg ships a static ffmpeg binary inside its wheel — auto-bundled
 # by PyInstaller via collect_all() in the spec. Eliminates the "brew install
 # ffmpeg" / "choco install ffmpeg" prerequisite for end users (zero manual
