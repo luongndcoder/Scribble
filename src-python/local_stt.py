@@ -15,6 +15,7 @@ platform uses this bundled Tier C model.
 
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -145,6 +146,12 @@ class MlxNemotronEngine(LocalSTTEngine):
 
 _mlx_engine: MlxNemotronEngine | None = None
 
+# MLX Metal streams are THREAD-LOCAL: the model must be created and every
+# generate() must run on the SAME thread, or mx.eval raises "There is no
+# Stream(gpu, N) in current thread". The upload pipeline runs STT chunks on a
+# multi-thread pool, so we funnel all MLX work onto one dedicated worker thread.
+_MLX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-stt")
+
 
 def get_mlx_engine() -> MlxNemotronEngine:
     global _mlx_engine
@@ -196,7 +203,13 @@ def _active_tier() -> str:
 def _transcribe_tier_a(file_path: str, language: str) -> str:
     wav_path = _ffmpeg_to_wav16(file_path)
     try:
-        return get_mlx_engine().transcribe_file(wav_path, language)
+        # Run model load + generate on the single dedicated MLX thread so all
+        # Metal stream ops stay on one thread (avoids cross-thread Stream error
+        # when the pipeline transcribes chunks in parallel).
+        future = _MLX_EXECUTOR.submit(
+            lambda: get_mlx_engine().transcribe_file(wav_path, language)
+        )
+        return future.result()
     finally:
         try:
             Path(wav_path).unlink()
