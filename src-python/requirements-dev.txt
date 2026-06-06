@@ -1,0 +1,6 @@
+# Dev/test-only dependencies. NOT bundled into the PyInstaller sidecar
+# (scribble-sidecar.spec uses requirements.txt only). Install locally with:
+#   .venv/bin/pip install -r requirements-dev.txt
+pytest>=8.0
+pytest-cov>=5.0
+pytest-asyncio>=0.23
