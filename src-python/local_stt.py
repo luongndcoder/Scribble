@@ -33,6 +33,19 @@ def _pcm_int16_to_float32(pcm_bytes: bytes) -> np.ndarray:
     return (ints.astype(np.float32) / 32768.0).copy()
 
 
+def _maybe_lowercase_allcaps(text: str) -> str:
+    """The sherpa Vietnamese model emits ALL-CAPS, no punctuation. Lowercase it
+    first so the downstream Vietnamese normalizer can capitalize sentence starts
+    instead of mistaking every short word for an acronym (RỒI/CŨNG/HỖ → kept).
+
+    Mixed-case input (e.g. cloud providers) is left untouched.
+    """
+    alpha = [c for c in text if c.isalpha()]
+    if alpha and sum(c.isupper() for c in alpha) / len(alpha) > 0.7:
+        return text.lower()
+    return text
+
+
 class LocalSTTEngine:
     """Base interface for a local STT engine."""
 
@@ -68,7 +81,7 @@ class SherpaOnnxEngine(LocalSTTEngine):
         stream = self._recognizer.create_stream()
         stream.accept_waveform(16000, pcm_float32)
         self._recognizer.decode_stream(stream)
-        text = (stream.result.text or "").strip()
+        text = _maybe_lowercase_allcaps((stream.result.text or "").strip())
         if language.startswith("vi"):
             text = normalize_vietnamese_text(text)
         return filter_hallucinations(text)

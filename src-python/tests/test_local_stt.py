@@ -85,6 +85,24 @@ def test_transcribe_pcm_returns_recognizer_text(fake_sherpa, tmp_path):
     assert eng.transcribe_pcm(samples, "vi") == "Xin chào mọi người"
 
 
+def test_allcaps_model_output_is_proper_cased(fake_sherpa, tmp_path):
+    """ALL-CAPS sherpa output → lowercased + sentence-capitalized, not kept as
+    a wall of acronyms."""
+    from local_stt import SherpaOnnxEngine
+
+    fake_sherpa["text"] = "RỒI CŨNG HỖ TRỢ CHO LÂU LÂU"
+    eng = SherpaOnnxEngine(tmp_path)
+    out = eng.transcribe_pcm(np.zeros(160, dtype=np.float32), "vi")
+    assert out == "Rồi cũng hỗ trợ cho lâu lâu"
+
+
+def test_maybe_lowercase_allcaps_leaves_mixed_case():
+    from local_stt import _maybe_lowercase_allcaps
+
+    assert _maybe_lowercase_allcaps("Xin chào mọi người") == "Xin chào mọi người"
+    assert _maybe_lowercase_allcaps("ÂM LƯỢNG TV GIẢM") == "âm lượng tv giảm"
+
+
 def test_transcribe_pcm_filters_hallucination(fake_sherpa, tmp_path):
     from local_stt import SherpaOnnxEngine
 

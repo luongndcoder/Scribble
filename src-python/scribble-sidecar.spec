@@ -4,6 +4,12 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [
     ('models/voxceleb_CAM++.onnx', 'models'),
+    # Local/offline STT (Tier C) — bundled Vietnamese sherpa-onnx model.
+    # model_registry._bundled_base() reads <_MEIPASS>/models/local/<model_id>.
+    (
+        'models/local/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09',
+        'models/local/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09',
+    ),
 ]
 binaries = []
 hiddenimports = [
@@ -33,6 +39,7 @@ hiddenimports = [
     'onnxruntime',
     'onnxruntime.capi',
     'onnxruntime.capi._pybind_state',
+    'sherpa_onnx',
 ]
 tmp_ret = collect_all('riva')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
@@ -59,6 +66,10 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 # PyInstaller _MEIPASS / dist directory. Zero manual setup — no more
 # "brew install ffmpeg" prerequisite for end users.
 tmp_ret = collect_all('imageio_ffmpeg')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# sherpa-onnx (local Tier C STT) ships native .dylib/.so/.dll + its own bundled
+# onnxruntime. collect_all pulls the native libs so PyInstaller doesn't drop them.
+tmp_ret = collect_all('sherpa_onnx')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 # ── Aggressive excludes ──

@@ -483,6 +483,10 @@ This project was inspired by and incorporates ideas from:
 
 - **[Meetily](https://github.com/Zackriya-Solutions/meetily)** by [Zackriya Solutions](https://github.com/Zackriya-Solutions) — UI/UX design patterns, summarization prompt engineering techniques, and chunking strategies for long transcripts.
 
+### Local/offline STT model
+
+The offline Vietnamese speech recognition (Settings → **Local (offline)**) uses the **sherpa-onnx Zipformer Vietnamese (30M, int8)** model by **[hynt/Zipformer-30M-RNNT-6000h](https://huggingface.co/hynt/Zipformer-30M-RNNT-6000h)**, packaged via **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)** (Apache-2.0). The model is licensed **CC BY-NC-ND 4.0** (non-commercial, attribution required, no derivatives) — bundled and used unmodified for offline transcription.
+
 ## 📄 License
 
 MIT
