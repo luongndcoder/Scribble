@@ -53,7 +53,9 @@ rm -rf "$DIST_INT/grpc_tools" 2>/dev/null || true
 find "$DIST_INT" -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
 find "$DIST_INT" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 find "$DIST_INT" -name "*.pyc" -delete 2>/dev/null || true
-find "$DIST_INT" -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
+# NOTE: do NOT strip *.dist-info — transformers (Tier A nemotron MLX) reads
+# package metadata at runtime via importlib.metadata (e.g. tqdm>=4.27). Removing
+# dist-info breaks "No package metadata was found for tqdm" → nemotron won't load.
 
 # ── Compress into tar.zst (fast decompress at first launch) ──
 echo "📦 Compressing sidecar-dist..."
