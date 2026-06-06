@@ -1555,7 +1555,10 @@ async def _process_chunks_parallel(
 
             text = ""
             if isinstance(text_raw, Exception):
-                log.warning("[pipeline] STT failed chunk %d: %s", chunk.idx, text_raw)
+                log.warning(
+                    "[pipeline] STT failed chunk %d: %s", chunk.idx, text_raw,
+                    exc_info=text_raw,
+                )
             elif text_raw:
                 text = str(text_raw)
 

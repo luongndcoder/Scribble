@@ -61,7 +61,13 @@ find "$DIST_INT" -name "*.pyc" -delete 2>/dev/null || true
 echo "📦 Compressing sidecar-dist..."
 STRIPPED_SIZE=$(du -sh "$SIDECAR_DIST" | cut -f1)
 echo "   Uncompressed: $STRIPPED_SIZE"
-tar --zstd -cf "$BINARIES_DIR/sidecar-dist.tar.zst" -C "$SIDECAR_DIR/dist" scribble-sidecar
+# Strip macOS xattrs first, then tar with COPYFILE_DISABLE=1 so macOS does NOT
+# embed AppleDouble `._*` companion files. The Rust extractor (tar crate) does
+# not understand AppleDouble and would extract them as literal files — e.g.
+# transformers/models/._foo.py — which transformers' import scanner then reads
+# as UTF-8 source and crashes ("can't decode byte 0xa3"). Breaks Tier A nemotron.
+xattr -cr "$SIDECAR_DIST" 2>/dev/null || true
+COPYFILE_DISABLE=1 tar --zstd -cf "$BINARIES_DIR/sidecar-dist.tar.zst" -C "$SIDECAR_DIR/dist" scribble-sidecar
 COMPRESSED_SIZE=$(du -sh "$BINARIES_DIR/sidecar-dist.tar.zst" | cut -f1)
 echo "   Compressed:   $COMPRESSED_SIZE"
 
