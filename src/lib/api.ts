@@ -352,6 +352,8 @@ export interface LocalModelStatus {
     status: string;        // idle | downloading | done | error
     progress: number;      // 0..1
     error: string | null;
+    multilingual?: boolean;
+    supported_languages?: string[];
 }
 export const getLocalModelStatus = () => request<LocalModelStatus>('/local/model-status');
 export const downloadLocalModel = () =>

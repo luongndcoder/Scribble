@@ -22,7 +22,7 @@ import numpy as np
 from local.model_registry import model_path_or_none, resolve
 from logger import get_logger
 # Reuse cloud-path text helpers so local output matches existing post-processing.
-from stt import _strip_wav_header, filter_hallucinations, normalize_vietnamese_text
+from stt import _strip_wav_header, filter_hallucinations, get_language_code, normalize_vietnamese_text
 
 log = get_logger(__name__)
 
@@ -131,7 +131,10 @@ class MlxNemotronEngine(LocalSTTEngine):
         log.info("LOADED: local STT engine MLX nemotron (%s)", repo)
 
     def transcribe_file(self, wav_path: str, language: str = "vi") -> str:
-        result = self._model.generate(wav_path)
+        # nemotron is multilingual (39 locales). "" / "auto" → let it auto-detect;
+        # otherwise pin the locale (e.g. "vi" → "vi-VN") for best accuracy.
+        locale = None if (not language or language == "auto") else get_language_code(language)
+        result = self._model.generate(wav_path, language=locale)
         text = (getattr(result, "text", "") or "").strip()
         # nemotron already emits proper case + punctuation → only filter.
         return filter_hallucinations(text)

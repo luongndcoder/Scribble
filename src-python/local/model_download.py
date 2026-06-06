@@ -22,6 +22,15 @@ log = get_logger(__name__)
 # Approx total on-disk size of the 8-bit MLX nemotron snapshot (~721-756MB).
 MLX_TOTAL_BYTES = 760_000_000
 
+# Short language codes nemotron MLX supports (subset of its 39 locales, matching
+# the app's language options). "auto" lets the model auto-detect. The engine
+# maps short → full locale via stt.get_language_code (vi → vi-VN, etc.).
+NEMOTRON_LANGS = [
+    "auto", "vi", "en", "zh", "ja", "ko", "fr", "de", "es", "it", "ru",
+    "pt", "th", "tr", "ar", "hi", "nl", "pl", "sv", "cs", "da", "uk", "ro",
+    "fi", "hu", "el", "he", "nb",
+]
+
 _state: dict = {"status": "idle", "progress": 0.0, "error": None}
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
@@ -80,8 +89,10 @@ def active_local_model() -> dict:
             "needs_download": True,
             "cached": is_mlx_cached(),
             "size_mb": round(MLX_TOTAL_BYTES / 1_000_000),
+            "multilingual": True,
+            "supported_languages": NEMOTRON_LANGS,
         }
-    # Tier C (or MLX unavailable) → bundled sherpa, always ready.
+    # Tier C (or MLX unavailable) → bundled sherpa, Vietnamese-only, always ready.
     return {
         "engine": "sherpa",
         "model_id": "sherpa-onnx-zipformer-vi-30M-int8-2026-02-09",
@@ -89,6 +100,8 @@ def active_local_model() -> dict:
         "needs_download": False,
         "cached": True,
         "size_mb": 32,
+        "multilingual": False,
+        "supported_languages": ["vi"],
     }
 
 

@@ -286,6 +286,12 @@ export function SettingsPanel() {
 
     const langOptions = sttProvider === 'nvidia' ? nvidiaLanguages : sonioxLanguages;
 
+    // Local (nemotron MLX) is multilingual — offer the supported languages + Auto.
+    const localLangOptions = [
+        { value: 'auto', label: lang === 'vi' ? 'Tự động' : 'Auto-detect' },
+        ...nvidiaLanguages.filter(o => modelStatus?.supported_languages?.includes(o.value)),
+    ];
+
     const currentApiKey = sttProvider === 'nvidia' ? nvidiaKey : sonioxKey;
     const setCurrentApiKey = sttProvider === 'nvidia' ? setNvidiaKey : setSonioxKey;
     const signupUrl = sttProvider === 'nvidia' ? 'build.nvidia.com' : 'console.soniox.com';
@@ -418,8 +424,8 @@ export function SettingsPanel() {
                                         <circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" />
                                     </svg>
                                     <span>{lang === 'vi'
-                                        ? `Chạy offline trên máy (${localInfo?.reason ?? 'CPU'}), miễn phí, không cần mạng. Chỉ hỗ trợ tiếng Việt. Lưu ý: ghi âm realtime vẫn dùng cloud (cần API key); chế độ offline chỉ áp dụng cho Upload file.`
-                                        : `Runs on-device (${localInfo?.reason ?? 'CPU'}), free, no internet. Vietnamese only. Note: realtime recording still uses the cloud (API key required); offline mode applies to file upload only.`
+                                        ? `Chạy offline trên máy (${localInfo?.reason ?? 'CPU'}), miễn phí, không cần mạng. ${modelStatus?.multilingual ? 'Hỗ trợ nhiều ngôn ngữ (chọn bên dưới).' : 'Chỉ hỗ trợ tiếng Việt.'} Lưu ý: ghi âm realtime vẫn dùng cloud (cần API key); chế độ offline chỉ áp dụng cho Upload file.`
+                                        : `Runs on-device (${localInfo?.reason ?? 'CPU'}), free, no internet. ${modelStatus?.multilingual ? 'Multiple languages (pick below).' : 'Vietnamese only.'} Note: realtime recording still uses the cloud (API key required); offline mode applies to file upload only.`
                                     }</span>
                                 </div>
                                 {modelStatus && (
@@ -454,6 +460,18 @@ export function SettingsPanel() {
                                                 <a onClick={handleDownloadModel} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{lang === 'vi' ? 'thử lại' : 'retry'}</a>
                                             </div>
                                         )}
+                                    </div>
+                                )}
+                                {modelStatus?.multilingual && (
+                                    <div className="setting-group setting-group--full" style={{ marginTop: 8 }}>
+                                        <div className="setting-label">{lang === 'vi' ? 'Ngôn ngữ' : 'Language'}</div>
+                                        <CustomSelect
+                                            className="setting-lang-select"
+                                            options={localLangOptions}
+                                            value={nvidiaLang}
+                                            onChange={setNvidiaLang}
+                                        />
+                                        <div className="setting-hint">{lang === 'vi' ? 'Chọn ngôn ngữ chính của audio (hoặc Tự động).' : "Pick the audio's main language (or Auto)."}</div>
                                     </div>
                                 )}
                                 </>
