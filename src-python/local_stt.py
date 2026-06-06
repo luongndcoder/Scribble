@@ -101,8 +101,58 @@ def get_engine(model_dir: Path) -> SherpaOnnxEngine:
     return engine
 
 
-def _normalize_to_pcm16(file_path: str) -> bytes:
-    """Decode any audio file to raw 16kHz mono 16-bit PCM via bundled ffmpeg."""
+# ── Tier A — MLX nemotron (macOS Apple Silicon) ──────────────────────────────
+MLX_REPO = "mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit"
+
+_mlx_available_cache: bool | None = None
+
+
+def _mlx_available() -> bool:
+    """True if mlx-audio is importable (Apple Silicon only). Cached."""
+    global _mlx_available_cache
+    if _mlx_available_cache is None:
+        try:
+            import mlx_audio.stt  # noqa: F401
+
+            _mlx_available_cache = True
+        except Exception:
+            _mlx_available_cache = False
+    return _mlx_available_cache
+
+
+class MlxNemotronEngine(LocalSTTEngine):
+    """nemotron-3.5-asr via mlx-audio (Apple Silicon). The model auto-downloads
+    from HuggingFace on first use and caches under ~/.cache/huggingface."""
+
+    def __init__(self, repo: str = MLX_REPO):
+        from mlx_audio.stt import load
+
+        self._model = load(repo)
+        log.info("LOADED: local STT engine MLX nemotron (%s)", repo)
+
+    def transcribe_file(self, wav_path: str, language: str = "vi") -> str:
+        result = self._model.generate(wav_path)
+        text = (getattr(result, "text", "") or "").strip()
+        # nemotron already emits proper case + punctuation → only filter.
+        return filter_hallucinations(text)
+
+    def transcribe_pcm(self, pcm_float32: np.ndarray, language: str = "vi") -> str:
+        raise NotImplementedError("MLX engine transcribes via file; use transcribe_file")
+
+
+_mlx_engine: MlxNemotronEngine | None = None
+
+
+def get_mlx_engine() -> MlxNemotronEngine:
+    global _mlx_engine
+    if _mlx_engine is None:
+        _mlx_engine = MlxNemotronEngine()
+    return _mlx_engine
+
+
+# ── audio normalization ──────────────────────────────────────────────────────
+def _ffmpeg_to_wav16(file_path: str) -> str:
+    """Decode any audio file to a temp 16kHz mono WAV. Caller deletes the file."""
     from services.audio import find_ffmpeg
 
     wav_path = file_path + "_local.wav"
@@ -110,13 +160,19 @@ def _normalize_to_pcm16(file_path: str) -> bytes:
     kwargs: dict = {"capture_output": True, "timeout": 60}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    result = subprocess.run(
+        [ffmpeg_bin, "-y", "-i", file_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
+        **kwargs,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {result.stderr.decode(errors='replace')[:200]}")
+    return wav_path
+
+
+def _normalize_to_pcm16(file_path: str) -> bytes:
+    """Decode any audio file to raw 16kHz mono 16-bit PCM via bundled ffmpeg."""
+    wav_path = _ffmpeg_to_wav16(file_path)
     try:
-        result = subprocess.run(
-            [ffmpeg_bin, "-y", "-i", file_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
-            **kwargs,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg failed: {result.stderr.decode(errors='replace')[:200]}")
         with open(wav_path, "rb") as f:
             wav_bytes = f.read()
     finally:
@@ -127,24 +183,43 @@ def _normalize_to_pcm16(file_path: str) -> bytes:
     return _strip_wav_header(wav_bytes)
 
 
-def transcribe_local_file(file_path: str, language: str = "vi") -> str:
-    """Transcribe an audio file fully offline using the bundled Tier C model.
+def _active_tier() -> str:
+    """Device tier used to select the local engine. Separated for testability."""
+    from local.device_detect import detect_tier
 
-    Phase 1 always uses the Tier C sherpa model (the only engine shipped); tier
-    dispatch (MLX / CUDA) is added in Phase 2/3.
+    return detect_tier()
+
+
+def _transcribe_tier_a(file_path: str, language: str) -> str:
+    wav_path = _ffmpeg_to_wav16(file_path)
+    try:
+        return get_mlx_engine().transcribe_file(wav_path, language)
+    finally:
+        try:
+            Path(wav_path).unlink()
+        except OSError:
+            pass
+
+
+def transcribe_local_file(file_path: str, language: str = "vi") -> str:
+    """Transcribe an audio file fully offline, picking the engine by device tier.
+
+    Tier A (macOS Apple Silicon + MLX available) → nemotron MLX (auto-downloads).
+    Otherwise → bundled Tier C sherpa-onnx (also the fallback when MLX missing).
 
     Raises:
-        RuntimeError: when the local model is not available on disk.
+        RuntimeError: when no local engine/model is available.
     """
+    if _active_tier() == "A" and _mlx_available():
+        return _transcribe_tier_a(file_path, language)
+
     spec = resolve("C")
     model_dir = model_path_or_none(spec)
     if model_dir is None:
         raise RuntimeError(
             "Model local chưa sẵn sàng — cài lại app hoặc tải model offline."
         )
-
     pcm = _normalize_to_pcm16(file_path)
     if not pcm:
         return ""
-    engine = get_engine(model_dir)
-    return engine.transcribe_pcm(_pcm_int16_to_float32(pcm), language)
+    return get_engine(model_dir).transcribe_pcm(_pcm_int16_to_float32(pcm), language)

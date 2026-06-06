@@ -15,6 +15,10 @@ onnxruntime>=1.17.0
 # bundle their own onnxruntime; the Vietnamese Zipformer model dir is bundled
 # separately into the sidecar via scribble-sidecar.spec (datas).
 sherpa-onnx>=1.13.0
+# Local/offline STT (Tier A) — nemotron-3.5-asr via MLX, macOS Apple Silicon ONLY.
+# nemotron_asr support is only on mlx-audio git main (not yet on PyPI), so we pin
+# a commit. The 756MB model auto-downloads from HuggingFace on first use.
+mlx-audio @ git+https://github.com/Blaizzy/mlx-audio.git@b3adf00ed001531d5031f57432251c5bf0101939 ; sys_platform == "darwin" and platform_machine == "arm64"
 # imageio-ffmpeg ships a static ffmpeg binary inside its wheel — auto-bundled
 # by PyInstaller via collect_all() in the spec. Eliminates the "brew install
 # ffmpeg" / "choco install ffmpeg" prerequisite for end users (zero manual

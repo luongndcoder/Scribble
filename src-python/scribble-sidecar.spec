@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
+import platform
 from PyInstaller.utils.hooks import collect_all
 
 datas = [
@@ -72,6 +73,18 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('sherpa_onnx')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
+# Local Tier A STT — nemotron via MLX, macOS Apple Silicon ONLY. mlx-audio loads
+# its stt model classes dynamically (importlib), so collect_all grabs all
+# submodules (incl. nemotron_asr) + mlx native Metal libs (.dylib/.metallib).
+# Guarded so Windows/Linux builds (no mlx wheel) skip it cleanly.
+if sys.platform == 'darwin' and platform.machine() == 'arm64':
+    # transformers/tokenizers/safetensors: nemotron tokenizer + weight loading
+    # (tokenizer-only, no torch). regex: transformers lazy-imports it.
+    for _pkg in ('mlx', 'mlx_audio', 'huggingface_hub',
+                 'transformers', 'tokenizers', 'safetensors', 'regex'):
+        tmp_ret = collect_all(_pkg)
+        datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+
 # ── Aggressive excludes ──
 # These are transitive deps pulled in by collect_all('riva') and other packages.
 # None of these are needed for the sidecar (FastAPI + STT).
@@ -79,8 +92,12 @@ excludes = [
     # Deep Learning frameworks (NOT needed — we use onnxruntime only)
     'torch', 'torchvision', 'torchaudio', 'torchtext',
     'tensorflow', 'tf2onnx', 'keras',
-    'transformers', 'diffusers', 'accelerate', 'safetensors',
+    'diffusers', 'accelerate',
     'modelscope',
+    # NOTE: 'transformers' + 'safetensors' are NOT excluded — mlx-audio's
+    # nemotron_asr (Tier A) needs them for tokenizer + weight loading. They run
+    # tokenizer-only without torch (torch stays excluded). Only collected on
+    # macOS arm64 (see collect_all block below); absent on Win/Linux builds.
 
     # LangChain / LLM frameworks (NOT needed — we call API directly)
     'langchain', 'langchain_community', 'langchain_core', 'langchain_text_splitters',

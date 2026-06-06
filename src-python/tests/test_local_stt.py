@@ -126,6 +126,39 @@ def test_engine_singleton_per_model_dir(fake_sherpa, tmp_path):
 def test_transcribe_local_file_raises_when_model_missing(monkeypatch, tmp_path):
     import local_stt
 
+    monkeypatch.setattr(local_stt, "_active_tier", lambda: "C")
     monkeypatch.setattr(local_stt, "model_path_or_none", lambda spec: None)
+    with pytest.raises(RuntimeError, match="chưa sẵn sàng"):
+        local_stt.transcribe_local_file(str(tmp_path / "a.wav"), "vi")
+
+
+# ── Tier A (MLX nemotron) dispatch ───────────────────────────────────────────
+
+
+def test_tier_a_dispatches_to_mlx(monkeypatch, tmp_path):
+    """On Apple Silicon with MLX available, transcribe routes to the MLX engine."""
+    import local_stt
+
+    class _FakeMlx:
+        def transcribe_file(self, wav_path, language="vi"):
+            return "Xin chào, đây là nemotron."
+
+    monkeypatch.setattr(local_stt, "_active_tier", lambda: "A")
+    monkeypatch.setattr(local_stt, "_mlx_available", lambda: True)
+    monkeypatch.setattr(local_stt, "get_mlx_engine", lambda: _FakeMlx())
+    monkeypatch.setattr(local_stt, "_ffmpeg_to_wav16", lambda p: str(tmp_path / "x.wav"))
+
+    out = local_stt.transcribe_local_file(str(tmp_path / "a.m4a"), "vi")
+    assert out == "Xin chào, đây là nemotron."
+
+
+def test_tier_a_falls_back_to_sherpa_when_mlx_missing(monkeypatch, tmp_path):
+    """Apple Silicon but MLX not importable → Tier C sherpa path (not MLX)."""
+    import local_stt
+
+    monkeypatch.setattr(local_stt, "_active_tier", lambda: "A")
+    monkeypatch.setattr(local_stt, "_mlx_available", lambda: False)
+    monkeypatch.setattr(local_stt, "model_path_or_none", lambda spec: None)
+    # Reaching the sherpa "missing model" RuntimeError proves it did NOT take MLX.
     with pytest.raises(RuntimeError, match="chưa sẵn sàng"):
         local_stt.transcribe_local_file(str(tmp_path / "a.wav"), "vi")
