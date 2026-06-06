@@ -342,6 +342,21 @@ export interface LocalDeviceInfo {
 }
 export const getLocalDeviceInfo = () => request<LocalDeviceInfo>('/local/device-info');
 
+export interface LocalModelStatus {
+    engine: string;
+    model_id: string;
+    display_name: string;
+    needs_download: boolean;
+    cached: boolean;
+    size_mb: number;
+    status: string;        // idle | downloading | done | error
+    progress: number;      // 0..1
+    error: string | null;
+}
+export const getLocalModelStatus = () => request<LocalModelStatus>('/local/model-status');
+export const downloadLocalModel = () =>
+    request<LocalModelStatus>('/local/download-model', { method: 'POST' });
+
 export const saveSettings = (data: Record<string, unknown>) =>
     request<{ ok: boolean }>('/settings', {
         method: 'POST',

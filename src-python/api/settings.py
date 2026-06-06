@@ -9,6 +9,7 @@ from db import Database
 from logger import get_logger
 from local.device_detect import get_device_info
 from local.model_registry import model_path_or_none, resolve
+from local.model_download import active_local_model, download_state, start_mlx_download
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -62,6 +63,21 @@ async def local_device_info():
     """Expose detected tier + local model status to the frontend."""
     override = db.get_setting("local_model_tier") or "auto"
     return build_local_device_info(override)
+
+
+@router.get("/local/model-status")
+async def local_model_status():
+    """Engine/model the device will actually use + download status (for polling)."""
+    return {**active_local_model(), **download_state()}
+
+
+@router.post("/local/download-model")
+async def local_download_model():
+    """Start (or resume) the on-demand download of the Tier A nemotron model."""
+    model = active_local_model()
+    if not model.get("needs_download"):
+        return {**model, "status": "done", "progress": 1.0, "error": None}
+    return {**model, **start_mlx_download()}
 
 
 @router.get("/settings")

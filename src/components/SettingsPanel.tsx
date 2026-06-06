@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useUpdaterStore } from '../stores/updaterStore';
 import { checkForUpdates } from '../lib/updater';
-import { getSettings, saveSettings, diagnose, fetchLLMModels, getLocalDeviceInfo } from '../lib/api';
-import type { LocalDeviceInfo } from '../lib/api';
+import { getSettings, saveSettings, diagnose, fetchLLMModels, getLocalDeviceInfo, getLocalModelStatus, downloadLocalModel } from '../lib/api';
+import type { LocalDeviceInfo, LocalModelStatus } from '../lib/api';
 import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
@@ -14,6 +14,8 @@ export function SettingsPanel() {
     const { showToast } = useToast();
     const [sttProvider, setSttProvider] = useState<'nvidia' | 'soniox' | 'local'>('nvidia');
     const [localInfo, setLocalInfo] = useState<LocalDeviceInfo | null>(null);
+    const [modelStatus, setModelStatus] = useState<LocalModelStatus | null>(null);
+    const [downloadingModel, setDownloadingModel] = useState(false);
     const [nvidiaKey, setNvidiaKey] = useState('');
     const [sonioxKey, setSonioxKey] = useState('');
     const [sonioxLangs, setSonioxLangs] = useState<Set<string>>(new Set(['vi']));
@@ -110,6 +112,44 @@ export function SettingsPanel() {
 
         } catch (e) {
             console.warn('[settings] Failed to load settings:', e);
+        }
+    };
+
+    // Fetch the actual local model status when the Local tab is active; keep
+    // polling while a download is in progress.
+    useEffect(() => {
+        if (sttProvider !== 'local') return;
+        let active = true;
+        const tick = async () => {
+            try {
+                const s = await getLocalModelStatus();
+                if (!active) return;
+                setModelStatus(s);
+                if (s.status === 'downloading') { setDownloadingModel(true); setTimeout(tick, 1000); }
+                else setDownloadingModel(false);
+            } catch { /* sidecar warming up */ }
+        };
+        tick();
+        return () => { active = false; };
+    }, [sttProvider]);
+
+    const handleDownloadModel = async () => {
+        setDownloadingModel(true);
+        try {
+            const s = await downloadLocalModel();
+            setModelStatus(s);
+            const poll = async () => {
+                try {
+                    const st = await getLocalModelStatus();
+                    setModelStatus(st);
+                    if (st.status === 'downloading') setTimeout(poll, 1000);
+                    else setDownloadingModel(false);
+                } catch { setDownloadingModel(false); }
+            };
+            if (s.status === 'downloading') setTimeout(poll, 1000);
+            else setDownloadingModel(false);
+        } catch {
+            setDownloadingModel(false);
         }
     };
 
@@ -372,15 +412,51 @@ export function SettingsPanel() {
                                 </div>
                             )}
                             {sttProvider === 'local' && (
+                                <>
                                 <div className="setting-warning">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" />
                                     </svg>
                                     <span>{lang === 'vi'
-                                        ? `Chạy offline trên máy (${localInfo?.reason ?? 'CPU'}), miễn phí, không cần mạng. Chỉ hỗ trợ tiếng Việt. ${localInfo?.model_available ? 'Model đã sẵn sàng.' : 'Model chưa sẵn sàng — vui lòng cài lại app.'} Lưu ý: ghi âm realtime vẫn dùng cloud (cần API key); chế độ offline chỉ áp dụng cho Upload file.`
-                                        : `Runs on-device (${localInfo?.reason ?? 'CPU'}), free, no internet. Vietnamese only. ${localInfo?.model_available ? 'Model ready.' : 'Model not ready — please reinstall the app.'} Note: realtime recording still uses the cloud (API key required); offline mode applies to file upload only.`
+                                        ? `Chạy offline trên máy (${localInfo?.reason ?? 'CPU'}), miễn phí, không cần mạng. Chỉ hỗ trợ tiếng Việt. Lưu ý: ghi âm realtime vẫn dùng cloud (cần API key); chế độ offline chỉ áp dụng cho Upload file.`
+                                        : `Runs on-device (${localInfo?.reason ?? 'CPU'}), free, no internet. Vietnamese only. Note: realtime recording still uses the cloud (API key required); offline mode applies to file upload only.`
                                     }</span>
                                 </div>
+                                {modelStatus && (
+                                    <div className="setting-group setting-group--full" style={{ marginTop: 8 }}>
+                                        <div className="setting-label">
+                                            Model: {modelStatus.display_name} · {modelStatus.size_mb}MB
+                                        </div>
+                                        {(modelStatus.cached || modelStatus.status === 'done') ? (
+                                            <div className="setting-hint" style={{ color: '#16a34a', fontWeight: 600 }}>
+                                                ✓ {lang === 'vi' ? 'Đã tải — sẵn sàng dùng offline' : 'Downloaded — ready offline'}
+                                            </div>
+                                        ) : (modelStatus.status === 'downloading' || downloadingModel) ? (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                <progress value={modelStatus.progress ?? 0} max={1} style={{ flex: 1, height: 8 }} />
+                                                <span style={{ minWidth: 42, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                                                    {Math.round((modelStatus.progress ?? 0) * 100)}%
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={handleDownloadModel}
+                                                disabled={downloadingModel}
+                                                style={{ background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 600, cursor: 'pointer' }}
+                                            >
+                                                {lang === 'vi' ? `Tải model (${modelStatus.size_mb}MB)` : `Download model (${modelStatus.size_mb}MB)`}
+                                            </button>
+                                        )}
+                                        {modelStatus.status === 'error' && (
+                                            <div className="setting-hint" style={{ color: '#dc2626' }}>
+                                                {lang === 'vi' ? 'Tải lỗi — kiểm tra mạng và ' : 'Download failed — check network and '}
+                                                <a onClick={handleDownloadModel} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{lang === 'vi' ? 'thử lại' : 'retry'}</a>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                </>
                             )}
                         </div>
 
