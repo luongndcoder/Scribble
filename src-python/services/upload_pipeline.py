@@ -48,6 +48,17 @@ from stt import (
     transcribe_soniox_file_id,
     upload_soniox_file,
 )
+from local_stt import transcribe_local_file
+
+# STT providers the batch pipeline can run. "local" = offline sherpa-onnx
+# (Tier C), needs no API key. Unknown/empty → historical default "nvidia".
+_VALID_STT_PROVIDERS = ("nvidia", "soniox", "local")
+
+
+def _normalize_stt_provider(raw: str | None) -> str:
+    """Normalize the configured STT provider; unknown/empty → 'nvidia'."""
+    p = (raw or "").strip().lower()
+    return p if p in _VALID_STT_PROVIDERS else "nvidia"
 
 log = logging.getLogger(__name__)
 
@@ -454,7 +465,7 @@ async def _execute(
     # auto-split into chunks and stitch results back together with offset.
     # Nvidia path always chunks via VAD because Riva caps audio length per
     # call and chunking gives parallel STT speedup + per-chunk resume.
-    stt_provider = (db.get_setting("stt_provider") or "nvidia").strip().lower()
+    stt_provider = _normalize_stt_provider(db.get_setting("stt_provider"))
     if stt_provider == "soniox":
         transcript_parts = await _run_soniox_pipeline(
             job, meeting_id, wav_path, duration_sec, tmp_root,
@@ -1462,9 +1473,7 @@ async def _process_chunks_parallel(
     # Earlier this hardcoded Nvidia and ignored the user's Settings choice
     # — uploading on a Soniox-configured app still ran Riva, producing
     # "[stt:nvidia-stream-batch] Parakeet …" in the log no matter what.
-    stt_provider = (db.get_setting("stt_provider") or "nvidia").strip().lower()
-    if stt_provider not in ("nvidia", "soniox"):
-        stt_provider = "nvidia"
+    stt_provider = _normalize_stt_provider(db.get_setting("stt_provider"))
 
     if stt_provider == "nvidia":
         nvidia_key = (
@@ -1479,6 +1488,15 @@ async def _process_chunks_parallel(
         riva_lang = get_language_code(stt_lang)
         soniox_key = ""
         soniox_hints: list[str] = []
+        local_lang = ""
+    elif stt_provider == "local":
+        # Offline sherpa-onnx — no API key. Tier C model is Vietnamese-only;
+        # other languages still pass through (model decodes vi best).
+        local_lang = db.get_setting("stt_language") or "vi"
+        nvidia_key = ""
+        riva_lang = ""
+        soniox_key = ""
+        soniox_hints = []
     else:
         soniox_key = (
             db.get_setting("soniox_api_key")
@@ -1492,6 +1510,7 @@ async def _process_chunks_parallel(
         soniox_hints = [h.strip() for h in hints_raw.split(",") if h.strip()] or ["vi"]
         nvidia_key = ""
         riva_lang = ""
+        local_lang = ""
     log.info("[pipeline] STT provider: %s", stt_provider)
 
     diarizer = None
@@ -1516,6 +1535,10 @@ async def _process_chunks_parallel(
             if stt_provider == "nvidia":
                 stt_task = asyncio.to_thread(
                     transcribe_nvidia_streaming, str(chunk.path), nvidia_key, riva_lang
+                )
+            elif stt_provider == "local":
+                stt_task = asyncio.to_thread(
+                    transcribe_local_file, str(chunk.path), local_lang
                 )
             else:
                 stt_task = asyncio.to_thread(

@@ -7,6 +7,8 @@ import httpx
 
 from db import Database
 from logger import get_logger
+from local.device_detect import get_device_info
+from local.model_registry import model_path_or_none, resolve
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -31,6 +33,35 @@ def _mask_value(key: str, value: str) -> str:
     if key not in _SENSITIVE_KEYS or not value or len(value) < 8:
         return value
     return value[:4] + "***" + value[-4:]
+
+
+def build_local_device_info(override: str | None = None) -> dict:
+    """Device profile + local model status for the Settings 'Local' tab.
+
+    Phase 1 always runs the Tier C (sherpa-onnx) model, so model availability
+    reflects the Tier C artifact regardless of the detected hardware tier.
+    """
+    info = get_device_info(override)
+    spec = resolve("C")
+    available = model_path_or_none(spec) is not None
+    return {
+        "tier": info.tier,
+        "os": info.os,
+        "arch": info.arch,
+        "has_cuda": info.has_cuda,
+        "reason": info.reason,
+        "model_available": available,
+        "model_id": spec.model_id,
+        "license": spec.license,
+        "supported_languages": ["vi"],  # Tier C model is Vietnamese-only
+    }
+
+
+@router.get("/local/device-info")
+async def local_device_info():
+    """Expose detected tier + local model status to the frontend."""
+    override = db.get_setting("local_model_tier") or "auto"
+    return build_local_device_info(override)
 
 
 @router.get("/settings")

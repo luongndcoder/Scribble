@@ -327,6 +327,21 @@ export const retryFailedChunks = (meetingId: number) =>
 
 // ─── Settings ───
 export const getSettings = () => request<SettingsData>('/settings');
+
+// ─── Local/offline STT ───
+export interface LocalDeviceInfo {
+    tier: string;
+    os: string;
+    arch: string;
+    has_cuda: boolean;
+    reason: string;
+    model_available: boolean;
+    model_id: string;
+    license: string;
+    supported_languages: string[];
+}
+export const getLocalDeviceInfo = () => request<LocalDeviceInfo>('/local/device-info');
+
 export const saveSettings = (data: Record<string, unknown>) =>
     request<{ ok: boolean }>('/settings', {
         method: 'POST',

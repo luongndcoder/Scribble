@@ -91,12 +91,14 @@ SQLite key-value, **additive, no migration**. Keys mới (default-on-read): `stt
 | 07 ✅ | `phase-07-test-local-engine.md` (5 tests RED) | 06 |
 | 08 ✅ | `phase-08-test-review-local-engine.md` (approved via sherpa decision) | 07 |
 | 09 ✅ | `phase-09-impl-local-engine.md` (GREEN; sherpa wrapper) | 08 |
-| 10 | `phase-10-test-routing.md` | 09 |
-| 11 | `phase-11-test-review-routing.md` | 10 |
-| 12 | `phase-12-impl-routing.md` | 11 |
-| 13 | `phase-13-test-settings.md` | 12 |
-| 14 | `phase-14-test-review-settings.md` | 13 |
-| 15 | `phase-15-impl-settings.md` | 14 |
+| 10 ✅ | `phase-10-test-routing.md` (2 tests RED) | 09 |
+| 11 ✅ | `phase-11-test-review-routing.md` (realtime = endpoint-based → backend chỉ upload_pipeline; main.py no-op) | 10 |
+| 12 ✅ | `phase-12-impl-routing.md` (GREEN; `_normalize_stt_provider` + local dispatch) | 11 |
+| 13 ✅ | `phase-13-test-settings.md` (4 tests RED) | 12 |
+| 14 ✅ | `phase-14-test-review-settings.md` (approved) | 13 |
+| 15 ✅ | `phase-15-impl-settings.md` (GREEN; device-info endpoint + Local tab + privacy note) | 14 |
+
+**Phase 1 CODE complete (2026-06-06):** 41 tests green, tsc clean. Còn lại = **build wiring** (chưa làm): (a) `scribble-sidecar.spec` bundle model dir + `collect_dynamic_libs('sherpa_onnx')`; (b) fetch model về `src-python/models/local/` (build script); (c) README/About attribution cc-by-nc-nd-4.0; (d) install sherpa-onnx + model → integration smoke transcribe tiếng Việt thật; (e) build + test 3 OS. Realtime privacy guard nâng cao (block khi không cloud key) = follow-up.
 
 **Deploy order:** A→B→C→D→E. Release model artifact (`phowhisper-base-onnx.tar.zst` + sha256) lên GitHub Release `local-models-v1` **trước** khi ship build có UI download.
 

@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useUpdaterStore } from '../stores/updaterStore';
 import { checkForUpdates } from '../lib/updater';
-import { getSettings, saveSettings, diagnose, fetchLLMModels } from '../lib/api';
+import { getSettings, saveSettings, diagnose, fetchLLMModels, getLocalDeviceInfo } from '../lib/api';
+import type { LocalDeviceInfo } from '../lib/api';
 import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
@@ -11,7 +12,8 @@ import { useToast } from './Toast';
 export function SettingsPanel() {
     const { setSettingsOpen, lang } = useAppStore();
     const { showToast } = useToast();
-    const [sttProvider, setSttProvider] = useState<'nvidia' | 'soniox'>('nvidia');
+    const [sttProvider, setSttProvider] = useState<'nvidia' | 'soniox' | 'local'>('nvidia');
+    const [localInfo, setLocalInfo] = useState<LocalDeviceInfo | null>(null);
     const [nvidiaKey, setNvidiaKey] = useState('');
     const [sonioxKey, setSonioxKey] = useState('');
     const [sonioxLangs, setSonioxLangs] = useState<Set<string>>(new Set(['vi']));
@@ -91,7 +93,8 @@ export function SettingsPanel() {
     const loadSettings = async () => {
         try {
             const s = await getSettings();
-            setSttProvider((s.stt_provider as 'nvidia' | 'soniox') || 'nvidia');
+            setSttProvider((s.stt_provider as 'nvidia' | 'soniox' | 'local') || 'nvidia');
+            getLocalDeviceInfo().then(setLocalInfo).catch(() => setLocalInfo(null));
             if (s.nvidia_api_key) setNvidiaKey('••••••••');
             if (s.soniox_api_key) setSonioxKey('••••••••');
             if (s.soniox_language_hints) {
@@ -349,6 +352,13 @@ export function SettingsPanel() {
                                     <strong>Soniox</strong>
                                     <span className="provider-tab-desc">{t('soniox_desc', lang)}</span>
                                 </button>
+                                <button
+                                    className={`provider-tab${sttProvider === 'local' ? ' active' : ''}`}
+                                    onClick={() => setSttProvider('local')}
+                                >
+                                    <strong>Local (offline)</strong>
+                                    <span className="provider-tab-desc">{lang === 'vi' ? 'Chạy trên máy, miễn phí' : 'On-device, free'}</span>
+                                </button>
                             </div>
                             {sttProvider === 'soniox' && (
                                 <div className="setting-warning">
@@ -361,9 +371,21 @@ export function SettingsPanel() {
                                     }</span>
                                 </div>
                             )}
+                            {sttProvider === 'local' && (
+                                <div className="setting-warning">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" />
+                                    </svg>
+                                    <span>{lang === 'vi'
+                                        ? `Chạy offline trên máy (${localInfo?.reason ?? 'CPU'}), miễn phí, không cần mạng. Chỉ hỗ trợ tiếng Việt. ${localInfo?.model_available ? 'Model đã sẵn sàng.' : 'Model chưa sẵn sàng — vui lòng cài lại app.'} Lưu ý: ghi âm realtime vẫn dùng cloud (cần API key); chế độ offline chỉ áp dụng cho Upload file.`
+                                        : `Runs on-device (${localInfo?.reason ?? 'CPU'}), free, no internet. Vietnamese only. ${localInfo?.model_available ? 'Model ready.' : 'Model not ready — please reinstall the app.'} Note: realtime recording still uses the cloud (API key required); offline mode applies to file upload only.`
+                                    }</span>
+                                </div>
+                            )}
                         </div>
 
-                        {/* API Key — span full so the long input row breathes */}
+                        {/* API Key — hidden for local (offline needs no key) */}
+                        {sttProvider !== 'local' && (
                         <div className="setting-group setting-group--full">
                             <div className="setting-label">
                                 API Key
@@ -392,8 +414,10 @@ export function SettingsPanel() {
                             </div>
                             <div className="setting-hint">{t('signup_free_at', lang)} <a href={signupHref} target="_blank" rel="noreferrer">{signupUrl}</a></div>
                         </div>
+                        )}
 
-                        {/* Language Selection — dropdown */}
+                        {/* Language Selection — dropdown (hidden for local: Vietnamese-only) */}
+                        {sttProvider !== 'local' && (
                         <div className="setting-group">
                             <div className="setting-label">
                                 {t(sttProvider === 'soniox' ? 'soniox_languages' : 'primary_language', lang)}
@@ -429,6 +453,7 @@ export function SettingsPanel() {
                                     : t('soniox_languages_hint', lang)}
                             </div>
                         </div>
+                        )}
 
                         {/* Max Speakers — only for Nvidia (Soniox has built-in diarization) */}
                         {sttProvider === 'nvidia' && <div className="setting-group setting-group--full">
