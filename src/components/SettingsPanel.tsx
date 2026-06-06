@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useUpdaterStore } from '../stores/updaterStore';
 import { checkForUpdates } from '../lib/updater';
-import { getSettings, saveSettings, diagnose, fetchLLMModels, getLocalDeviceInfo, getLocalModelStatus, downloadLocalModel } from '../lib/api';
-import type { LocalDeviceInfo, LocalModelStatus } from '../lib/api';
+import { getSettings, saveSettings, diagnose, fetchLLMModels, getLocalModelStatus, downloadLocalModel } from '../lib/api';
+import type { LocalModelStatus } from '../lib/api';
 import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
@@ -13,7 +13,6 @@ export function SettingsPanel() {
     const { setSettingsOpen, lang } = useAppStore();
     const { showToast } = useToast();
     const [sttProvider, setSttProvider] = useState<'nvidia' | 'soniox' | 'local'>('nvidia');
-    const [localInfo, setLocalInfo] = useState<LocalDeviceInfo | null>(null);
     const [modelStatus, setModelStatus] = useState<LocalModelStatus | null>(null);
     const [downloadingModel, setDownloadingModel] = useState(false);
     const [nvidiaKey, setNvidiaKey] = useState('');
@@ -96,7 +95,6 @@ export function SettingsPanel() {
         try {
             const s = await getSettings();
             setSttProvider((s.stt_provider as 'nvidia' | 'soniox' | 'local') || 'nvidia');
-            getLocalDeviceInfo().then(setLocalInfo).catch(() => setLocalInfo(null));
             if (s.nvidia_api_key) setNvidiaKey('••••••••');
             if (s.soniox_api_key) setSonioxKey('••••••••');
             if (s.soniox_language_hints) {
@@ -424,26 +422,26 @@ export function SettingsPanel() {
                                         <circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" />
                                     </svg>
                                     <span>{lang === 'vi'
-                                        ? `Chạy offline trên máy (${localInfo?.reason ?? 'CPU'}), miễn phí, không cần mạng. ${modelStatus?.multilingual ? 'Hỗ trợ nhiều ngôn ngữ (chọn bên dưới); dùng được cả ghi âm realtime lẫn Upload file — hoàn toàn offline.' : 'Chỉ hỗ trợ tiếng Việt. Realtime offline chưa hỗ trợ trên máy này — dùng Upload file (hoặc cloud cho realtime).'}`
-                                        : `Runs on-device (${localInfo?.reason ?? 'CPU'}), free, no internet. ${modelStatus?.multilingual ? 'Multiple languages (pick below); works for both realtime recording and file upload — fully offline.' : 'Vietnamese only. Realtime offline not supported on this machine — use file upload (or cloud for realtime).'}`
+                                        ? `Chạy hoàn toàn trên máy — miễn phí, không cần mạng, riêng tư. ${modelStatus?.multilingual ? 'Hỗ trợ nhiều ngôn ngữ (chọn bên dưới); ghi âm realtime và Upload file đều được.' : 'Chỉ hỗ trợ tiếng Việt; realtime offline chưa hỗ trợ trên máy này — dùng Upload file.'}`
+                                        : `Runs entirely on your device — free, offline, private. ${modelStatus?.multilingual ? 'Many languages (pick below); works for both realtime recording and file upload.' : 'Vietnamese only; realtime offline not supported here — use file upload.'}`
                                     }</span>
                                 </div>
                                 {modelStatus && (
                                     <div className="setting-group setting-group--full" style={{ marginTop: 8 }}>
-                                        <div className="setting-label">
-                                            Model: {modelStatus.display_name} · {modelStatus.size_mb}MB
-                                        </div>
                                         {(modelStatus.cached || modelStatus.status === 'done') ? (
-                                            <div className="setting-hint" style={{ color: '#16a34a', fontWeight: 600 }}>
-                                                ✓ {lang === 'vi' ? 'Đã tải — sẵn sàng dùng offline' : 'Downloaded — ready offline'}
+                                            <div className="setting-label" style={{ color: '#16a34a' }}>
+                                                ✓ {lang === 'vi' ? 'Sẵn sàng dùng offline' : 'Ready to use offline'}
                                             </div>
                                         ) : (modelStatus.status === 'downloading' || downloadingModel) ? (
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                <progress value={modelStatus.progress ?? 0} max={1} style={{ flex: 1, height: 8 }} />
-                                                <span style={{ minWidth: 42, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                                                    {Math.round((modelStatus.progress ?? 0) * 100)}%
-                                                </span>
-                                            </div>
+                                            <>
+                                                <div className="setting-label">{lang === 'vi' ? 'Đang tải model…' : 'Downloading model…'}</div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                    <progress value={modelStatus.progress ?? 0} max={1} style={{ flex: 1, height: 8 }} />
+                                                    <span style={{ minWidth: 42, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                                                        {Math.round((modelStatus.progress ?? 0) * 100)}%
+                                                    </span>
+                                                </div>
+                                            </>
                                         ) : (
                                             <button
                                                 type="button"
@@ -451,7 +449,7 @@ export function SettingsPanel() {
                                                 disabled={downloadingModel}
                                                 style={{ background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 600, cursor: 'pointer' }}
                                             >
-                                                {lang === 'vi' ? `Tải model (${modelStatus.size_mb}MB)` : `Download model (${modelStatus.size_mb}MB)`}
+                                                {lang === 'vi' ? `Tải model offline (${modelStatus.size_mb}MB)` : `Download offline model (${modelStatus.size_mb}MB)`}
                                             </button>
                                         )}
                                         {modelStatus.status === 'error' && (
@@ -460,6 +458,9 @@ export function SettingsPanel() {
                                                 <a onClick={handleDownloadModel} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{lang === 'vi' ? 'thử lại' : 'retry'}</a>
                                             </div>
                                         )}
+                                        <div className="setting-hint" style={{ opacity: 0.5, marginTop: 4 }}>
+                                            {modelStatus.display_name} · {modelStatus.size_mb}MB
+                                        </div>
                                     </div>
                                 )}
                                 {modelStatus?.multilingual && (
