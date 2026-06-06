@@ -424,8 +424,8 @@ export function SettingsPanel() {
                                         <circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" />
                                     </svg>
                                     <span>{lang === 'vi'
-                                        ? `Chạy offline trên máy (${localInfo?.reason ?? 'CPU'}), miễn phí, không cần mạng. ${modelStatus?.multilingual ? 'Hỗ trợ nhiều ngôn ngữ (chọn bên dưới).' : 'Chỉ hỗ trợ tiếng Việt.'} Lưu ý: ghi âm realtime vẫn dùng cloud (cần API key); chế độ offline chỉ áp dụng cho Upload file.`
-                                        : `Runs on-device (${localInfo?.reason ?? 'CPU'}), free, no internet. ${modelStatus?.multilingual ? 'Multiple languages (pick below).' : 'Vietnamese only.'} Note: realtime recording still uses the cloud (API key required); offline mode applies to file upload only.`
+                                        ? `Chạy offline trên máy (${localInfo?.reason ?? 'CPU'}), miễn phí, không cần mạng. ${modelStatus?.multilingual ? 'Hỗ trợ nhiều ngôn ngữ (chọn bên dưới); dùng được cả ghi âm realtime lẫn Upload file — hoàn toàn offline.' : 'Chỉ hỗ trợ tiếng Việt. Realtime offline chưa hỗ trợ trên máy này — dùng Upload file (hoặc cloud cho realtime).'}`
+                                        : `Runs on-device (${localInfo?.reason ?? 'CPU'}), free, no internet. ${modelStatus?.multilingual ? 'Multiple languages (pick below); works for both realtime recording and file upload — fully offline.' : 'Vietnamese only. Realtime offline not supported on this machine — use file upload (or cloud for realtime).'}`
                                     }</span>
                                 </div>
                                 {modelStatus && (

@@ -568,6 +568,236 @@ async def nvidia_stream_ws(websocket: WebSocket):
             pass
 
 
+# ─── Local (offline) Streaming WebSocket — nemotron MLX, near-realtime VAD ───
+@app.websocket("/ws/local-stream")
+async def local_stream_ws(websocket: WebSocket):
+    """Real-time STT fully on-device (Tier A nemotron MLX). No API key required.
+
+    Mirrors the Nvidia handler but swaps the cloud streamer for LocalStreamingSTT
+    (VAD-segmented nemotron). Same WS payload contract + diarization + auto-save
+    + cabin translation, so the frontend needs no special handling.
+    """
+    await websocket.accept()
+
+    diarizer.reset()
+    source = websocket.query_params.get("source", "web")
+    diarizer.set_source(source)
+    max_sp = db.get_setting("max_speakers")
+    if max_sp:
+        try:
+            diarizer.set_max_speakers(int(max_sp))
+        except (ValueError, TypeError):
+            pass
+
+    meeting_id_raw = websocket.query_params.get("meeting_id")
+    archive_fh = None
+    if meeting_id_raw:
+        try:
+            meeting_id = int(meeting_id_raw)
+            if db.get_meeting(meeting_id):
+                audio_dir = _voicescribe_data_dir() / "audio"
+                audio_dir.mkdir(parents=True, exist_ok=True)
+                archive_path = audio_dir / f"meeting_{meeting_id}.pcm"
+                archive_fh = archive_path.open("ab")
+                db.update_meeting(meeting_id, audio_path=str(archive_path))
+        except Exception as e:
+            log.warning("[ws:local-stream] archive setup failed: %s", e)
+
+    stt_lang = db.get_setting("stt_language") or "vi"
+    translation_tasks = set()
+    translate_state = {"lang": websocket.query_params.get("translate_lang", "")}
+
+    def _close_archive():
+        nonlocal archive_fh
+        if archive_fh is not None:
+            try:
+                archive_fh.close()
+            except Exception:
+                pass
+            archive_fh = None
+
+    # Local engine must be available (Tier A nemotron). Guard so the frontend
+    # gets a clear error instead of a silent stall when it isn't.
+    from local_stt import LocalStreamingSTT, _active_tier, _mlx_available
+    if not (_active_tier() == "A" and _mlx_available()):
+        _close_archive()
+        await websocket.send_json({
+            "error": "Realtime offline chưa hỗ trợ trên máy này. Dùng Upload file.",
+        })
+        await websocket.close()
+        return
+
+    streamer = LocalStreamingSTT(stt_lang)
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, streamer.start)
+    except Exception as e:
+        _close_archive()
+        await websocket.send_json({"error": str(e)})
+        await websocket.close()
+        return
+
+    result_queue = asyncio.Queue()
+    last_final_chunk_id = ""
+    diarize_buf = bytearray()
+    diarize_buf_lock = threading.Lock()
+    DIARIZE_MIN_BYTES = 16000 * 2
+
+    def _read_results():
+        for result in streamer.results():
+            asyncio.run_coroutine_threadsafe(result_queue.put(result), loop)
+        asyncio.run_coroutine_threadsafe(result_queue.put(None), loop)
+
+    result_thread = threading.Thread(target=_read_results, daemon=True)
+    result_thread.start()
+
+    async def _send_results():
+        nonlocal last_final_chunk_id
+        current_chunk_id = f"chunk-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+        from translate import translate_instant
+
+        transcript_parts: list[dict] = []
+        last_save_at = time.time()
+        SAVE_INTERVAL = 10.0
+
+        def _accumulate_part(text, speaker, speaker_id, chunk_id, is_final):
+            if not text.strip():
+                return
+            if transcript_parts and transcript_parts[-1].get("speakerId") == speaker_id:
+                p = transcript_parts[-1]
+                ids = p.get("chunkIds") or []
+                if chunk_id and chunk_id not in ids:
+                    ids.append(chunk_id)
+                p["chunkIds"] = ids
+                if "chunkData" not in p:
+                    p["chunkData"] = {p.get("chunkId"): p.get("text", "")}
+                p["chunkData"][chunk_id] = text
+                ordered = [p["chunkData"][c] for c in p.get("chunkIds", []) if p.get("chunkData", {}).get(c)]
+                p["text"] = " ".join(ordered)
+            else:
+                transcript_parts.append({
+                    "text": text, "speaker": speaker, "speakerId": speaker_id,
+                    "chunkId": chunk_id, "chunkIds": [chunk_id] if chunk_id else [],
+                    "chunkData": {chunk_id: text} if chunk_id else {},
+                })
+
+        def _flush_to_db():
+            nonlocal last_save_at
+            if not meeting_id_raw or not transcript_parts:
+                return
+            try:
+                db.update_meeting(int(meeting_id_raw), transcript=json.dumps(transcript_parts, ensure_ascii=False))
+                last_save_at = time.time()
+            except Exception as e:
+                log.warning("[ws:local auto-save] error: %s", e)
+
+        last_speaker = "Speaker 1"
+        last_speaker_id = 0
+
+        while True:
+            result = await result_queue.get()
+            if result is None:
+                break
+            try:
+                msg = {
+                    "text": result["text"], "is_final": True,
+                    "speaker": last_speaker, "speaker_id": last_speaker_id,
+                    "chunk_id": current_chunk_id,
+                }
+                # Local engine emits final segments only; diarize each one.
+                with diarize_buf_lock:
+                    buf_bytes = bytes(diarize_buf)
+                    diarize_buf.clear()
+                if len(buf_bytes) >= DIARIZE_MIN_BYTES:
+                    try:
+                        samples = np.frombuffer(buf_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                        speaker_info = await loop.run_in_executor(
+                            None, diarizer.identify_speaker_from_samples, samples, 16000
+                        )
+                        msg["speaker"] = speaker_info.get("speaker", last_speaker)
+                        msg["speaker_id"] = speaker_info.get("speaker_id", last_speaker_id)
+                        last_speaker = msg["speaker"]
+                        last_speaker_id = msg["speaker_id"]
+                    except Exception as e:
+                        log.warning("[ws:local] diarize error: %s", e)
+
+                await websocket.send_json(msg)
+                final_chunk_id = current_chunk_id
+                if result["text"]:
+                    last_final_chunk_id = current_chunk_id
+                current_chunk_id = f"chunk-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+                _accumulate_part(msg["text"], msg["speaker"], msg["speaker_id"], last_final_chunk_id or final_chunk_id, True)
+
+                if msg["text"].strip() and translate_state["lang"]:
+                    _text, _cid, _lang, _src = msg["text"], msg["chunk_id"], translate_state["lang"], stt_lang
+
+                    async def _do_translate(text=_text, cid=_cid, lang=_lang, src=_src):
+                        import re
+                        if not text or not lang or not re.sub(r'[^\w\s]', '', text).strip():
+                            return
+                        try:
+                            translated = await loop.run_in_executor(None, translate_instant, text, lang, db, src)
+                            if translated:
+                                await websocket.send_json({
+                                    "type": "translation", "translation": translated,
+                                    "chunk_id": cid, "append": True,
+                                })
+                        except Exception as e:
+                            log.warning("[ws:local-trans] error: %s", e)
+
+                    t = asyncio.create_task(_do_translate())
+                    translation_tasks.add(t)
+                    t.add_done_callback(translation_tasks.discard)
+
+                if time.time() - last_save_at >= SAVE_INTERVAL:
+                    _flush_to_db()
+            except WebSocketDisconnect:
+                break
+
+        _flush_to_db()
+
+    send_task = asyncio.create_task(_send_results())
+
+    try:
+        while True:
+            data = await websocket.receive()
+            if data.get("type") == "websocket.disconnect":
+                break
+            if "bytes" in data:
+                audio_bytes = data["bytes"]
+                streamer.feed_audio(audio_bytes)
+                with diarize_buf_lock:
+                    diarize_buf.extend(audio_bytes)
+                if archive_fh is not None:
+                    try:
+                        archive_fh.write(audio_bytes)
+                    except Exception as e:
+                        log.warning("[ws:local-stream] archive write failed: %s", e)
+            elif "text" in data:
+                txt = data["text"]
+                if txt == "STOP":
+                    break
+                if txt.startswith("TRANSLATE:"):
+                    lang_cmd = txt[len("TRANSLATE:"):].strip()
+                    translate_state["lang"] = "" if lang_cmd.lower() == "off" else lang_cmd
+    except WebSocketDisconnect:
+        pass
+    finally:
+        streamer.stop()
+        result_thread.join(timeout=5)
+        try:
+            await asyncio.wait_for(send_task, timeout=3.0)
+        except asyncio.TimeoutError:
+            send_task.cancel()
+        if translation_tasks:
+            await asyncio.wait(translation_tasks, timeout=5.0)
+        _close_archive()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 # ─── Soniox Streaming WebSocket ───
 @app.websocket("/ws/soniox-stream")
 async def soniox_stream_ws(websocket: WebSocket):

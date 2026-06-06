@@ -162,3 +162,39 @@ def test_tier_a_falls_back_to_sherpa_when_mlx_missing(monkeypatch, tmp_path):
     # Reaching the sherpa "missing model" RuntimeError proves it did NOT take MLX.
     with pytest.raises(RuntimeError, match="chưa sẵn sàng"):
         local_stt.transcribe_local_file(str(tmp_path / "a.wav"), "vi")
+
+
+# ── LocalStreamingSTT VAD segmentation (no MLX needed) ───────────────────────
+
+import numpy as _np
+
+
+def test_streaming_vad_cuts_segment_after_speech_then_silence():
+    from local_stt import LocalStreamingSTT
+
+    s = LocalStreamingSTT("vi")
+    speech = (_np.full(16000, 5000, dtype=_np.int16)).tobytes()     # 1s loud
+    silence = (_np.zeros(int(16000 * 0.8), dtype=_np.int16)).tobytes()  # 0.8s quiet
+    s.feed_audio(speech)
+    s.feed_audio(silence)
+    assert not s._in.empty()  # one speech segment enqueued
+
+
+def test_streaming_no_segment_on_pure_silence():
+    from local_stt import LocalStreamingSTT
+
+    s = LocalStreamingSTT("vi")
+    s.feed_audio(_np.zeros(16000 * 3, dtype=_np.int16).tobytes())  # 3s silence
+    assert s._in.empty()  # nothing to transcribe
+
+
+def test_streaming_stop_flushes_trailing_speech():
+    from local_stt import LocalStreamingSTT
+
+    s = LocalStreamingSTT("vi")
+    s.feed_audio((_np.full(16000, 6000, dtype=_np.int16)).tobytes())  # 1s speech, no trailing silence
+    assert s._in.empty()  # not yet flushed (no silence hang)
+    s.stop()
+    # stop() flushes remaining speech, then enqueues the sentinel
+    item = s._in.get_nowait()
+    assert item is not None and len(item) > 0

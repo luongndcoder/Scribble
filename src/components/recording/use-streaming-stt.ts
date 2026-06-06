@@ -6,6 +6,7 @@ import {
     WS_CONNECT_TIMEOUT_MS,
     WS_PATH_NVIDIA,
     WS_PATH_SONIOX,
+    WS_PATH_LOCAL,
     TARGET_SAMPLE_RATE,
     SCRIPT_PROCESSOR_BUFFER,
 } from "./recording-constants";
@@ -18,7 +19,9 @@ export async function openStreamingWebSocket(
     preferredHttpBase: string | null,
     translateLang?: string,
 ): Promise<WebSocket | null> {
-    const wsPath = provider === "soniox" ? WS_PATH_SONIOX : WS_PATH_NVIDIA;
+    const wsPath = provider === "soniox" ? WS_PATH_SONIOX
+        : provider === "local" ? WS_PATH_LOCAL
+        : WS_PATH_NVIDIA;
     const translateQuery = translateLang ? `&translate_lang=${encodeURIComponent(translateLang)}` : "";
     const preferredWs = preferredHttpBase ? preferredHttpBase.replace(/^http/, "ws") : null;
     const wsBases = preferredWs ? [preferredWs, ...SIDECAR_WS_BASES.filter((b) => b !== preferredWs)] : [...SIDECAR_WS_BASES];
