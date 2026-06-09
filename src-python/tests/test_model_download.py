@@ -58,3 +58,27 @@ def test_start_download_when_cached_is_done(monkeypatch):
     st = model_download.start_mlx_download()
     assert st["status"] == "done"
     assert st["progress"] == 1.0
+
+
+def test_is_mlx_cached_false_while_blob_incomplete(monkeypatch, tmp_path):
+    """Regression: snapshot_download(local_files_only=True) resolves the instant
+    the tiny config/tokenizer files land, but the 720MB model.safetensors may
+    still be streaming as a `*.incomplete` blob. is_mlx_cached() must report
+    False until that incomplete blob is renamed — otherwise the UI flips to
+    'ready' mid-download."""
+    from local import model_download
+
+    repo = tmp_path / "models--mlx-community--nemotron"
+    (repo / "blobs").mkdir(parents=True)
+    (repo / "blobs" / "abc123.incomplete").write_bytes(b"partial")
+
+    # snapshot ref resolves fine (small files present) ...
+    monkeypatch.setattr(
+        "huggingface_hub.snapshot_download", lambda *a, **k: str(repo)
+    )
+    monkeypatch.setattr(model_download, "_repo_cache_dir", lambda: repo)
+    assert model_download.is_mlx_cached() is False
+
+    # ... once the incomplete blob is renamed (download done), reports True.
+    (repo / "blobs" / "abc123.incomplete").rename(repo / "blobs" / "abc123")
+    assert model_download.is_mlx_cached() is True

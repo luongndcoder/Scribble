@@ -86,7 +86,9 @@ export function RecordingPanel() {
         // ── Check API key before recording ──
         try {
             const settings = await getSettings();
-            if (!settings?.nvidia_api_key) {
+            const provider = (settings?.stt_provider || 'nvidia').toLowerCase();
+            // Local/offline + Soniox don't need an Nvidia key.
+            if (provider === 'nvidia' && !settings?.nvidia_api_key) {
                 const { lang } = useAppStore.getState();
                 setKeyWarning(
                     lang === 'vi'

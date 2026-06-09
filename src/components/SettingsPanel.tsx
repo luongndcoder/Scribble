@@ -428,11 +428,7 @@ export function SettingsPanel() {
                                 </div>
                                 {modelStatus && (
                                     <div className="setting-group setting-group--full" style={{ marginTop: 8 }}>
-                                        {(modelStatus.cached || modelStatus.status === 'done') ? (
-                                            <div className="setting-label" style={{ color: '#16a34a' }}>
-                                                ✓ {lang === 'vi' ? 'Sẵn sàng dùng offline' : 'Ready to use offline'}
-                                            </div>
-                                        ) : (modelStatus.status === 'downloading' || downloadingModel) ? (
+                                        {(modelStatus.status === 'downloading' || downloadingModel) ? (
                                             <>
                                                 <div className="setting-label">{lang === 'vi' ? 'Đang tải model…' : 'Downloading model…'}</div>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -442,6 +438,10 @@ export function SettingsPanel() {
                                                     </span>
                                                 </div>
                                             </>
+                                        ) : (modelStatus.cached || modelStatus.status === 'done') ? (
+                                            <div className="setting-label" style={{ color: '#16a34a' }}>
+                                                ✓ {lang === 'vi' ? 'Sẵn sàng dùng offline' : 'Ready to use offline'}
+                                            </div>
                                         ) : (
                                             <button
                                                 type="button"

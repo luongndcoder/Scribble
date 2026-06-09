@@ -15,8 +15,8 @@
  *   2  → diarizer loaded, finalizing
  *   3+ → ready (parent unmounts the bar before this is rendered)
  *
- * First boot can take 20-40s on slow disks because the Rust shell extracts
- * a ~110MB tar.gz of the Python sidecar. Subsequent boots are ~5-10s.
+ * First boot (and after each app update) can take ~30-60s because the Rust
+ * shell extracts the ~250MB compressed Python sidecar. Subsequent boots ~5-10s.
  * The elapsed-time counter helps users distinguish "still going" from
  * "actually stuck".
  */
@@ -51,11 +51,11 @@ export function StartupStatusBar({ lang, step, elapsed, expanded, onToggleExpand
               starting: 'Đang khởi động',
               ready: 'Hoàn tất',
               details: 'Chi tiết',
-              slowHint: 'Lần đầu chạy có thể mất 20-40 giây để giải nén AI engine.',
+              slowHint: 'Lần đầu (và sau mỗi lần cập nhật) mất ~30-60 giây để giải nén AI engine.',
               steps: [
                   {
                       label: 'Khởi tạo dịch vụ AI',
-                      hint: 'Lần đầu sẽ giải nén ~110MB AI engine.',
+                      hint: 'Lần đầu/sau cập nhật: giải nén ~250MB AI engine (chỉ 1 lần).',
                   },
                   {
                       label: 'Tải mô hình nhận diện giọng nói',
@@ -70,11 +70,11 @@ export function StartupStatusBar({ lang, step, elapsed, expanded, onToggleExpand
               starting: 'Starting',
               ready: 'Complete',
               details: 'Details',
-              slowHint: 'First launch may take 20-40s to extract the AI engine.',
+              slowHint: 'First launch (and after each update) takes ~30-60s to extract the AI engine.',
               steps: [
                   {
                       label: 'Initialising AI service',
-                      hint: 'First launch extracts a ~110MB AI engine.',
+                      hint: 'First launch/update extracts a ~250MB AI engine (one-time).',
                   },
                   {
                       label: 'Loading speech models',

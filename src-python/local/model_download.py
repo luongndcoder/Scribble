@@ -53,14 +53,31 @@ def _repo_cache_dir():
 
 
 def is_mlx_cached() -> bool:
-    """True when the full nemotron MLX snapshot is present in the HF cache."""
+    """True when the full nemotron MLX snapshot is present in the HF cache.
+
+    Two checks, both required:
+      1. snapshot_download(local_files_only=True) resolves — the snapshot ref +
+         file symlinks exist.
+      2. No `*.incomplete` blob remains. HF downloads each file to
+         `blobs/<hash>.incomplete` and only renames it on completion, so a
+         lingering `.incomplete` means the big `model.safetensors` (~720MB) is
+         still streaming. Without this check (1) alone returns True the instant
+         the tiny files (config/tokenizer/vocab) land — flipping the UI to
+         "ready" mid-download.
+    """
     try:
         from huggingface_hub import snapshot_download
 
         snapshot_download(_mlx_repo(), local_files_only=True)
-        return True
     except Exception:
         return False
+    d = _repo_cache_dir()
+    try:
+        if any(d.rglob("*.incomplete")):
+            return False
+    except OSError:
+        pass
+    return True
 
 
 def _cache_bytes() -> int:

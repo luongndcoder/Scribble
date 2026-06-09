@@ -204,23 +204,41 @@ async def diagnose(lang: str = "vi"):
     loop = asyncio.get_event_loop()
 
     stt_provider = db.get_setting("stt_provider") or "nvidia"
+    stt_is_local = stt_provider == "local"
+
+    # Local STT runs entirely on-device — no API key, no network. Its readiness
+    # depends only on whether the model is available (bundled sherpa = always;
+    # nemotron MLX = needs prior download). Compute once and reuse below.
+    def _local_stt_block() -> dict:
+        try:
+            from local.model_download import active_local_model
+            info = active_local_model()
+            if info.get("needs_download") and not info.get("cached"):
+                return {"status": "warning", "message": t("local_model_needs_download", lang)}
+        except Exception:
+            pass  # On any introspection failure, assume bundled/ready.
+        return {"status": "ok", "message": t("local_stt_ready", lang)}
 
     # ── Offline short-circuit ──────────────────────────────────────────────
     # Probe the network FIRST (force-fresh via _do_probe, not cached). If the
-    # machine is offline, every provider check below would just raise a raw
-    # DNS error. Return one clean "no internet" message for both STT + LLM.
+    # machine is offline, the cloud provider checks below would just raise a raw
+    # DNS error. Local STT still works offline, so only flag it when it actually
+    # needs a (network-dependent) model download; LLM always needs network.
     await _do_probe()
     if _network_cache["online"] is False:
         offline_msg = t("network_offline", lang)
         log.info("STATUS: diagnose short-circuit — network offline")
         return {
-            "stt": {"status": "error", "message": offline_msg, "offline": True},
+            "stt": _local_stt_block() if stt_is_local
+            else {"status": "error", "message": offline_msg, "offline": True},
             "llm": {"status": "error", "message": offline_msg, "offline": True},
             "backend": stt_provider,
             "network": {"online": False},
         }
 
-    if stt_provider == "soniox":
+    if stt_is_local:
+        results["stt"] = _local_stt_block()
+    elif stt_provider == "soniox":
         soniox_key = db.get_setting("soniox_api_key") or os.getenv("SONIOX_API_KEY", "")
         if not soniox_key:
             results["stt"] = {"status": "warning", "message": t("soniox_key_missing", lang)}
