@@ -33,6 +33,11 @@ export function RecordingBar() {
     const [audioSource, setAudioSource] = useState<'mic' | 'system' | 'both'>('mic');
     const [barHeights, setBarHeights] = useState(['4px', '4px', '4px']);
     const sttProviderRef = useRef('nvidia');
+    // Reactive copy of the saved STT provider for UI gating. Cabin translation
+    // is Nvidia NMT (cloud) — there is no offline translate model — so when the
+    // user picks Local (offline) we disable the toggle entirely.
+    const [sttProvider, setSttProvider] = useState('nvidia');
+    const cabinDisabled = sttProvider === 'local';
     const { showToast } = useToast();
 
     // AI is OPTIONAL — `aiConfigured` (resolved in App.tsx, shared via store)
@@ -84,6 +89,26 @@ export function RecordingBar() {
     useEffect(() => {
         setBarHeightsFn.current = setBarHeights;
     }, [setBarHeightsFn]);
+
+    // Keep the reactive STT provider in sync with saved settings: fetch on
+    // mount and whenever Settings is saved (SettingsPanel dispatches the event).
+    useEffect(() => {
+        let alive = true;
+        const refresh = () => {
+            getSettings()
+                .then((s) => { if (alive) setSttProvider((s.stt_provider || 'nvidia').toLowerCase()); })
+                .catch(() => {});
+        };
+        refresh();
+        window.addEventListener('scribble:settings-saved', refresh);
+        return () => { alive = false; window.removeEventListener('scribble:settings-saved', refresh); };
+    }, []);
+
+    // Local (offline) has no translation model — force cabin translation off so
+    // no stale TRANSLATE command/lang is sent on the local WS.
+    useEffect(() => {
+        if (cabinDisabled && translationEnabled) setTranslationEnabled(false);
+    }, [cabinDisabled, translationEnabled, setTranslationEnabled]);
 
     // ── Mid-session translation toggle ──
     const translationToggleRef = useRef({ enabled: translationEnabled, lang: translationLang });
@@ -806,18 +831,27 @@ export function RecordingBar() {
                     />
                 </div>
                 <div className="bar-divider" />
-                <div className="translation-toggle-wrap">
+                <div
+                    className="translation-toggle-wrap"
+                    title={cabinDisabled
+                        ? (lang === 'vi'
+                            ? 'Dịch cabin cần Nvidia (chưa hỗ trợ dịch offline) — không khả dụng ở chế độ Local'
+                            : 'Cabin translation needs Nvidia (no offline translate model) — unavailable in Local mode')
+                        : undefined}
+                    style={cabinDisabled ? { opacity: 0.45 } : undefined}
+                >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" />
                     </svg>
                     <span>{lang === 'vi' ? 'Dịch cabin' : 'Translate'}</span>
                     <label className="toggle toggle-sm">
-                        <input type="checkbox" checked={translationEnabled} onChange={(e) => setTranslationEnabled(e.target.checked)} />
+                        <input type="checkbox" checked={translationEnabled && !cabinDisabled} disabled={cabinDisabled}
+                            onChange={(e) => setTranslationEnabled(e.target.checked)} />
                         <span className="toggle-slider" />
                     </label>
                 </div>
                 <CustomSelect className="translation-lang-select" value={translationLang}
-                    onChange={setTranslationLang} disabled={!translationEnabled}
+                    onChange={setTranslationLang} disabled={!translationEnabled || cabinDisabled}
                     options={[
                         { value: 'vi', label: 'Vietnamese' }, { value: 'en', label: 'English' },
                         { value: 'ja', label: 'Japanese' }, { value: 'ko', label: 'Korean' },

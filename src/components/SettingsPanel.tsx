@@ -153,7 +153,12 @@ export function SettingsPanel() {
 
     const handleSave = async () => {
         setSaving(true);
-        try { await saveSettings(buildSettingsBody()); } catch (e) { console.warn('[settings] Save failed:', e); }
+        try {
+            await saveSettings(buildSettingsBody());
+            // Notify other views (e.g. RecordingBar gates cabin translation by
+            // the saved STT provider) that settings changed.
+            window.dispatchEvent(new CustomEvent('scribble:settings-saved'));
+        } catch (e) { console.warn('[settings] Save failed:', e); }
         setSaving(false);
         setSettingsOpen(false);
     };
