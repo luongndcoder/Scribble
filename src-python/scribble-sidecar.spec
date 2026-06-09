@@ -4,7 +4,8 @@ import platform
 from PyInstaller.utils.hooks import collect_all
 
 datas = [
-    ('models/voxceleb_CAM++.onnx', 'models'),
+    # Diarizer embedding model — CAM++ zh-cn-common 200k (192-dim, Apache-2.0).
+    ('models/speech_campplus_sv_zh-cn_16k-common.onnx', 'models'),
     # Local/offline STT (Tier C) — bundled Vietnamese sherpa-onnx model.
     # model_registry._bundled_base() reads <_MEIPASS>/models/local/<model_id>.
     (

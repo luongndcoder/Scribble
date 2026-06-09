@@ -56,7 +56,7 @@ from fastapi.responses import JSONResponse, StreamingResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from db import Database
-from diarize import SpeakerDiarizer
+from diarize import SpeakerDiarizer, DIARIZE_MIN_BYTES
 from i18n import t
 from stt import NvidiaStreamingSTT, SonioxStreamingSTT, get_language_code
 from logger import get_logger
@@ -350,10 +350,9 @@ async def nvidia_stream_ws(websocket: WebSocket):
     result_queue = asyncio.Queue()
     last_final_chunk_id = ""
 
-    # Audio buffer for speaker diarization
+    # Audio buffer for speaker diarization (min-bytes from diarize module)
     diarize_buf = bytearray()
     diarize_buf_lock = threading.Lock()
-    DIARIZE_MIN_BYTES = 16000 * 2  # 0.5s at 16kHz 16-bit mono
 
     def _read_results():
         for result in streamer.results():
@@ -641,7 +640,6 @@ async def local_stream_ws(websocket: WebSocket):
     last_final_chunk_id = ""
     diarize_buf = bytearray()
     diarize_buf_lock = threading.Lock()
-    DIARIZE_MIN_BYTES = 16000 * 2
 
     def _read_results():
         for result in streamer.results():

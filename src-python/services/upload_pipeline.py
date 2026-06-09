@@ -33,7 +33,10 @@ from uuid import uuid4
 
 from db import Database
 from services.audio import find_ffmpeg
-from services.batch_diarizer import cluster_speakers, extract_embedding
+from services.batch_diarizer import (
+    chunk_speaker_map_from_timeline,
+    diarize_fine_windows,
+)
 from services.job_registry import JobState, JobStatus, registry
 from services.vad_splitter import AudioChunk, split_into_chunks
 from stt import (
@@ -520,6 +523,28 @@ async def _execute(
     #                                            with summary_skipped + reason
     # In every case the job ends in DONE so the upload modal can navigate
     # the user to their (saved) transcript.
+    #
+    # User opt-out (from the upload form) takes precedence over the LLM key
+    # check: when the user chose "don't generate report", we skip summarize
+    # entirely so they are not forced to wait — minutes can be generated
+    # later on demand from the meeting view.
+    if not job.generate_summary:
+        log.info("[pipeline] user opted out of auto-summarize — skipping")
+        await registry.update(
+            job_id,
+            progress=P_SUMMARIZE,
+            message="Bỏ qua biên bản (theo lựa chọn)",
+            summary_skipped=True,
+            summary_skip_reason="user_opted_out",
+        )
+        await registry.update(
+            job_id,
+            status=JobStatus.DONE,
+            progress=1.0,
+            message="Hoàn thành (transcript đã lưu, chưa tạo biên bản)",
+        )
+        return
+
     llm_key = (db.get_setting("llm_api_key") or os.environ.get("LLM_API_KEY", "")).strip()
     if not llm_key:
         log.info("[pipeline] LLM key not configured — skipping auto-summarize")
@@ -1321,17 +1346,29 @@ async def _run_nvidia_chunked_pipeline(
     # Merge saved + newly processed results into chunk_results
     chunk_results = _merge_saved_and_new_results(saved_chunks, new_results, chunks)
 
-    # ── Global speaker clustering ──────────────────────────────────────────
+    # ── Global speaker clustering (FINE-GRAINED) ───────────────────────────
+    # Diarize on ~2s windows of the whole WAV, NOT the 20s STT chunks: a 20s
+    # chunk blends multiple speakers so every chunk's embedding looks alike
+    # (collapses to 1 speaker). Fine windows are single-speaker far more often.
+    # We then assign each STT chunk the speaker with the most overlap.
     await registry.update(
         job_id,
         status=JobStatus.FINALIZING,
         progress=P_FINALIZE,
         message="Phân loại người nói",
     )
-    embeddings = [
-        (r["idx"], r["embedding"]) for r in chunk_results if r["embedding"] is not None
-    ]
-    speaker_map = await asyncio.to_thread(cluster_speakers, embeddings)
+    diarizer = None
+    try:
+        from main import diarizer as _diarizer
+        diarizer = _diarizer
+    except Exception:
+        log.warning("[pipeline] diarizer unavailable — single-speaker output")
+
+    speaker_map: dict[int, int] = {}
+    if diarizer is not None:
+        timeline = await asyncio.to_thread(diarize_fine_windows, diarizer, wav_path)
+        chunk_bounds = [(c.idx, int(c.start_ms), int(c.end_ms)) for c in chunks]
+        speaker_map = chunk_speaker_map_from_timeline(timeline, chunk_bounds)
     if _is_cancelled(job):
         return []
 
@@ -1513,13 +1550,6 @@ async def _process_chunks_parallel(
         local_lang = ""
     log.info("[pipeline] STT provider: %s", stt_provider)
 
-    diarizer = None
-    try:
-        from main import diarizer as _diarizer
-        diarizer = _diarizer
-    except Exception:
-        log.warning("[pipeline] global diarizer not available — single-speaker output")
-
     semaphore = asyncio.Semaphore(_stt_concurrency())
     results: dict[int, dict] = {}
     lock = asyncio.Lock()
@@ -1544,44 +1574,30 @@ async def _process_chunks_parallel(
                 stt_task = asyncio.to_thread(
                     transcribe_soniox_file, str(chunk.path), soniox_key, soniox_hints
                 )
-            emb_task = (
-                asyncio.to_thread(extract_embedding, diarizer, chunk.path)
-                if diarizer is not None
-                else asyncio.sleep(0, result=None)
-            )
-            text_raw, emb_raw = await asyncio.gather(
-                stt_task, emb_task, return_exceptions=True
-            )
-
-            text = ""
-            if isinstance(text_raw, Exception):
+            try:
+                text_raw = await stt_task
+            except Exception as exc:
                 log.warning(
-                    "[pipeline] STT failed chunk %d: %s", chunk.idx, text_raw,
-                    exc_info=text_raw,
+                    "[pipeline] STT failed chunk %d: %s", chunk.idx, exc, exc_info=exc,
                 )
-            elif text_raw:
-                text = str(text_raw)
-
-            embedding = None
-            if isinstance(emb_raw, Exception):
-                log.warning("[pipeline] embed failed chunk %d: %s", chunk.idx, emb_raw)
-            else:
-                embedding = emb_raw
+                text_raw = ""
+            text = str(text_raw) if text_raw else ""
 
             text_clean = _filter_hallucinations(text or "").strip()
 
-            # Persist this chunk's result so we can resume after a crash and
-            # so the user sees live updates if they open the meeting now.
-            embedding_blob = embedding.tobytes() if embedding is not None else None
+            # Speaker IDs come from fine-grained diarization over the whole WAV
+            # (diarize_fine_windows) at finalize time — NOT per chunk. So we no
+            # longer run CAM++ per chunk here (it was wasted: written to DB but
+            # never read once chunk-level clustering was removed). Persist text.
             await asyncio.to_thread(
-                db.save_chunk_result, meeting_id, chunk.idx, text_clean, embedding_blob,
+                db.save_chunk_result, meeting_id, chunk.idx, text_clean, None,
             )
 
             async with lock:
                 results[chunk.idx] = {
                     "idx": chunk.idx,
                     "text": text_clean,
-                    "embedding": embedding,
+                    "embedding": None,  # diarization is fine-grained, not per-chunk
                     "start_ms": chunk.start_ms,
                     "end_ms": chunk.end_ms,
                 }

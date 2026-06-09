@@ -13,14 +13,39 @@ from logger import get_logger
 _log = get_logger(__name__)
 
 # ── Tunable parameters (configurable via env vars) ────────────────────────────
-MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.68"))
-STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.78"))
-MAX_SPEAKERS           = int(os.getenv("DIARIZE_MAX_SPEAKERS",             "4"))
+# Defaults tuned for CAM++ zh-cn-common 200k (192-dim) on the ONLINE realtime
+# path (identify_speaker_from_samples). At utterance granularity same-speaker
+# cosine ~0.7–0.9 and different ~0.5–0.65, so 0.65 separates well; lower (0.50)
+# collapsed ~82% of turns onto Speaker 1 (EMA profile drift). MAX_SPEAKERS 4
+# was too low for real meetings → 8. (Upload uses a separate cosine-DISTANCE
+# threshold in batch_diarizer, NOT these.) Override via env if needed.
+MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.65"))
+STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.80"))
+MAX_SPEAKERS           = int(os.getenv("DIARIZE_MAX_SPEAKERS",             "8"))
 SWITCH_CONFIRM_HITS    = int(os.getenv("DIARIZE_SWITCH_CONFIRM_HITS",      "2"))
 NEW_SPEAKER_CONFIRM_HITS = int(os.getenv("DIARIZE_NEW_SPEAKER_CONFIRM_HITS", "3"))
 CROSS_GENDER_PENALTY   = float(os.getenv("DIARIZE_CROSS_GENDER_PENALTY",   "0.06"))
 MERGE_SIM_THRESHOLD    = float(os.getenv("DIARIZE_MERGE_SIM_THRESHOLD",    "0.94"))
 EMA_UPDATE_MIN_SIM     = float(os.getenv("DIARIZE_EMA_UPDATE_MIN_SIM",     "0.50"))
+
+# Minimum buffered audio before running a diarization embedding. CAM++ needs
+# ~1–1.5s of speech for a stable embedding; shorter clips give noisy embeddings
+# that mis-merge speakers. NOTE: the legacy constant `16000*2` (=32000 bytes)
+# was mislabelled "0.5s" but is actually 1.0s @ 16kHz/16-bit/mono. We bump to
+# 1.5s for more robust embeddings with the 200k model. Realtime WS handlers in
+# main.py import this; segments shorter than this keep the previous speaker.
+# bytes = 16000 samples/s * 2 bytes/sample * seconds.
+DIARIZE_MIN_SECONDS    = float(os.getenv("DIARIZE_MIN_SECONDS", "1.5"))
+DIARIZE_MIN_BYTES      = int(16000 * 2 * DIARIZE_MIN_SECONDS)
+
+# Embedding model. CAM++ zh-cn-common 200k (192-dim, trained on 200k Asian
+# speakers) discriminates Vietnamese / same-gender voices well. The legacy
+# voxceleb model was removed — it returned ~0.9 cosine for ALL Vietnamese
+# voices (collapsed everyone to one speaker), so it was useless as a fallback.
+# If this asset is missing, the diarizer falls back to pitch-only (no crash).
+MODEL_FILENAMES = [
+    "speech_campplus_sv_zh-cn_16k-common.onnx",
+]
 
 # ── Internal constants (hardcoded — no need to tune via env) ──────────────────
 # Core
@@ -91,6 +116,9 @@ _CFG_SOURCE_OVERRIDES = {
 class SpeakerDiarizer:
     def __init__(self):
         self._session = None
+        self._in_name = None       # ONNX input node name (introspected)
+        self._out_name = None      # ONNX output node name (introspected)
+        self._emb_dim = None       # embedding dim of loaded model (192 for zh-cn 200k)
         self._profiles = []
         self._next_id = 0
         self._model_loaded = False
@@ -151,13 +179,16 @@ class SpeakerDiarizer:
                 candidates.append(os.path.join(exe_dir, "..", "Resources", "models"))
             candidates.append(os.path.join(file_dir, "models"))
 
+            # Resolve the model file across every candidate dir.
             onnx_path = None
-            for d in candidates:
-                p = os.path.join(d, "voxceleb_CAM++.onnx")
-                exists = os.path.exists(p)
-                _log.info("[diarize] checking: %s -> %s", p, 'FOUND' if exists else 'not found')
-                if exists and onnx_path is None:
-                    onnx_path = p
+            for fname in MODEL_FILENAMES:
+                for d in candidates:
+                    p = os.path.join(d, fname)
+                    if os.path.exists(p):
+                        onnx_path = p
+                        break
+                if onnx_path:
+                    break
 
             if not onnx_path:
                 _log.warning("[diarize] ONNX model not found in any candidate path")
@@ -169,10 +200,21 @@ class SpeakerDiarizer:
             so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             self._session = ort.InferenceSession(onnx_path, sess_options=so)
             self._model_loaded = True
-            _log.info("[diarize] ONNX model loaded: %s", onnx_path)
-            # Clear profiles if dimension mismatch
-            if self._profiles and len(self._profiles[0]["embedding"]) != 512:
-                _log.info(f"[diarize] Clearing profiles (dim mismatch)")
+            # Introspect node names + embedding dim instead of hardcoding
+            # 'feats'/'embs'/512 — keeps the loader robust if the model changes.
+            self._in_name = self._session.get_inputs()[0].name
+            self._out_name = self._session.get_outputs()[0].name
+            out_shape = self._session.get_outputs()[0].shape
+            self._emb_dim = out_shape[-1] if isinstance(out_shape[-1], int) else None
+            _log.info(
+                "[diarize] ONNX model loaded: %s (in=%s out=%s dim=%s)",
+                os.path.basename(onnx_path), self._in_name, self._out_name, self._emb_dim,
+            )
+            # Clear profiles if their embedding dim no longer matches the model.
+            if (self._profiles and self._emb_dim
+                    and len(self._profiles[0]["embedding"]) != self._emb_dim):
+                _log.info("[diarize] Clearing profiles (dim mismatch %d != %d)",
+                          len(self._profiles[0]["embedding"]), self._emb_dim)
                 self._profiles = []
                 self._next_id = 0
         except Exception as e:
@@ -454,7 +496,7 @@ class SpeakerDiarizer:
             # Extract fbank features and run ONNX inference
             fbank = self._compute_fbank(samples, sr=16000)
             fbank_input = fbank[np.newaxis, :, :]  # Add batch dim: (1, T, 80)
-            outputs = self._session.run(['embs'], {'feats': fbank_input})
+            outputs = self._session.run([self._out_name], {self._in_name: fbank_input})
             emb_np = outputs[0].flatten().astype(np.float32)
             # L2 normalize
             norm = np.linalg.norm(emb_np)
