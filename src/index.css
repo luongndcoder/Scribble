@@ -1417,6 +1417,61 @@ body.electron-app .sub-tabs {
   letter-spacing: 0.05em;
 }
 
+/* ── Playback follow: segment currently being spoken ── */
+.transcript-item.playing {
+  background: rgba(99, 102, 241, 0.07);
+  box-shadow: inset 3px 0 0 var(--indigo-500, #6366f1);
+}
+
+/* Clickable timestamp → seek audio to this segment */
+.transcript-seek-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 1px 4px;
+  border-radius: var(--radius-full);
+  color: var(--text-muted);
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+}
+.transcript-seek-btn svg {
+  opacity: 0.55;
+}
+.transcript-seek-btn:hover {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--indigo-600, #4f46e5);
+}
+.transcript-seek-btn:hover svg {
+  opacity: 1;
+}
+
+/* Floating "follow audio" pill shown after a manual scroll */
+.transcript-follow-pill {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px auto 0;
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--indigo-500, #6366f1);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+  transition: background 120ms var(--ease), transform 120ms var(--ease);
+}
+.transcript-follow-pill:hover {
+  background: var(--indigo-600, #4f46e5);
+  transform: translateY(-1px);
+}
+
 /* ── Live Typing Bubble ── */
 .interim-bubble {
   display: flex;
@@ -5332,6 +5387,34 @@ body.electron-app .draft-recovery-banner {
   font-size: 12px;
   color: var(--text-secondary, #94a3b8);
   margin: 4px 0 0;
+}
+
+.upload-summary-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.upload-summary-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--indigo-500, #6366f1);
+  cursor: pointer;
+}
+
+.upload-summary-toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #0f172a);
+}
+
+.upload-field-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #94a3b8);
+  margin: 2px 0 0;
+  line-height: 1.45;
 }
 
 .upload-modal-actions {

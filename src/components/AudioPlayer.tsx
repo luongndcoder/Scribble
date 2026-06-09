@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { CSSProperties, ChangeEvent } from 'react';
+
+/** Imperative handle so a parent (e.g. MeetingDetail) can drive playback —
+ *  used by transcript "click-to-seek": jump the audio to a segment's start. */
+export interface AudioPlayerHandle {
+    /** Seek to `sec` seconds and start playing. */
+    seek: (sec: number) => void;
+}
 
 interface AudioPlayerProps {
     src: string;
+    /** Fired continuously during playback with the current position (seconds).
+     *  Lets the parent follow the transcript to the spoken segment. */
+    onTime?: (sec: number) => void;
 }
 
 const formatTime = (seconds: number): string => {
@@ -18,7 +28,10 @@ const formatTime = (seconds: number): string => {
  * Native <audio> kept hidden and driven via ref so we can theme the UI
  * to match the app's indigo/gray palette.
  */
-export default function AudioPlayer({ src }: AudioPlayerProps) {
+const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer(
+    { src, onTime },
+    ref,
+) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const [playing, setPlaying] = useState(false);
     const [current, setCurrent] = useState(0);
@@ -32,6 +45,16 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
         setDuration(0);
         setReady(false);
     }, [src]);
+
+    useImperativeHandle(ref, () => ({
+        seek: (sec: number) => {
+            const audio = audioRef.current;
+            if (!audio || !Number.isFinite(sec)) return;
+            audio.currentTime = Math.max(0, sec);
+            setCurrent(audio.currentTime);
+            void audio.play();
+        },
+    }), []);
 
     const togglePlay = () => {
         const audio = audioRef.current;
@@ -61,7 +84,11 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
                 src={src}
                 preload="metadata"
                 onLoadedMetadata={(e) => { setDuration(e.currentTarget.duration); setReady(true); }}
-                onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
+                onTimeUpdate={(e) => {
+                    const t = e.currentTarget.currentTime;
+                    setCurrent(t);
+                    onTime?.(t);
+                }}
                 onPlay={() => setPlaying(true)}
                 onPause={() => setPlaying(false)}
                 onEnded={() => setPlaying(false)}
@@ -99,4 +126,6 @@ export default function AudioPlayer({ src }: AudioPlayerProps) {
             <span className="audio-time audio-time-total">{formatTime(duration)}</span>
         </div>
     );
-}
+});
+
+export default AudioPlayer;

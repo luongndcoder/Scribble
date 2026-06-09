@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { TranscriptPart, Meeting, useAppStore } from '../stores/appStore';
 import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile, retryFailedChunks, meetingAudioStreamUrl } from '../lib/api';
-import AudioPlayer from './AudioPlayer';
+import AudioPlayer, { type AudioPlayerHandle } from './AudioPlayer';
 import { subscribeJobEvents } from '../lib/upload-audio';
 import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
@@ -439,6 +439,20 @@ export function MeetingDetail() {
 
     const transcriptRef = useRef<HTMLDivElement>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
+
+    // ── Playback ↔ transcript sync ───────────────────────────────────────
+    // As the saved audio plays, follow the transcript to the segment being
+    // spoken (auto-scroll) and let the user click a segment's timestamp to
+    // jump the audio there. `activeChunkId` is the itemKey of the part that
+    // contains the current playhead — we ONLY setState when it changes (not
+    // on every timeupdate ~4×/s) so the big transcript list doesn't re-render
+    // continuously. `autoFollow` pauses when the user scrolls by hand.
+    const audioPlayerRef = useRef<AudioPlayerHandle>(null);
+    const [activeChunkId, setActiveChunkId] = useState<string | null>(null);
+    const activeChunkIdRef = useRef<string | null>(null);
+    const [autoFollow, setAutoFollow] = useState(true);
+    const autoFollowRef = useRef(true);
+    const programmaticScrollRef = useRef(false);
     const [meetingData, setMeetingData] = useState<Meeting | null>(null);
     const [meetingLoading, setMeetingLoading] = useState(false);
     const [editingSpeakerId, setEditingSpeakerId] = useState<number | null>(null);
@@ -567,6 +581,122 @@ export function MeetingDetail() {
     const transcriptRows = isTranscriptSearching
         ? searchMatchedRows
         : visibleParts.map((part, visibleIdx) => ({ part, absoluteIdx: visibleStartIdx + visibleIdx }));
+
+    // ── Playback ↔ transcript sync helpers ──────────────────────────────
+    // Stable itemKey identical to the one used in the render map below, so
+    // `activeChunkId` matches the DOM `data-chunk-id` for scroll targeting.
+    const itemKeyFor = useCallback(
+        (part: TranscriptPart, absoluteIdx: number) => part.chunkId || `t-${absoluteIdx}`,
+        [],
+    );
+
+    // Map the current audio position (seconds) → itemKey of the part being
+    // spoken. Prefer a part whose [start, end) brackets `t`; otherwise the
+    // last part that has already started (covers gaps between segments).
+    const chunkIdAtTime = useCallback(
+        (t: number): string | null => {
+            let candidate: string | null = null;
+            for (let i = 0; i < transcriptParts.length; i++) {
+                const p = transcriptParts[i];
+                const start = toTimeNumber(p.startTime);
+                const end = toTimeNumber(p.endTime);
+                if (t >= start) {
+                    candidate = itemKeyFor(p, i);
+                    if (end > start && t < end) break;
+                } else {
+                    break; // parts are chronological — no later part can match
+                }
+            }
+            return candidate;
+        },
+        [transcriptParts, itemKeyFor],
+    );
+
+    // Fired ~4×/s by AudioPlayer. Only commit to state when the active part
+    // actually changes → avoids re-rendering the whole transcript list on
+    // every tick.
+    const handlePlaybackTime = useCallback(
+        (sec: number) => {
+            const id = chunkIdAtTime(sec);
+            if (id !== activeChunkIdRef.current) {
+                activeChunkIdRef.current = id;
+                setActiveChunkId(id);
+            }
+        },
+        [chunkIdAtTime],
+    );
+
+    // True when a saved audio file is available to seek (playback mode).
+    const canSeekPlayback = !recording && !!meetingData?.audio_path;
+
+    // Click a segment's timestamp → jump audio there + re-arm auto-follow.
+    const seekToPart = useCallback((part: TranscriptPart) => {
+        const start = toTimeNumber(part.startTime);
+        autoFollowRef.current = true;
+        setAutoFollow(true);
+        audioPlayerRef.current?.seek(start);
+    }, []);
+
+    // Auto-scroll the active segment into view when it changes (unless the
+    // user scrolled away by hand). Skipped during transcript search (rows
+    // there are the match set, not the playback window).
+    useEffect(() => {
+        if (!autoFollow || !activeChunkId || isTranscriptSearching) return;
+        const container = transcriptRef.current;
+        if (!container) return;
+        const el = container.querySelector<HTMLElement>(
+            `[data-chunk-id="${CSS.escape(activeChunkId)}"]`,
+        );
+        if (!el) return; // active part outside the sliding window — skip
+        programmaticScrollRef.current = true;
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const timer = setTimeout(() => { programmaticScrollRef.current = false; }, 700);
+        return () => clearTimeout(timer);
+    }, [activeChunkId, autoFollow, isTranscriptSearching]);
+
+    // Detect a hand scroll (vs our own programmatic scrollIntoView) and pause
+    // auto-follow so playback doesn't yank the user back.
+    useEffect(() => {
+        const container = transcriptRef.current;
+        if (!container) return;
+        const onScroll = () => {
+            if (programmaticScrollRef.current) return;
+            if (autoFollowRef.current) {
+                autoFollowRef.current = false;
+                setAutoFollow(false);
+            }
+        };
+        container.addEventListener('scroll', onScroll, { passive: true });
+        return () => container.removeEventListener('scroll', onScroll);
+        // Re-attach when the transcript container (re)mounts — e.g. parts load
+        // after the initial render, or the user switches meetings.
+    }, [viewingMeetingId, transcriptParts.length, canSeekPlayback]);
+
+    // Reset sync state when switching meetings.
+    useEffect(() => {
+        activeChunkIdRef.current = null;
+        setActiveChunkId(null);
+        autoFollowRef.current = true;
+        setAutoFollow(true);
+    }, [viewingMeetingId]);
+
+    // Re-arm auto-follow + jump to the active part (used by the floating pill).
+    const resumeFollow = useCallback(() => {
+        autoFollowRef.current = true;
+        setAutoFollow(true);
+        const container = transcriptRef.current;
+        const id = activeChunkIdRef.current;
+        if (container && id) {
+            const el = container.querySelector<HTMLElement>(
+                `[data-chunk-id="${CSS.escape(id)}"]`,
+            );
+            if (el) {
+                programmaticScrollRef.current = true;
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => { programmaticScrollRef.current = false; }, 700);
+            }
+        }
+    }, []);
 
     // Debounce search input so filtering doesn't re-run on every keystroke.
     useEffect(() => {
@@ -1291,8 +1421,21 @@ export function MeetingDetail() {
                 </div>
 
                 {(currentMeetingId || draftId) && !recording && meetingData?.audio_path ? (
-                    <AudioPlayer src={meetingAudioStreamUrl((currentMeetingId || draftId) as number)} />
+                    <AudioPlayer
+                        ref={audioPlayerRef}
+                        src={meetingAudioStreamUrl((currentMeetingId || draftId) as number)}
+                        onTime={handlePlaybackTime}
+                    />
                 ) : null}
+
+                {canSeekPlayback && !autoFollow && activeChunkId && (
+                    <button type="button" className="transcript-follow-pill" onClick={resumeFollow}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 5v14" /><path d="m19 12-7 7-7-7" />
+                        </svg>
+                        <span>{lang === 'vi' ? 'Cuộn theo audio' : 'Follow audio'}</span>
+                    </button>
+                )}
 
                 {transcriptParts.length === 0 && !recording ? (
                     <div className="welcome-state">
@@ -1438,7 +1581,7 @@ export function MeetingDetail() {
                             const itemKey = part.chunkId || `t-${absoluteIdx}`;
                             return (
                                 <div
-                                    className={`transcript-item ${isLive ? 'live' : ''}`}
+                                    className={`transcript-item ${isLive ? 'live' : ''} ${itemKey === activeChunkId ? 'playing' : ''}`}
                                     key={itemKey}
                                     data-chunk-id={itemKey}
                                 >
@@ -1487,7 +1630,22 @@ export function MeetingDetail() {
                                                 {part.speaker}
                                             </span>
                                         )}
-                                        <span style={{ marginLeft: 8 }}>{fmtSec(part.startTime)} – {fmtSec(part.endTime)}</span>
+                                        {canSeekPlayback ? (
+                                            <button
+                                                type="button"
+                                                className="transcript-seek-btn"
+                                                style={{ marginLeft: 8 }}
+                                                onClick={() => seekToPart(part)}
+                                                title={lang === 'vi' ? 'Tua audio đến đoạn này' : 'Jump audio to this segment'}
+                                            >
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                                    <path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.7-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14z" />
+                                                </svg>
+                                                <span>{fmtSec(part.startTime)} – {fmtSec(part.endTime)}</span>
+                                            </button>
+                                        ) : (
+                                            <span style={{ marginLeft: 8 }}>{fmtSec(part.startTime)} – {fmtSec(part.endTime)}</span>
+                                        )}
                                     </div>
                                     <TranscriptSentences
                                         text={part.text}
