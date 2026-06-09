@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -909,16 +910,31 @@ class SonioxStreamingSTT:
     """Real-time streaming STT via Soniox WebSocket.
 
     Follows official Soniox SDK pattern:
-    - Audio queued via feed_audio() and exposed as an iterator
-    - start_audio_thread(session, iterator) sends audio on background thread
+    - Audio queued via feed_audio()
+    - A single sender thread drains the queue → send_byte_chunk, and sends
+      keepalive control messages during silence to hold the connection open
     - receive_events() runs on the calling thread (results generator)
     """
 
-    # Soniox stt-rt-v4 has a server-side session duration cap (default ~1h
-    # depending on plan). When the cap fires, the server closes the WS and our
-    # event iterator just exits silently. We auto-reconnect up to this many
-    # times before surfacing a hard error to the user.
+    # Soniox stt-rt-v4 has a server-side session duration cap of 300 min (5h,
+    # fixed — see docs/stt/rt/limits-and-quotas). When the cap fires OR the
+    # connection idle-closes, the server closes the WS and our event iterator
+    # exits silently. We auto-reconnect up to this many times.
+    #
+    # CRITICAL: a reconnect opens a FRESH Soniox session, which RESETS
+    # speaker-diarization context (speaker numbering restarts, voices must be
+    # re-learned). On long meetings this collapses every speaker onto
+    # "Speaker 1". The real defense is to NOT lose the connection — Soniox
+    # idle-closes after >20s with no audio AND no keepalive
+    # (docs/stt/rt/connection-keepalive). Our frontend stops sending audio
+    # while the user pauses, so without keepalive a >20s pause kills the
+    # session. The sender loop below emits keepalive during silence to keep
+    # the single session (and its diarization) alive.
     MAX_RECONNECT_ATTEMPTS = 8
+
+    # Send a keepalive control message after this many seconds of no audio
+    # (well under Soniox's 20s idle-close window).
+    _KEEPALIVE_IDLE_SEC = 5.0
 
     def __init__(self, api_key: str, language_hints: list[str] | None = None, translate_lang: str = ""):
         self._api_key = api_key
@@ -928,28 +944,12 @@ class SonioxStreamingSTT:
         self._session = None
         self._client = None
         self._audio_queue = None
+        self._sender_thread = None
         # Cumulative ms of audio processed across ALL completed sessions in
         # this stream. Added to every yielded start_ms / end_ms so the timeline
         # the frontend sees stays continuous across auto-reconnects.
         self._cumulative_offset_ms = 0
         log.info("[stt:soniox-stream] language_hints=%s, translate_lang='%s'", self._language_hints, translate_lang)
-
-    def _audio_iter(self):
-        """Yield audio chunks from the queue as an iterator (for send_bytes).
-
-        Each call returns a FRESH generator — when a session reconnects we
-        start a new audio thread bound to a new generator. The old generator
-        is GC'd after its thread dies.
-        """
-        import queue
-        while not self._stopped:
-            try:
-                chunk = self._audio_queue.get(timeout=0.5)
-                if chunk is None:
-                    break
-                yield chunk
-            except queue.Empty:
-                continue
 
     def _open_session(self):
         """Open a Soniox real-time session and start a fresh audio thread.
@@ -960,7 +960,6 @@ class SonioxStreamingSTT:
         instead of dropped.
         """
         from soniox.types import RealtimeSTTConfig, TranslationConfig
-        from soniox.utils import start_audio_thread
 
         config = RealtimeSTTConfig(
             model="stt-rt-v4",
@@ -979,10 +978,44 @@ class SonioxStreamingSTT:
 
         self._session = self._client.realtime.stt.connect(config=config)
         self._session.__enter__()
-        # Start a NEW audio thread per session — previous one died when the
-        # old WS closed (send_byte_chunk raised SonioxRealtimeError). A fresh
-        # thread re-reads from the same queue so buffered audio is preserved.
-        start_audio_thread(self._session, self._audio_iter())
+        # Start a NEW sender thread per session — the previous one dies when
+        # the old WS closes (send raises SonioxRealtimeError). A fresh thread
+        # re-reads the same queue so buffered audio is preserved, and emits
+        # keepalive during silence so the session never idle-closes.
+        session = self._session
+        self._sender_thread = threading.Thread(
+            target=self._run_audio_sender, args=(session,),
+            name="soniox-audio-sender", daemon=True,
+        )
+        self._sender_thread.start()
+
+    def _run_audio_sender(self, session):
+        """Drain the audio queue into `session`, sending keepalive on silence.
+
+        Single-threaded by design: audio chunks and keepalive control messages
+        share one thread so they never race on the underlying WebSocket. Exits
+        when the stream is stopped or the session's WS dies (any send raises) —
+        on a server-side close the results() reconnect loop opens a new session
+        and starts a fresh sender thread.
+        """
+        import queue
+        while not self._stopped:
+            try:
+                chunk = self._audio_queue.get(timeout=self._KEEPALIVE_IDLE_SEC)
+            except queue.Empty:
+                # Silence / paused recording — keep the session alive so Soniox
+                # does not idle-close it (which would reset diarization).
+                try:
+                    session.keep_alive()
+                except Exception:
+                    return  # WS closed — let results() handle reconnect
+                continue
+            if chunk is None:
+                return  # stop() sentinel
+            try:
+                session.send_byte_chunk(chunk)
+            except Exception:
+                return  # WS closed — let results() handle reconnect
 
     def _close_session(self):
         """Best-effort close of the current Soniox session."""
