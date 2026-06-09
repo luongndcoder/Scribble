@@ -59,6 +59,8 @@ async function checkSttProviderConfigured(): Promise<{
             if (v.includes('***')) return true;
             return true;
         };
+        // Local/offline runs entirely on-device — no API key required.
+        if (provider === 'local') return { ok: true, provider, missing: null };
         const nvidiaOk = isConfigured(settings.nvidia_api_key);
         const sonioxOk = isConfigured(settings.soniox_api_key);
         if (provider === 'soniox' && !sonioxOk) return { ok: false, provider, missing: 'soniox' };
@@ -111,6 +113,11 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
     const [filePath, setFilePath] = useState<string | null>(null);
     const [title, setTitle] = useState<string>('');
     const [language, setLanguage] = useState<string>('vi');
+    // Whether to auto-generate the AI minutes after transcription. Default OFF
+    // so upload finishes as soon as the transcript is ready (no waiting on the
+    // LLM). The user creates the report on-demand later via the meeting's
+    // "Tạo biên bản" button, which defaults to the "Phân tích chi tiết" prompt.
+    const [generateSummary, setGenerateSummary] = useState<boolean>(false);
 
     // Upload phase (Rust streaming)
     const [bytesSent, setBytesSent] = useState<number>(0);
@@ -135,6 +142,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
         setStep('pick');
         setFilePath(null);
         setTitle('');
+        setGenerateSummary(false);
         setBytesSent(0);
         setTotalBytes(0);
         setJobState(null);
@@ -200,6 +208,9 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
               titleLabel: 'Tiêu đề cuộc họp',
               titlePlaceholder: 'Tên cuộc họp (tuỳ chọn)',
               languageLabel: 'Ngôn ngữ chính',
+              summaryToggleLabel: 'Tạo biên bản tự động',
+              summaryToggleHintOn: 'Sau khi phiên âm xong sẽ tạo biên bản bằng AI (có thể mất vài phút).',
+              summaryToggleHintOff: 'Chỉ phiên âm — xong ngay, không phải chờ. Bạn có thể tạo biên bản sau trong cuộc họp.',
               start: 'Bắt đầu xử lý',
               cancel: 'Hủy',
               close: 'Đóng',
@@ -211,6 +222,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
               doneTranscriptOnly: 'Transcript đã lưu',
               doneTranscriptOnlyDesc: 'Tóm tắt AI chưa chạy vì bạn chưa cấu hình AI API Key. Bạn vẫn có thể mở cuộc họp để xem & export transcript. Vào Cài đặt → AI để bật tóm tắt tự động cho lần sau.',
               doneTranscriptOnlyFailed: 'Bước tạo biên bản tự động lỗi nhưng transcript đã được lưu. Bạn có thể mở cuộc họp để xem & export.',
+              doneTranscriptOnlyOptedOut: 'Transcript đã sẵn sàng. Bạn chọn không tạo biên bản — có thể tạo bất cứ lúc nào trong cuộc họp.',
               openMeeting: 'Mở cuộc họp',
               error: 'Có lỗi xảy ra',
               tryAgain: 'Thử lại',
@@ -233,6 +245,9 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
               titleLabel: 'Meeting title',
               titlePlaceholder: 'Meeting name (optional)',
               languageLabel: 'Primary language',
+              summaryToggleLabel: 'Auto-generate minutes',
+              summaryToggleHintOn: 'After transcription, AI will generate the meeting minutes (may take a few minutes).',
+              summaryToggleHintOff: "Transcript only — finishes right away, no waiting. You can generate minutes later from the meeting.",
               start: 'Start processing',
               cancel: 'Cancel',
               close: 'Close',
@@ -244,6 +259,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
               doneTranscriptOnly: 'Transcript saved',
               doneTranscriptOnlyDesc: 'AI summary was skipped because no AI API key is configured. You can still open the meeting to view & export the transcript. Open Settings → AI to enable auto-summarize next time.',
               doneTranscriptOnlyFailed: 'Auto-summarize failed but your transcript was saved. Open the meeting to view & export.',
+              doneTranscriptOnlyOptedOut: 'Transcript is ready. You chose not to generate minutes — you can generate them anytime from the meeting.',
               openMeeting: 'Open meeting',
               error: 'Something went wrong',
               tryAgain: 'Try again',
@@ -304,6 +320,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                     filePath,
                     title: title.trim() || undefined,
                     language,
+                    generateSummary,
                 },
                 (p: UploadProgressPayload) => {
                     uploadIdRef.current = p.upload_id;
@@ -484,6 +501,23 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                                         options={NVIDIA_STT_LANGUAGES}
                                     />
                                 </div>
+                                <div className="upload-field">
+                                    <label className="upload-summary-toggle">
+                                        <input
+                                            type="checkbox"
+                                            checked={generateSummary}
+                                            onChange={(e) => setGenerateSummary(e.target.checked)}
+                                        />
+                                        <span className="upload-summary-toggle-label">
+                                            {tr.summaryToggleLabel}
+                                        </span>
+                                    </label>
+                                    <p className="upload-field-hint">
+                                        {generateSummary
+                                            ? tr.summaryToggleHintOn
+                                            : tr.summaryToggleHintOff}
+                                    </p>
+                                </div>
                             </>
                         )}
 
@@ -588,6 +622,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                     //     failed-with-transcript_saved recovery path)
                     const summarySkipped = jobState?.summary_skipped === true;
                     const cameFromFailed = jobState?.status === 'failed';
+                    const optedOut = jobState?.summary_skip_reason === 'user_opted_out';
                     let title = tr.done;
                     let desc = tr.doneDesc;
                     let warn = false;
@@ -595,6 +630,11 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                         title = tr.doneTranscriptOnly;
                         desc = tr.doneTranscriptOnlyFailed;
                         warn = true;
+                    } else if (optedOut) {
+                        // Deliberate user choice — not a warning, show neutral success.
+                        title = tr.doneTranscriptOnly;
+                        desc = tr.doneTranscriptOnlyOptedOut;
+                        warn = false;
                     } else if (summarySkipped) {
                         title = tr.doneTranscriptOnly;
                         desc = tr.doneTranscriptOnlyDesc;

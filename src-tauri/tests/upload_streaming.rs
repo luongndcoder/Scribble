@@ -156,6 +156,7 @@ async fn streams_full_file_and_parses_response() {
         &file_path,
         Some("Phase 1.5 smoke"),
         "vi",
+        true,
         cancel,
         move |sent, total| {
             progress_log_cb.lock().unwrap().push((sent, total));
@@ -230,6 +231,7 @@ async fn cancel_aborts_before_stream() {
         &file_path,
         None,
         "vi",
+        true,
         cancel,
         move |sent, total| {
             progress_log_cb.lock().unwrap().push((sent, total));
@@ -271,6 +273,7 @@ async fn missing_file_returns_error() {
         std::path::Path::new("/tmp/this-file-does-not-exist-scribble-upload-test"),
         None,
         "vi",
+        true,
         cancel,
         |_, _| {},
     )
@@ -291,6 +294,7 @@ async fn empty_file_returns_error() {
         &file_path,
         None,
         "vi",
+        true,
         cancel,
         |_, _| {},
     )

@@ -57,6 +57,8 @@ export interface JobState {
    *  modal shows a friendly "configure AI key" hint instead of an error. */
   summary_skipped?: boolean;
   summary_skip_reason?: string;
+  /** Echoes the user's upload-form choice of whether to auto-generate minutes. */
+  generate_summary?: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -110,7 +112,7 @@ export async function pickAudioFile(): Promise<string | null> {
  * the rest of the pipeline (normalize → STT → diarize → summarize).
  */
 export async function uploadAudio(
-  args: { filePath: string; title?: string; language?: string },
+  args: { filePath: string; title?: string; language?: string; generateSummary?: boolean },
   onProgress?: (payload: UploadProgressPayload) => void,
 ): Promise<UploadResult> {
   ensureTauri('uploadAudio');
@@ -128,6 +130,7 @@ export async function uploadAudio(
       filePath: args.filePath,
       title: args.title ?? null,
       language: args.language ?? 'vi',
+      generateSummary: args.generateSummary ?? true,
     });
   } finally {
     if (unlisten) unlisten();

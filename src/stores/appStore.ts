@@ -143,7 +143,7 @@ export const useAppStore = create<AppState>((set) => ({
     transientSummary: '',
     summaryLoading: false,
     summaryLang: safeGetItem('scribble:summaryLang', 'vi'),
-    summaryTemplate: safeGetItem('scribble:summaryTemplate', 'mom'),
+    summaryTemplate: safeGetItem('scribble:summaryTemplate', 'deep'),
     customPrompt: safeGetItem('scribble:customPrompt'),
 
     setRecording: (v) => set({ recording: v }),

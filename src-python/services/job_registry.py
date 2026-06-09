@@ -46,6 +46,10 @@ class JobState:
     # to enable auto-minutes" message instead of an error.
     summary_skipped: bool = False
     summary_skip_reason: str = ""
+    # User choice from the upload form: when False the pipeline skips the
+    # auto-summarize step entirely and finishes as soon as the transcript is
+    # saved — so the user is never forced to wait for the LLM minutes.
+    generate_summary: bool = True
     # True once the transcript JSON has been written to DB. Lets the UI
     # offer "Open meeting" even if the job later ends in FAILED — so users
     # never lose their transcript work even when a downstream step crashes.
@@ -68,6 +72,7 @@ class JobState:
             "processed_chunks": self.processed_chunks,
             "summary_skipped": self.summary_skipped,
             "summary_skip_reason": self.summary_skip_reason,
+            "generate_summary": self.generate_summary,
             "transcript_saved": self.transcript_saved,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -79,9 +84,13 @@ class JobRegistry:
         self._jobs: dict[str, JobState] = {}
         self._lock = asyncio.Lock()
 
-    def create(self, meeting_id: int) -> JobState:
+    def create(self, meeting_id: int, generate_summary: bool = True) -> JobState:
         job_id = uuid.uuid4().hex
-        job = JobState(job_id=job_id, meeting_id=meeting_id)
+        job = JobState(
+            job_id=job_id,
+            meeting_id=meeting_id,
+            generate_summary=generate_summary,
+        )
         self._jobs[job_id] = job
         return job
 

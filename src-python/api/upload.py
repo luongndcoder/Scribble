@@ -65,6 +65,7 @@ async def upload_audio(
     audio: UploadFile = File(...),
     title: str | None = Form(None),
     language: str = Form("vi"),
+    generate_summary: bool = Form(True),
 ):
     """Receive audio/video upload, persist to disk synchronously, return job ref.
 
@@ -132,7 +133,7 @@ async def upload_audio(
         file_hash=sha256,
     )
 
-    job = registry.create(meeting_id=meeting_id)
+    job = registry.create(meeting_id=meeting_id, generate_summary=generate_summary)
     await registry.update(
         job.job_id,
         status=JobStatus.PENDING,

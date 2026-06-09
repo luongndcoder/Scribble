@@ -120,6 +120,7 @@ pub async fn upload_audio_to_sidecar(
     file_path: String,
     title: Option<String>,
     language: Option<String>,
+    generate_summary: Option<bool>,
     state: State<'_, UploadState>,
 ) -> Result<UploadResult, String> {
     let upload_id = uuid::Uuid::new_v4().simple().to_string();
@@ -132,6 +133,7 @@ pub async fn upload_audio_to_sidecar(
         file_path,
         title,
         language,
+        generate_summary.unwrap_or(true),
         cancel_flag,
     )
     .await;
@@ -156,6 +158,7 @@ async fn do_upload(
     file_path: String,
     title: Option<String>,
     language: Option<String>,
+    generate_summary: bool,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<UploadResult, String> {
     let app_for_progress = app.clone();
@@ -177,6 +180,7 @@ async fn do_upload(
         Path::new(&file_path),
         title.as_deref(),
         language.as_deref().unwrap_or("vi"),
+        generate_summary,
         cancel_flag,
         on_progress,
     )
@@ -196,6 +200,7 @@ pub async fn stream_upload_to_url(
     file_path: &Path,
     title: Option<&str>,
     language: &str,
+    generate_summary: bool,
     cancel_flag: Arc<AtomicBool>,
     on_progress: impl Fn(u64, u64) + Send + Sync + 'static,
 ) -> Result<SidecarUploadResponse, String> {
@@ -256,6 +261,10 @@ pub async fn stream_upload_to_url(
         }
     }
     form = form.text("language", language.to_string());
+    form = form.text(
+        "generate_summary",
+        if generate_summary { "true" } else { "false" }.to_string(),
+    );
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(UPLOAD_TIMEOUT_SECS))
