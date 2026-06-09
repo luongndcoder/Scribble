@@ -25,10 +25,10 @@
 
 | Hệ điều hành | Chip / Kiến trúc | File cài đặt | Link |
 |---------------|-------------------|---------------|------|
-| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.2.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.2.0_aarch64.dmg) |
-| 🪟 **Windows** | 64-bit | `Scribble_1.2.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.2.0_x64-setup.exe) |
-| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.2.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.2.0_amd64.AppImage) |
-| 🐧 **Linux** | 64-bit (deb) | `scribble_1.2.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.2.0_amd64.deb) |
+| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.3.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_aarch64.dmg) |
+| 🪟 **Windows** | 64-bit | `Scribble_1.3.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_x64-setup.exe) |
+| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.3.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_amd64.AppImage) |
+| 🐧 **Linux** | 64-bit (deb) | `scribble_1.3.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.3.0_amd64.deb) |
 
 > **⚠️ Lưu ý macOS:** Lần đầu mở app nếu gặp cảnh báo **"Scribble Not Opened"**, mở Terminal và chạy:
 > ```bash
@@ -41,11 +41,12 @@
 | Tính năng | Mô tả |
 |-----------|-------|
 | 🎙️ **Ghi âm realtime** | Voice Activity Detection — tự cắt chunk theo silence |
-| 📤 **Upload file ghi âm** | Tải lên m4a/mp3/wav/mp4 có sẵn → phiên âm + biên bản tự động. Resume khi pipeline bị gián đoạn, lưu transcript theo từng chunk (timestamps mỗi 22s) |
-| 📝 **Phiên dịch tự động** | Nvidia Riva STT (streaming gRPC, 13+ ngôn ngữ) hoặc Soniox (chất lượng cao, ~$0.12/giờ) |
-| 👥 **Nhận diện người nói** | Speaker diarization realtime (ONNX Runtime + CAM++) — tự phân biệt giọng nói |
+| 📤 **Upload file ghi âm** | Tải lên m4a/mp3/wav/mp4 có sẵn → phiên âm; tạo biên bản là tùy chọn (mặc định tắt, không phải chờ). Resume khi pipeline bị gián đoạn, lưu transcript theo từng chunk (timestamps mỗi 22s) |
+| 📝 **Phiên dịch tự động** | Nvidia Riva STT (streaming gRPC, 13+ ngôn ngữ), Soniox (chất lượng cao, ~$0.12/giờ), hoặc **Local (offline)** — chạy trên máy, không cần API key/mạng |
+| 👥 **Nhận diện người nói** | Speaker diarization (ONNX Runtime + CAM++ zh-cn) cho cả realtime lẫn upload — tối ưu tiếng Việt & ngôn ngữ châu Á |
+| ▶️ **Nghe lại đồng bộ** | Phát lại audio, transcript tự cuộn theo; bấm mốc thời gian để tua đúng đoạn |
 | 🌐 **Dịch cabin realtime** | Nvidia NMT — dịch 10+ ngôn ngữ, realtime |
-| 📋 **Biên bản AI** | Tóm tắt: tiêu đề, key points, action items, decisions, risks, next steps. Hỗ trợ template MoM / Deep / Summary / Bullets / Custom |
+| 📋 **Biên bản AI** | Tóm tắt: tiêu đề, key points, action items, decisions, risks, next steps. Template mặc định "Phân tích chi tiết"; hỗ trợ MoM / Deep / Summary / Bullets / Custom |
 | 📎 **Tài liệu tham khảo** | Attach file .md / .txt vào meeting làm context cho AI — agenda, brief, glossary, prior decisions. Tối đa 1MB/file, 2MB tổng |
 | 📦 **Export đa định dạng** | Markdown (.md) và Word (.docx) |
 | 💾 **Lưu nháp tự động** | Auto-save transcript vào DB, khôi phục khi crash |
@@ -160,6 +161,7 @@ npx tauri build
 |---------|----------|---------|---------|
 | ☁️ **Nvidia Riva** | Streaming gRPC, 13+ ngôn ngữ, speaker diarization, Parakeet CTC 0.6B cho tiếng Việt | API key từ [build.nvidia.com](https://build.nvidia.com) | Free tier hào phóng |
 | 🎯 **Soniox** | Chất lượng tốt nhất, đa ngôn ngữ trong cùng 1 audio, diarization tích hợp | API key từ [soniox.com](https://soniox.com) | ~$0.12/giờ |
+| 💻 **Local (offline)** | Chạy hoàn toàn trên máy — không cần API key/mạng, riêng tư. nemotron MLX đa ngôn ngữ (macOS Apple Silicon, tải 1 lần ~720MB) hoặc sherpa-onnx tiếng Việt (bundled sẵn) | Không cần key | Miễn phí |
 
 > 🔒 **Bảo mật:** API key của bạn được lưu trữ **hoàn toàn trên máy tính của bạn**. Chúng tôi không thu thập, gửi đi hay sử dụng API key của bạn cho bất kỳ mục đích nào.
 
@@ -192,13 +194,13 @@ Có sẵn file audio/video → không cần ghi âm lại. Pipeline tự xử l�
 3. Pipeline chạy tự động:
    - **Normalize** → 16kHz mono WAV
    - **Split** → cắt chunk theo silence (ffmpeg silencedetect, target 22s)
-   - **Transcribe** → STT song song 3 chunks/lần (Nvidia Riva streaming)
-   - **Diarize** → CAM++ ONNX + clustering toàn cuộc họp
-   - **Summarize** → LLM tự sinh biên bản
+   - **Transcribe** → STT song song 3 chunks/lần (Nvidia Riva streaming / Local)
+   - **Diarize** → CAM++ ONNX, phân tách theo cửa sổ 2s (fine-grained)
+   - **Summarize** → LLM sinh biên bản (tùy chọn — bật khi upload, mặc định tắt)
 4. Tiến độ stream qua SSE — đóng app vẫn tiếp tục, mở lại meeting để **Resume** từ chunk dở dang
 
 **Đặc điểm**:
-- Mỗi chunk lưu transcript + embedding ngay khi xong → crash recovery hoàn hảo
+- Mỗi chunk lưu transcript ngay khi xong → crash recovery hoàn hảo
 - Timestamps mỗi 22s trong transcript (vd `1:24 – 1:46`)
 - Idempotent: upload file trùng (cùng SHA-256) → tự redirect về meeting cũ
 - Cross-platform: m4a/mp4 đều OK trên Windows / Linux / macOS
@@ -227,10 +229,10 @@ Cho AI thêm context khi tạo biên bản — agenda, project brief, glossary, 
 
 | OS | Architecture | Installer | Link |
 |----|-------------|-----------|------|
-| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.2.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.2.0_aarch64.dmg) |
-| 🪟 **Windows** | 64-bit | `Scribble_1.2.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.2.0_x64-setup.exe) |
-| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.2.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.2.0_amd64.AppImage) |
-| 🐧 **Linux** | 64-bit (deb) | `scribble_1.2.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.2.0_amd64.deb) |
+| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.3.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_aarch64.dmg) |
+| 🪟 **Windows** | 64-bit | `Scribble_1.3.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_x64-setup.exe) |
+| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.3.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_amd64.AppImage) |
+| 🐧 **Linux** | 64-bit (deb) | `scribble_1.3.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.3.0_amd64.deb) |
 
 > **⚠️ macOS note:** If you see **"Scribble Not Opened"** on first launch, open Terminal and run:
 > ```bash
@@ -243,11 +245,12 @@ Cho AI thêm context khi tạo biên bản — agenda, project brief, glossary, 
 | Feature | Description |
 |---------|-------------|
 | 🎙️ **Real-time Recording** | Voice Activity Detection — auto-splits chunks on silence |
-| 📤 **Upload Audio Files** | Upload existing m4a/mp3/wav/mp4 → automatic transcription + minutes. Resumable pipeline (survives app restart), per-chunk timestamps (every ~22s) |
-| 📝 **Auto Transcription** | Nvidia Riva STT (streaming gRPC, 13+ languages) or Soniox (premium quality, ~$0.12/hr) |
-| 👥 **Speaker Diarization** | Real-time speaker identification (ONNX Runtime + CAM++) — auto-detects voice changes |
+| 📤 **Upload Audio Files** | Upload existing m4a/mp3/wav/mp4 → transcription; minutes generation optional (off by default, no waiting). Resumable pipeline (survives app restart), per-chunk timestamps (every ~22s) |
+| 📝 **Auto Transcription** | Nvidia Riva STT (streaming gRPC, 13+ languages), Soniox (premium quality, ~$0.12/hr), or **Local (offline)** — on-device, no API key/network |
+| 👥 **Speaker Diarization** | Speaker identification (ONNX Runtime + CAM++ zh-cn) for both realtime and upload — tuned for Vietnamese & Asian languages |
+| ▶️ **Synced Playback** | Play back audio with the transcript auto-scrolling to follow; click a timestamp to seek to that part |
 | 🌐 **Cabin Translation** | Nvidia NMT — 10+ languages, real-time streaming |
-| 📋 **AI Minutes** | Auto-summarize: title, key points, action items, decisions, risks, next steps. Templates: MoM / Deep / Summary / Bullets / Custom |
+| 📋 **AI Minutes** | Auto-summarize: title, key points, action items, decisions, risks, next steps. Default template "Deep Analysis"; supports MoM / Deep / Summary / Bullets / Custom |
 | 📎 **Reference Materials** | Attach .md / .txt docs to a meeting as AI context — agendas, briefs, glossaries, prior decisions. Max 1MB/file, 2MB/meeting total |
 | 📦 **Multi-format Export** | Markdown (.md) and Word (.docx) |
 | 💾 **Auto-save Drafts** | Transcript saved to DB incrementally, resilient to crashes |
@@ -362,6 +365,7 @@ npx tauri build
 |---------|------------|--------------|------|
 | ☁️ **Nvidia Riva** | Streaming gRPC, 13+ languages, speaker diarization, Parakeet CTC 0.6B for Vietnamese | API key from [build.nvidia.com](https://build.nvidia.com) | Generous free tier |
 | 🎯 **Soniox** | Best-in-class accuracy, multi-lang mixed audio, built-in diarization | API key from [soniox.com](https://soniox.com) | ~$0.12/hr |
+| 💻 **Local (offline)** | Runs fully on-device — no API key/network, private. Multilingual nemotron MLX (macOS Apple Silicon, one-time ~720MB download) or bundled Vietnamese sherpa-onnx | No key needed | Free |
 
 > 🔒 **Privacy:** Your API keys are stored **entirely on your local machine**. We never collect, transmit, or use your API keys for any purpose.
 
@@ -394,13 +398,13 @@ Have an existing audio/video file? Skip live recording — the pipeline handles 
 3. Pipeline runs automatically:
    - **Normalize** → 16kHz mono WAV
    - **Split** → silence-aligned chunks (ffmpeg silencedetect, ~22s target)
-   - **Transcribe** → 3 concurrent STT calls (Nvidia Riva streaming)
-   - **Diarize** → CAM++ ONNX + global clustering
-   - **Summarize** → LLM auto-generates minutes
+   - **Transcribe** → 3 concurrent STT calls (Nvidia Riva streaming / Local)
+   - **Diarize** → CAM++ ONNX, fine-grained 2s windows
+   - **Summarize** → LLM generates minutes (optional — opt-in at upload, off by default)
 4. Progress streams via SSE — closing the app is fine, reopen the meeting and **Resume** picks up where it left off
 
 **Highlights**:
-- Per-chunk save (transcript + embedding) → perfect crash recovery
+- Per-chunk transcript save → perfect crash recovery
 - Per-chunk timestamps in transcript (e.g. `1:24 – 1:46`)
 - Idempotent: re-uploading the same file (matching SHA-256) redirects to the existing meeting
 - Cross-platform: m4a/mp4 work on Windows / Linux / macOS
