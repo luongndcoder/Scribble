@@ -2,6 +2,11 @@
 
 Tất cả thay đổi đáng chú ý của Scribble được ghi tại đây.
 
+## [1.3.1] - 2026-06-09
+
+### Fixed
+- Tắt tính năng "Dịch cabin" khi dùng STT Local (offline). Dịch cabin chạy bằng Nvidia (cloud), không có model dịch offline, nên ở chế độ Local toggle bị vô hiệu hoá kèm chú thích — thay vì bật mà không có kết quả.
+
 ## [1.3.0] - 2026-06-09
 
 ### Added
