@@ -2,6 +2,14 @@
 
 Tất cả thay đổi đáng chú ý của Scribble được ghi tại đây.
 
+## [1.3.2] - 2026-06-22
+
+### Fixed
+- Sửa lỗi `no such column: status` khi upload file trên máy cài mới. Migration tạo bảng `upload_chunks` sai thứ tự (ALTER chạy trước CREATE) khiến bảng thiếu cột `status/error_message/segments_json` — nay tạo bảng trước, khai báo cột inline, ALTER chỉ top-up cho DB cũ.
+
+### Changed
+- Nâng Soniox lên model v5 (`stt-async-v5` cho upload, `stt-rt-v5` cho ghi âm realtime) — chất lượng nhận diện và tách người nói tốt hơn, giá không đổi.
+
 ## [1.3.1] - 2026-06-09
 
 ### Fixed

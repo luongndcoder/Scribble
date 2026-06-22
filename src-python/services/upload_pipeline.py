@@ -76,7 +76,7 @@ DEFAULT_STT_CONCURRENCY = 3
 # setting `upload_max_duration_hours` if a user has legit >24h needs.
 DEFAULT_MAX_DURATION_HOURS = 24
 
-# Soniox stt-async-v4 has an ~5h cap per submission. We split at 3.5h to
+# Soniox stt-async-v5 has an ~5h cap per submission. We split at 3.5h to
 # leave a 30% safety buffer for network slowness, peak-load queueing, and
 # Soniox-side variance. Files ≤ 3.5h take the single-shot path (preserves
 # globally-consistent speaker diarization across the whole file).
@@ -647,7 +647,7 @@ async def _run_soniox_pipeline(
     duration_sec: float, tmp_root: Path,
 ) -> list[dict]:
     """Soniox STT pipeline. Auto-splits files > 3.5h into chunks because
-    Soniox stt-async-v4 caps at ~5h per submission.
+    Soniox stt-async-v5 caps at ~5h per submission.
 
     Returns transcript_parts ready for ``db.update_meeting(transcript=...)``.
       - File ≤ 3.5h: single-shot — Soniox does globally-consistent diarization
@@ -1561,7 +1561,7 @@ async def _process_chunks_parallel(
 
             # Dispatch to the configured provider. Nvidia uses streaming gRPC
             # (offline_recognize unavailable for vi/zh). Soniox uses the
-            # async file API (stt-async-v4) with auto-cleanup.
+            # async file API (stt-async-v5) with auto-cleanup.
             if stt_provider == "nvidia":
                 stt_task = asyncio.to_thread(
                     transcribe_nvidia_streaming, str(chunk.path), nvidia_key, riva_lang

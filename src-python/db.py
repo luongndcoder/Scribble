@@ -109,24 +109,15 @@ class Database:
         Existing rows get default values; realtime flow unaffected.
         """
         conn = self._conn()
-        migrations = [
-            "ALTER TABLE meetings ADD COLUMN source_type TEXT DEFAULT 'realtime'",
-            "ALTER TABLE meetings ADD COLUMN file_hash TEXT DEFAULT NULL",
-            "ALTER TABLE meetings ADD COLUMN source_filename TEXT DEFAULT NULL",
-            "CREATE INDEX IF NOT EXISTS idx_meetings_file_hash ON meetings(file_hash)",
-            # v1.2.13: per-chunk failure tracking + denormalized failed count
-            # for fast list queries (avoids COUNT(*) per meeting).
-            "ALTER TABLE meetings ADD COLUMN failed_chunks_count INTEGER DEFAULT 0",
-            "ALTER TABLE upload_chunks ADD COLUMN status TEXT DEFAULT NULL",
-            "ALTER TABLE upload_chunks ADD COLUMN error_message TEXT DEFAULT NULL",
-            "ALTER TABLE upload_chunks ADD COLUMN segments_json TEXT DEFAULT NULL",
-        ]
-        for sql in migrations:
-            try:
-                conn.execute(sql)
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e).lower():
-                    log.warning("Migration skipped (%s): %s", sql[:60], e)
+
+        # Create child tables FIRST — before the ALTER migrations below.
+        # ORDER MATTERS: the upload_chunks ALTERs target this table. On a fresh
+        # DB, an ALTER that ran before CREATE threw "no such table", which the
+        # loop swallowed (it only ignores "duplicate column"). That left
+        # upload_chunks without status/error_message/segments_json and broke
+        # every fresh install with "no such column: status" on upload. The
+        # three columns are also declared inline here so a fresh DB is complete
+        # even when the ALTERs are no-ops.
 
         # ── Per-chunk progress (upload pipeline resume) ──
         # text IS NULL until STT completes; embedding BLOB is the raw 512×f32
@@ -141,6 +132,9 @@ class Database:
                 text TEXT DEFAULT NULL,
                 embedding BLOB DEFAULT NULL,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT NULL,
+                error_message TEXT DEFAULT NULL,
+                segments_json TEXT DEFAULT NULL,
                 PRIMARY KEY (meeting_id, chunk_idx)
             )
             """
@@ -170,6 +164,29 @@ class Database:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_attachments_meeting ON meeting_attachments(meeting_id)"
         )
+
+        # Column top-ups for DBs created by older versions. The tables above
+        # already exist by now, so an upload_chunks ALTER either adds the
+        # missing column (old DB) or is ignored as "duplicate column".
+        migrations = [
+            "ALTER TABLE meetings ADD COLUMN source_type TEXT DEFAULT 'realtime'",
+            "ALTER TABLE meetings ADD COLUMN file_hash TEXT DEFAULT NULL",
+            "ALTER TABLE meetings ADD COLUMN source_filename TEXT DEFAULT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_meetings_file_hash ON meetings(file_hash)",
+            # v1.2.13: per-chunk failure tracking + denormalized failed count
+            # for fast list queries (avoids COUNT(*) per meeting).
+            "ALTER TABLE meetings ADD COLUMN failed_chunks_count INTEGER DEFAULT 0",
+            "ALTER TABLE upload_chunks ADD COLUMN status TEXT DEFAULT NULL",
+            "ALTER TABLE upload_chunks ADD COLUMN error_message TEXT DEFAULT NULL",
+            "ALTER TABLE upload_chunks ADD COLUMN segments_json TEXT DEFAULT NULL",
+        ]
+        for sql in migrations:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    log.warning("Migration skipped (%s): %s", sql[:60], e)
+
         conn.commit()
 
     # ─── Upload chunks (resume support) ───

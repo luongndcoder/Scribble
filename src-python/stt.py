@@ -510,7 +510,7 @@ def transcribe_soniox_file_id(
     )
     client = SonioxClient(api_key=api_key)
     config = CreateTranscriptionConfig(
-        model="stt-async-v4",
+        model="stt-async-v5",
         language_hints=hints,
         enable_speaker_diarization=True,
         enable_language_identification=False,
@@ -916,7 +916,7 @@ class SonioxStreamingSTT:
     - receive_events() runs on the calling thread (results generator)
     """
 
-    # Soniox stt-rt-v4 has a server-side session duration cap of 300 min (5h,
+    # Soniox stt-rt-v5 has a server-side session duration cap of 300 min (5h,
     # fixed — see docs/stt/rt/limits-and-quotas). When the cap fires OR the
     # connection idle-closes, the server closes the WS and our event iterator
     # exits silently. We auto-reconnect up to this many times.
@@ -962,7 +962,7 @@ class SonioxStreamingSTT:
         from soniox.types import RealtimeSTTConfig, TranslationConfig
 
         config = RealtimeSTTConfig(
-            model="stt-rt-v4",
+            model="stt-rt-v5",
             audio_format="pcm_s16le",
             sample_rate=16000,
             num_channels=1,
