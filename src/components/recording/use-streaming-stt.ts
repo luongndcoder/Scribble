@@ -2,9 +2,9 @@ import { useRef, useCallback } from "react";
 import { useAppStore } from "../../stores/appStore";
 import { SIDECAR_WS_BASES } from "../../lib/sidecar";
 import type { SttWsMessage } from "../../types/stt";
+import { applySttMessage, type SttStreamContext } from "./stt-message-reducer";
 import {
     WS_CONNECT_TIMEOUT_MS,
-    WS_PATH_NVIDIA,
     WS_PATH_SONIOX,
     WS_PATH_LOCAL,
     TARGET_SAMPLE_RATE,
@@ -19,34 +19,80 @@ export async function openStreamingWebSocket(
     preferredHttpBase: string | null,
     translateLang?: string,
 ): Promise<WebSocket | null> {
-    const wsPath = provider === "soniox" ? WS_PATH_SONIOX
-        : provider === "local" ? WS_PATH_LOCAL
-        : WS_PATH_NVIDIA;
+    // Only Soniox and Local remain; anything else (stale stored value) is
+    // treated as Local — the free, key-less offline default.
+    const wsPath = provider === "soniox" ? WS_PATH_SONIOX : WS_PATH_LOCAL;
     const translateQuery = translateLang ? `&translate_lang=${encodeURIComponent(translateLang)}` : "";
     const preferredWs = preferredHttpBase ? preferredHttpBase.replace(/^http/, "ws") : null;
-    const wsBases = preferredWs ? [preferredWs, ...SIDECAR_WS_BASES.filter((b) => b !== preferredWs)] : [...SIDECAR_WS_BASES];
+    const urlSep = wsPath.includes("?") ? "&" : "?";
 
-    for (const base of wsBases) {
-        const urlSep = wsPath.includes("?") ? "&" : "?";
-        const url = `${base}${wsPath}${urlSep}t=1${translateQuery}`;
-        try {
-            const ws = new WebSocket(url);
-            const opened = await new Promise<boolean>((resolve) => {
-                const timer = window.setTimeout(() => resolve(false), WS_CONNECT_TIMEOUT_MS);
-                ws.onopen = () => { window.clearTimeout(timer); resolve(true); };
-                ws.onerror = () => { window.clearTimeout(timer); resolve(false); };
-                ws.onclose = () => { window.clearTimeout(timer); resolve(false); };
-            });
-            if (opened) return ws;
-            try { ws.close(); } catch {}
-        } catch {}
+    const dialOne = (base: string): Promise<WebSocket | null> =>
+        new Promise<WebSocket | null>((resolve) => {
+            const url = `${base}${wsPath}${urlSep}t=1${translateQuery}`;
+            let settled = false;
+            let ws: WebSocket;
+            try {
+                ws = new WebSocket(url);
+            } catch {
+                resolve(null);
+                return;
+            }
+            const finish = (ok: boolean) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(timer);
+                if (ok) {
+                    resolve(ws);
+                } else {
+                    resolve(null);
+                    try { ws.close(); } catch { /* already dead */ }
+                }
+            };
+            const timer = window.setTimeout(() => finish(false), WS_CONNECT_TIMEOUT_MS);
+            ws.onopen = () => finish(true);
+            ws.onerror = () => finish(false);
+            ws.onclose = () => finish(false);
+        });
+
+    // If waitForSidecarReady() already verified a healthy HTTP base (typically
+    // 127.0.0.1:8765), dial ONLY that base first so we don't spawn a second
+    // concurrent Soniox/local STT session on `localhost:8765` and wait on
+    // Promise.all for the slower mDNS dial.
+    if (preferredWs) {
+        const direct = await dialOne(preferredWs);
+        if (direct) return direct;
     }
-    return null;
+
+    const fallbackBases = preferredWs
+        ? SIDECAR_WS_BASES.filter((b) => b !== preferredWs)
+        : [...SIDECAR_WS_BASES];
+    if (fallbackBases.length === 0) return null;
+    if (fallbackBases.length === 1) return dialOne(fallbackBases[0]);
+
+    // True first-success race across remaining candidates: resolve as soon as
+    // the first socket opens and immediately close any other in-flight sockets.
+    return new Promise<WebSocket | null>((resolve) => {
+        let winner: WebSocket | null = null;
+        let remaining = fallbackBases.length;
+        for (const base of fallbackBases) {
+            void dialOne(base).then((ws) => {
+                remaining -= 1;
+                if (ws && !winner) {
+                    winner = ws;
+                    resolve(ws);
+                } else if (ws) {
+                    try { ws.close(); } catch { /* already dead */ }
+                } else if (remaining === 0 && !winner) {
+                    resolve(null);
+                }
+            });
+        }
+    });
 }
 
 /**
  * Attach transcript message handlers to an open WebSocket.
- * Handles: speaker_correction, speaker_split, translation, interim/final text.
+ * Message semantics live in `applySttMessage` (shared with system audio).
  */
 export function attachSocketHandlers(
     ws: WebSocket,
@@ -63,94 +109,40 @@ export function attachSocketHandlers(
     },
 ) {
     const { wsRef, sttProvider, readyBase, fallbackToChunkMode, setIsTranscribing, onTerminalError } = opts;
+    // Backend start_ms/end_ms count from THIS socket's first sample, so pin
+    // them to the timer value at connect (resumed drafts, reconnects).
+    const ctx: SttStreamContext = {
+        speakerIdOffset: 0,
+        useStreamClock: true,
+        streamOffsetSec: useAppStore.getState().seconds,
+        setIsTranscribing,
+    };
 
     ws.onmessage = (event) => {
+        let data: SttWsMessage;
         try {
-            const data = JSON.parse(event.data);
-            if (data.error) {
-                // Surface the actual message (Soniox sends error: true + text: "..."),
-                // not the boolean flag, so the user sees what went wrong.
-                const fallbackErr = useAppStore.getState().lang === "vi" ? "Lỗi nhận dạng giọng nói" : "STT error";
-                const msg = (typeof data.error === "string" ? data.error : "") || data.text || fallbackErr;
-                console.error("[stt-ws]", msg);
-                setIsTranscribing(false);
-                useAppStore.getState().setInterimText("");
-                // Terminal errors (402 budget, auth fail) — the stream is dead.
-                // Null wsRef BEFORE close so the onclose handler skips reconnect.
-                if (data.terminal || onTerminalError) {
-                    wsRef.current = null;
-                    try { ws.close(); } catch { /* may already be closed */ }
-                    onTerminalError?.(msg);
-                } else {
-                    // Backwards-compat: legacy non-terminal error keeps old UX.
-                    useAppStore.getState().setInterimText(`⚠ ${msg}`);
-                }
-                return;
-            }
-            // Backend reconnect heartbeat (Soniox auto-reconnect after server
-            // closed the WS due to its ~1h session-duration cap). Show as
-            // interim status; do NOT add to transcriptParts. We OWN the display
-            // string (localized) instead of echoing the backend's English text,
-            // so the message always matches the UI language.
-            if (data.info || data.type === "info") {
-                const reconnecting = useAppStore.getState().lang === "vi"
-                    ? "Đang kết nối lại..."
-                    : "Reconnecting...";
-                useAppStore.getState().setInterimText(`🔄 ${reconnecting}`);
-                return;
-            }
-            if (data.type === "speaker_correction" && data.chunk_id) {
-                const correctedId = data.speaker_id ?? 0;
-                const correctedSpeaker = data.speaker || `Speaker ${correctedId + 1}`;
-                useAppStore.getState().updateTranscriptSpeakerByChunk(data.chunk_id, correctedId, correctedSpeaker);
-                return;
-            }
-            if (data.type === "speaker_split") {
-                const preState = useAppStore.getState();
-                if (preState.interimTranslation && preState.transcriptParts.length > 0) {
-                    const lastIdx = preState.transcriptParts.length - 1;
-                    useAppStore.getState().updateTranscriptTranslation(lastIdx, preState.interimTranslation);
-                    useAppStore.getState().setInterimTranslation("");
-                }
-                const newSpeakerId = data.speaker_id ?? 0;
-                const newSpeaker = data.speaker || `Speaker ${newSpeakerId + 1}`;
-                useAppStore.getState().setInterimText("");
-                useAppStore.getState().setInterimSpeaker(newSpeaker, newSpeakerId);
-                return;
-            }
-            // Translation event
-            if (data.type === "translation" && data.translation) {
-                handleTranslationEvent(data);
-                return;
-            }
-
-            const text = (data.text || "").trim();
-            if (!text) return;
-
-            const state = useAppStore.getState();
-            if (!state.recording || state.paused) {
-                useAppStore.getState().setInterimText("");
-                setIsTranscribing(false);
-                return;
-            }
-            const ts = new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
-
-            if (data.is_final) {
-                handleFinalTranscript(data, text, ts, state);
-                setIsTranscribing(false);
-            } else {
-                useAppStore.getState().setInterimText(text);
-                useAppStore.getState().setInterimSpeaker(data.speaker || "Speaker 1", data.speaker_id ?? 0);
-                setIsTranscribing(true);
-            }
+            data = JSON.parse(event.data);
         } catch (e) {
             console.warn("[stt-ws] message parse error:", e);
+            return;
+        }
+        const outcome = applySttMessage(data, ctx);
+        if (outcome.kind !== "error") return;
+        console.error("[stt-ws]", outcome.message);
+        // Terminal errors (402 budget, auth fail, model load failure) — the
+        // stream is dead. Null wsRef BEFORE close so onclose skips reconnect.
+        if (outcome.terminal || onTerminalError) {
+            wsRef.current = null;
+            try { ws.close(); } catch { /* may already be closed */ }
+            onTerminalError?.(outcome.message);
+        } else {
+            useAppStore.getState().setInterimText(`⚠ ${outcome.message}`);
         }
     };
 
     ws.onerror = (e) => console.warn("[stt-ws] WebSocket error:", e);
     ws.onclose = () => {
-        // Guard: skip reconnect if WS was already replaced (stopRecording nullifies wsRef)
+        // Guard: skip reconnect if WS was already replaced (stop nullifies wsRef)
         if (wsRef.current !== ws) return;
         const state = useAppStore.getState();
         // Don't reconnect if paused or not recording (user stopped)
@@ -181,107 +173,9 @@ export function attachSocketHandlers(
     };
 }
 
-/** Handle a translation WS event (chunk-targeted or interim). */
-function handleTranslationEvent(data: SttWsMessage) {
-    const translation = data.translation || "";
-    if (data.chunk_id) {
-        const currentParts = useAppStore.getState().transcriptParts;
-        const cid = data.chunk_id;
-        const targetIdx = currentParts.findIndex(
-            (p) => p.chunkId === cid || (p.chunkIds && p.chunkIds.includes(cid)),
-        );
-        if (targetIdx >= 0) {
-            if (data.append) {
-                const existingTrans = currentParts[targetIdx].translation || "";
-                const combined = existingTrans ? `${existingTrans} ${translation}` : translation;
-                useAppStore.getState().updateTranscriptTranslation(targetIdx, combined);
-            } else {
-                // Replace mode: accumulated translation from Nvidia NMT
-                useAppStore.getState().updateTranscriptTranslation(targetIdx, translation);
-            }
-            // Clear interim if this is the live (last) part
-            if (targetIdx === currentParts.length - 1) {
-                useAppStore.getState().setInterimTranslation("");
-            }
-            return;
-        }
-    }
-    // No chunk_id: accumulated block translation (Nvidia NMT).
-    // Backend sends growing accumulated result — always accept and persist.
-    const parts = useAppStore.getState().transcriptParts;
-    if (parts.length > 0) {
-        const lastIdx = parts.length - 1;
-        useAppStore.getState().updateTranscriptTranslation(lastIdx, translation);
-        useAppStore.getState().setInterimTranslation("");
-    } else {
-        useAppStore.getState().setInterimTranslation(translation);
-    }
-}
-
-/** Handle a final transcript result — determine same-chunk, same-speaker, or new speaker. */
-function handleFinalTranscript(data: SttWsMessage, text: string, ts: string, state: ReturnType<typeof useAppStore.getState>) {
-    const speakerId = data.speaker_id ?? 0;
-    const speaker = data.speaker || "Speaker 1";
-    const chunkId = data.chunk_id || "";
-
-    useAppStore.getState().setInterimText("");
-    useAppStore.getState().setInterimSpeaker(speaker, speakerId);
-
-    // Prefer the backend's token-level offsets (Soniox sends start_ms / end_ms
-    // per segment, which is the truth). Fall back to the recording timer for
-    // STT sources that don't provide ms offsets, with a 3-second look-back on
-    // segment start to roughly match the spoken phrase boundary.
-    const startSec = data.start_ms != null
-        ? Math.floor(data.start_ms / 1000)
-        : Math.max(0, state.seconds - 3);
-    const endSec = data.end_ms != null
-        ? Math.floor(data.end_ms / 1000)
-        : state.seconds;
-
-    const lastPart = state.transcriptParts[state.transcriptParts.length - 1];
-    const lastChunkIds = new Set<string>();
-    if (lastPart?.chunkId) lastChunkIds.add(lastPart.chunkId);
-    if (Array.isArray(lastPart?.chunkIds)) {
-        lastPart.chunkIds.forEach((id) => { if (id) lastChunkIds.add(id); });
-    }
-    const sameChunk = Boolean(chunkId) && lastChunkIds.has(chunkId);
-    const sameSpeaker = Boolean(lastPart) && Number(lastPart.speakerId) === Number(speakerId);
-
-    if (sameChunk) {
-        useAppStore.getState().replaceLastPartText(text, String(endSec), chunkId || undefined);
-    } else if (sameSpeaker) {
-        // Don't clear interimTranslation here — accumulated translation will update via handleTranslationEvent
-        useAppStore.getState().appendToLastPart(text, String(endSec), chunkId || undefined);
-    } else {
-        // New speaker — commit pending translation
-        const prevTranslation = useAppStore.getState().interimTranslation;
-        if (prevTranslation && state.transcriptParts.length > 0) {
-            useAppStore.getState().updateTranscriptTranslation(state.transcriptParts.length - 1, prevTranslation);
-            useAppStore.getState().setInterimTranslation("");
-        }
-        useAppStore.getState().addTranscriptPart({
-            text,
-            speaker,
-            speakerId,
-            chunkId: chunkId || undefined,
-            chunkIds: chunkId ? [chunkId] : undefined,
-            startTime: String(startSec),
-            endTime: String(endSec),
-            timestamp: ts,
-            translation: "",
-        });
-    }
-
-    // Inline translation on final event
-    if (data.translation) {
-        const updatedParts = useAppStore.getState().transcriptParts;
-        if (updatedParts.length > 0) {
-            const li = updatedParts.length - 1;
-            useAppStore.getState().updateTranscriptTranslation(li, data.translation);
-            useAppStore.getState().setInterimTranslation("");
-        }
-    }
-}
+/** Control frame the Rust STT routes understand (`{"type":"stop"}`). The old
+ *  plain-text "STOP" was ignored, so the server never got to flush. */
+const STOP_FRAME = JSON.stringify({ type: "stop" });
 
 /**
  * Hook providing WebSocket ref and PCM streaming node setup.
@@ -334,10 +228,31 @@ export function useStreamingStt() {
         const ws = wsRef.current;
         if (ws) {
             wsRef.current = null;
-            try { ws.send("STOP"); } catch {} // may already be closed
+            try { ws.send(STOP_FRAME); } catch {} // may already be closed
             try { ws.close(); } catch {} // may already be closed
         }
     }, []);
 
-    return { wsRef, scriptNodeRef, connectPcmStream, disconnectPcmStream, closeWebSocket };
+    /**
+     * Graceful stop: ask the server to finalize, keep receiving until it
+     * closes the socket (every trailing final delivered) or `timeoutMs`
+     * passes. Message handlers stay attached, so late finals still land in
+     * the transcript. Closing immediately used to drop the last utterance.
+     */
+    const drainWebSocket = useCallback(async (timeoutMs: number) => {
+        const ws = wsRef.current;
+        if (!ws) return;
+        // Detach first: stops PCM sends and makes onclose skip its reconnect.
+        wsRef.current = null;
+        if (ws.readyState === WebSocket.OPEN) {
+            await new Promise<void>((resolve) => {
+                const timer = window.setTimeout(resolve, timeoutMs);
+                ws.addEventListener("close", () => { window.clearTimeout(timer); resolve(); }, { once: true });
+                try { ws.send(STOP_FRAME); } catch { window.clearTimeout(timer); resolve(); }
+            });
+        }
+        try { ws.close(); } catch {} // may already be closed
+    }, []);
+
+    return { wsRef, scriptNodeRef, connectPcmStream, disconnectPcmStream, closeWebSocket, drainWebSocket };
 }

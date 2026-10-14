@@ -18,8 +18,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.spatial.distance import pdist
 
 if TYPE_CHECKING:
     from diarize import SpeakerDiarizer
@@ -29,10 +27,18 @@ log = logging.getLogger(__name__)
 import os
 
 # Cosine-distance threshold below which embeddings count as the same speaker.
-# Validated on CAM++ zh-cn 200k: at 0.40 a 60-min Vietnamese meeting clusters
-# into 4 distinct speakers (window sizes 499/461/326/215). Must run on FINE
-# (~2s) windows — 20s STT chunks blend speakers so every chunk looks alike.
-DEFAULT_DISTANCE_THRESHOLD = float(os.getenv("DIARIZE_DISTANCE_THRESHOLD", "0.4"))
+#
+# NOTE: this Python path is no longer the shipped implementation — the Rust
+# diarizer is. These values are kept in sync with src-tauri/src/diarize.rs so
+# the two do not silently disagree for anyone still running the Python path.
+# Current Rust model: 3D-Speaker ERes2Net-base (Apache-2.0), thresholds
+# re-derived 2026-10-09 (distance 0.55, match 0.42, strong 0.65, self-sim 0.35).
+#
+# Earlier calibration (hynt ResNet34, distance 0.45) is superseded.
+# Override via DIARIZE_DISTANCE_THRESHOLD.
+# Must run on FINE (~2s) windows — 20s STT chunks blend speakers so every
+# chunk looks alike.
+DEFAULT_DISTANCE_THRESHOLD = float(os.getenv("DIARIZE_DISTANCE_THRESHOLD", "0.55"))
 DEFAULT_MAX_SPEAKERS = 8
 
 # Fine-grained diarization windowing (independent of the 20s STT chunks).
@@ -67,7 +73,7 @@ def _ensure_session(diarizer: "SpeakerDiarizer") -> bool:
 
 
 def _embed_samples(diarizer: "SpeakerDiarizer", samples: np.ndarray) -> np.ndarray | None:
-    """fbank → CAM++ → L2-normalized embedding. Assumes session is loaded."""
+    """fbank → embedding model → L2-normalized embedding. Assumes session is loaded."""
     if len(samples) == 0:
         return None
     try:
@@ -90,7 +96,7 @@ def _embed_samples(diarizer: "SpeakerDiarizer", samples: np.ndarray) -> np.ndarr
 def extract_embedding(
     diarizer: "SpeakerDiarizer", wav_path: Path
 ) -> np.ndarray | None:
-    """Run CAM++ inference on a chunk WAV → L2-normalized embedding (or None).
+    """Run embedding inference on a chunk WAV → L2-normalized embedding (or None).
 
     Kept for the per-chunk path; fine-grained diarization uses _embed_samples
     directly. Bypasses identify_speaker_from_samples() so the singleton's
@@ -105,6 +111,115 @@ def extract_embedding(
         log.warning("[batch-diarize] extract skip %s: 0 samples (wav header issue?)", name)
         return None
     return _embed_samples(diarizer, samples)
+
+
+def _cosine_distance_matrix(matrix: np.ndarray) -> np.ndarray:
+    """Pairwise cosine distance, scipy.spatial.distance.pdist(metric='cosine').
+
+    scipy defines cosine distance as 1 - u·v/(|u||v|). Embeddings here are
+    already L2-normalised, but we normalise defensively so the helper is safe
+    for un-normalised input too (matching scipy's behaviour).
+    """
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    unit = matrix / norms
+    sim = unit @ unit.T
+    d = 1.0 - sim
+    # Clip tiny negatives from float error; scipy does not clamp, so keep the
+    # values as-is apart from the diagonal/mirror handling.
+    d = np.clip(d, 0.0, 2.0)
+    np.fill_diagonal(d, 0.0)
+    return d
+
+
+def _average_linkage(dist: np.ndarray) -> np.ndarray:
+    """Agglomerative average-linkage merge sequence (scipy linkage, method='average').
+
+    Returns an (n-1, 4) matrix [cluster_a, cluster_b, distance, size] using the
+    same label convention scipy uses: original observations are 0..n-1 and each
+    merge i creates cluster n+i. Nearest-neighbour chain would change tie
+    ordering, so we use the straightforward "pick global minimum each step"
+    (O(n^3) worst case, but n is the number of 2s windows — hundreds, not
+    millions — and this runs once per upload).
+    """
+    n = dist.shape[0]
+    # Working copy: distances between active clusters (float64 for stability).
+    d = dist.astype(np.float64).copy()
+    sizes = np.ones(n, dtype=np.int64)
+    active = np.ones(n, dtype=bool)
+    merges = np.zeros((max(n - 1, 0), 4), dtype=np.float64)
+
+    for step in range(n - 1):
+        # Mask inactive rows/cols AND the diagonal: scipy only merges distinct
+        # clusters, and a zeroed diagonal would otherwise always win argmin.
+        masked = np.where(active[:, None] & active[None, :], d, np.inf)
+        np.fill_diagonal(masked, np.inf)
+        flat = int(np.argmin(masked))
+        i, j = divmod(flat, n)
+        if i > j:
+            i, j = j, i
+        merge_dist = float(masked[i, j])
+        merges[step] = (float(i), float(j), merge_dist, float(sizes[i] + sizes[j]))
+
+        # Lance-Williams update for average linkage (UPGMA):
+        #   d(new, k) = (n_i*d(i,k) + n_j*d(j,k)) / (n_i + n_j)
+        ni, nj = sizes[i], sizes[j]
+        total = ni + nj
+        new_d = (ni * d[i] + nj * d[j]) / total
+        d[i] = new_d
+        d[:, i] = new_d
+        d[i, i] = 0.0
+        sizes[i] = total
+        active[j] = False
+        # Park inactive j behind +inf for both directions.
+        d[j, :] = np.inf
+        d[:, j] = np.inf
+
+    return merges
+
+
+def _fcluster_distance(merges: np.ndarray, n: int, threshold: float) -> np.ndarray:
+    """Flat clusters from a linkage matrix (scipy fcluster, criterion='distance').
+
+    scipy's rule: cut at `threshold` — observations joined by a merge whose
+    distance is <= threshold belong to the same flat cluster. Labels are
+    returned 1..k in the order clusters are discovered by scipy (we only need
+    a partition, and callers renumber by first appearance anyway).
+    """
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    if n == 1:
+        return np.ones(1, dtype=np.int64)
+
+    # Union-Find over observations, applying every merge under the threshold.
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        while parent[x] != root:
+            parent[x], x = root, parent[x]
+        return root
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+
+    for a, b, dist, _size in merges:
+        if dist <= threshold:
+            union(int(a), int(b))
+
+    # Renumber roots to contiguous 1..k (matching fcluster's return type).
+    root_to_label: dict[int, int] = {}
+    labels = np.zeros(n, dtype=np.int64)
+    for i in range(n):
+        r = find(i)
+        if r not in root_to_label:
+            root_to_label[r] = len(root_to_label) + 1
+        labels[i] = root_to_label[r]
+    return labels
 
 
 def cluster_speakers(
@@ -133,11 +248,12 @@ def cluster_speakers(
     matrix = np.stack([e[1] for e in embeddings])
 
     # Agglomerative clustering on cosine distance, average linkage.
-    condensed = pdist(matrix, metric="cosine")
-    if len(condensed) == 0:
-        return {chunk_indices[0]: 0}
-    z = linkage(condensed, method="average")
-    raw_labels = fcluster(z, t=distance_threshold, criterion="distance")
+    # NOTE: implemented in numpy (no scipy) — identical results to
+    # scipy.cluster.hierarchy.linkage(method="average") + fcluster(
+    # criterion="distance"); pinned by tests/test_diarizer_clustering.py.
+    dist = _cosine_distance_matrix(matrix)
+    merges = _average_linkage(dist)
+    raw_labels = _fcluster_distance(merges, len(chunk_indices), distance_threshold)
 
     # Map raw cluster IDs to 0-indexed speaker IDs in temporal order.
     seen: dict[int, int] = {}
@@ -172,7 +288,7 @@ def diarize_fine_windows(
     """Fine-grained diarization timeline for a whole normalized WAV.
 
     Slices the audio into non-overlapping ~`window_ms` windows (default 2s),
-    embeds each speech window with CAM++, clusters them, and returns a timeline
+    embeds each speech window, clusters them, and returns a timeline
     of (start_ms, end_ms, speaker_id). Fine windows are single-speaker far more
     often than the 20s STT chunks (which blend speakers and collapse to one
     cluster), so this is what actually separates speakers.

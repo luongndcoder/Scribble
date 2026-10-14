@@ -164,37 +164,138 @@ def test_tier_a_falls_back_to_sherpa_when_mlx_missing(monkeypatch, tmp_path):
         local_stt.transcribe_local_file(str(tmp_path / "a.wav"), "vi")
 
 
-# ── LocalStreamingSTT VAD segmentation (no MLX needed) ───────────────────────
+# ── LocalStreamingSTT streaming feed (no model needed) ───────────────────────
+# The class no longer does its own VAD segmentation: it streams PCM straight
+# into the sherpa OnlineRecognizer, which owns endpointing. These tests pin the
+# FEED contract (frame quantization + stop flush), not decode behaviour.
 
 import numpy as _np
 
 
-def test_streaming_vad_cuts_segment_after_speech_then_silence():
+def test_streaming_feed_queues_whole_frame_batch():
     from local_stt import LocalStreamingSTT
 
     s = LocalStreamingSTT("vi")
-    speech = (_np.full(16000, 5000, dtype=_np.int16)).tobytes()     # 1s loud
-    silence = (_np.zeros(int(16000 * 0.8), dtype=_np.int16)).tobytes()  # 0.8s quiet
-    s.feed_audio(speech)
-    s.feed_audio(silence)
-    assert not s._in.empty()  # one speech segment enqueued
+    # 100ms at 20ms frames → one queued job carrying all 5 whole frames.
+    s.feed_audio((_np.full(1600, 5000, dtype=_np.int16)).tobytes())
+    assert s._in.qsize() == 1
+    pcm_bytes, is_flush = s._in.get_nowait()
+    assert is_flush is False
+    assert len(pcm_bytes) == 1600 * 2  # 5 frames * 320 samples * 2 bytes
 
 
-def test_streaming_no_segment_on_pure_silence():
+def test_streaming_feed_keeps_partial_frame_as_tail():
     from local_stt import LocalStreamingSTT
 
     s = LocalStreamingSTT("vi")
-    s.feed_audio(_np.zeros(16000 * 3, dtype=_np.int16).tobytes())  # 3s silence
-    assert s._in.empty()  # nothing to transcribe
+    # Half a frame (10ms) is held back until the rest arrives.
+    s.feed_audio((_np.full(160, 5000, dtype=_np.int16)).tobytes())
+    assert s._in.empty()
+    assert len(s._tail) == 320  # 160 samples * 2 bytes
+    s.feed_audio((_np.full(160, 5000, dtype=_np.int16)).tobytes())
+    assert s._in.qsize() == 1  # completed frame flushed
 
 
-def test_streaming_stop_flushes_trailing_speech():
+def test_streaming_stop_flushes_tail_and_sentinel():
     from local_stt import LocalStreamingSTT
 
     s = LocalStreamingSTT("vi")
-    s.feed_audio((_np.full(16000, 6000, dtype=_np.int16)).tobytes())  # 1s speech, no trailing silence
-    assert s._in.empty()  # not yet flushed (no silence hang)
+    s.feed_audio((_np.full(16000, 6000, dtype=_np.int16)).tobytes())  # 1s speech
     s.stop()
-    # stop() flushes remaining speech, then enqueues the sentinel
-    item = s._in.get_nowait()
-    assert item is not None and len(item) > 0
+    # Last queued item is the None sentinel; at least one audio job precedes it.
+    items = []
+    while not s._in.empty():
+        items.append(s._in.get_nowait())
+    assert items[-1] is None
+    assert any(it is not None for it in items)
+
+
+def test_streaming_feed_after_stop_only_queues_sentinel():
+    from local_stt import LocalStreamingSTT
+
+    s = LocalStreamingSTT("vi")
+    s.stop()
+    s.feed_audio((_np.full(1600, 5000, dtype=_np.int16)).tobytes())
+    # stop() put the sentinel; the post-stop feed must add nothing on top.
+    assert s._in.qsize() == 1
+    assert s._in.get_nowait() is None
+
+
+# ── Short-utterance regression (streaming emits each reply as its own segment) ─
+def test_streaming_keeps_short_vietnamese_replies():
+    """Regression 2026-10-09: filter_hallucinations dropped every text <=3
+    chars, so streaming segments like 'OK' / 'Vâng' / 'Dạ' vanished from the
+    transcript. The streaming path must keep them; the cloud path keeps the
+    noise guard via filter_hallucinations_min_chars."""
+    from stt import filter_hallucinations, filter_hallucinations_min_chars
+
+    for reply in ("OK", "Vâng", "Dạ", "Ừ", "Đúng"):
+        assert filter_hallucinations(reply) == reply
+    # Cloud path still suppresses 1-3 char noise blips.
+    assert filter_hallucinations_min_chars("OK") == ""
+    # Real hallucination patterns are dropped on BOTH paths.
+    for path in (filter_hallucinations, filter_hallucinations_min_chars):
+        assert path("hãy subscribe cho kênh") == ""
+
+
+def test_mixed_case_segment_is_normalised():
+    """Regression 2026-10-09: the >70%-uppercase rule missed mixed segments
+    from the streaming model ("POPPY vào trong"), leaving shouted tokens in
+    the transcript. Any 2+ uppercase run means the model emitted this segment.
+    """
+    from local_stt import _maybe_lowercase_allcaps
+
+    assert _maybe_lowercase_allcaps("POPPY vào trong") == "poppy vào trong"
+    assert _maybe_lowercase_allcaps("NHƯNG TUY NHIÊN Ở OCB") == "nhưng tuy nhiên ở ocb"
+    # Already-proper text (cloud providers) is left alone.
+    assert _maybe_lowercase_allcaps("Poppy vào trong") == "Poppy vào trong"
+    assert _maybe_lowercase_allcaps("Chạy lí từ các đối tác") == "Chạy lí từ các đối tác"
+
+
+# ── Repeat-stall guard (streaming transducer can loop on long audio) ─────────
+def test_collapse_repeats_kills_phrase_stall():
+    """Reported bug 2026-10-09: a long unbroken segment made the streaming
+    model emit the same phrase over and over, flooding the transcript."""
+    from local_stt import _collapse_repeats
+
+    spam = " ".join(["Poppy vào trong cái capid đó"] * 8)
+    assert _collapse_repeats(spam) == "Poppy vào trong cái capid đó"
+    assert _collapse_repeats("đúng rồi " * 5) == "đúng rồi"
+
+
+def test_collapse_repeats_caps_token_stall_at_two():
+    from local_stt import _collapse_repeats
+
+    assert _collapse_repeats("nó nó nó nó nó nó") == "nó nó"
+    assert _collapse_repeats("là là là là") == "là là"
+
+
+def test_collapse_repeats_preserves_vietnamese_reduplication():
+    """Two identical words in a row is normal Vietnamese (từ láy) — kept."""
+    from local_stt import _collapse_repeats
+
+    for natural in ("rất rất thích", "từ từ đã", "nó nó"):
+        assert _collapse_repeats(natural) == natural
+
+
+def test_collapse_repeats_leaves_ordinary_speech_untouched():
+    from local_stt import _collapse_repeats
+
+    sentence = "Poppy vào trong cái capid đó đúng không thì cái đấy nó là một cái tình huống"
+    assert _collapse_repeats(sentence) == sentence
+
+
+def test_interim_preview_is_normalised_like_final():
+    """Regression 2026-10-09: the interim preview showed RAW recognizer output
+    (unpunctuated ALL-CAPS) while committed finals were normalised — the live
+    row looked broken next to finished rows."""
+    from local_stt import _postprocess_local
+
+    raw = "À MẤY CÁI ÔNG GIÁO SƯ ĐẠI HỌC ÔNG LÀM CÁI GÌ"
+    shown = _postprocess_local(raw, "vi")
+
+    assert shown != raw, "interim text must go through post-processing"
+    letters = [c for c in shown if c.isalpha()]
+    upper_ratio = sum(c.isupper() for c in letters) / len(letters)
+    assert upper_ratio < 0.3, f"interim still shouting: {shown!r}"
+    assert shown.startswith("À"), "sentence case restored"

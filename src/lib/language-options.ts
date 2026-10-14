@@ -5,7 +5,7 @@
  *   - Label = English language name (Vietnamese, Japanese, Chinese …)
  *   - Value = ISO 639-1 two-letter code (vi, en, ja …)
  *
- * Use NVIDIA_STT_LANGUAGES for STT pickers (Recording, Upload, Settings).
+ * Use STT_LANGUAGES for STT pickers (Recording, Upload, Settings).
  * SonioxLanguages covers a wider set when Soniox is the chosen provider.
  *
  * Importing the same constant in every component keeps the visible labels +
@@ -19,10 +19,11 @@ export interface LanguageOption {
     label: string;
 }
 
-/** STT languages supported by Nvidia Riva — mirrors SettingsPanel.nvidiaLanguages.
- *  Not declared `readonly` so it can be passed straight to CustomSelect's
- *  `options: Option[]` prop without a cast. Treat as immutable in practice. */
-export const NVIDIA_STT_LANGUAGES: LanguageOption[] = [
+/** Default STT language set offered by the offline (Local) engine and used by
+ *  the Upload picker. Kept as a plain array (not `readonly`) so it can be
+ *  passed straight to CustomSelect's `options: Option[]` prop without a cast.
+ *  Treat as immutable in practice. */
+export const STT_LANGUAGES: LanguageOption[] = [
     { value: 'vi', label: 'Vietnamese' },
     { value: 'en', label: 'English' },
     { value: 'zh', label: 'Chinese' },

@@ -98,7 +98,7 @@ export function SummaryView({ meetingId, transcript }: { meetingId: number; tran
                 <button
                     onClick={generateSummary}
                     disabled={loading || !transcript}
-                    className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-hover text-white text-sm transition-colors cursor-pointer disabled:opacity-50"
+                    className="px-4 py-2 rounded-lg btn-primary text-sm transition-colors cursor-pointer disabled:opacity-50"
                 >
                     {loading ? '⏳ Generating...' : '✨ Generate'}
                 </button>

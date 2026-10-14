@@ -4,13 +4,24 @@ import platform
 from PyInstaller.utils.hooks import collect_all
 
 datas = [
-    # Diarizer embedding model — CAM++ zh-cn-common 200k (192-dim, Apache-2.0).
-    ('models/speech_campplus_sv_zh-cn_16k-common.onnx', 'models'),
-    # Local/offline STT (Tier C) — bundled Vietnamese sherpa-onnx model.
-    # model_registry._bundled_base() reads <_MEIPASS>/models/local/<model_id>.
+    # Diarizer embedding model — hynt ResNet34 (256-d, 27MB, default engine).
+    # NOTE: the HF repo lists no explicit license; owner confirmed the app is
+    # free/non-commercial, so bundling is accepted (revisit if that changes).
+    ('models/speaker_embedding_resnet34.onnx', 'models'),
+    # Local/offline STT (Tier C) — bundled Vietnamese sherpa-onnx OFFLINE model
+    # (used by the upload pipeline / file transcription).
+    # model_registry._local_models_base() reads <_MEIPASS>/models/local/<model_id>.
     (
         'models/local/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09',
         'models/local/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09',
+    ),
+    # Local/offline STT — bundled Vietnamese STREAMING model (hynt
+    # Zipformer-30M RNNT chunk-32, fp16 ~50MB). Powers realtime offline
+    # recording via /ws/local-stream. License cc-by-nc-nd-4.0 (non-commercial;
+    # owner accepted, app is free). See local_stt.StreamingZipformerEngine.
+    (
+        'models/local/sherpa-onnx-zipformer-vi-streaming-30M',
+        'models/local/sherpa-onnx-zipformer-vi-streaming-30M',
     ),
 ]
 binaries = []
@@ -127,6 +138,20 @@ excludes = [
 
     # gRPC tools (build-time only)
     'grpcio_tools', 'grpc_tools',
+
+    # scipy: fully removed from the sidecar 2026-10-09. The only three call
+    # sites (cosine pdist, average-linkage clustering, FFT resample) are now
+    # numpy implementations — see tests/test_diarizer_clustering.py for the
+    # parity proofs. Excluding the whole package is safe because nothing in
+    # src-python imports it anymore (guarded by tests/test_bundle_excludes.py).
+    'scipy',
+
+    # uvicorn[standard] speedups — uvicorn falls back to asyncio/h11 cleanly
+    # (verified). Localhost traffic doesn't need uvloop/httptools.
+    'uvloop', 'httptools', 'watchfiles',
+
+    # numpy test suite (never imported at runtime)
+    'numpy.tests',
 
     # Other unnecessary
     'tkinter', '_tkinter', 'turtle',

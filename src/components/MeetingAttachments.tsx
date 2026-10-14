@@ -23,6 +23,7 @@ import {
 } from '../lib/attachments';
 import { useAppStore } from '../stores/appStore';
 import { useToast } from './Toast';
+import { IconChevronDown, IconInfo, IconPage, IconPaperclip, IconTrash, IconWarning } from './icons/scribble-icons';
 
 interface Props {
     meetingId: number;
@@ -172,7 +173,10 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
     const isOpen = !hasItems || expanded;
 
     return (
-        <div className={`meeting-attachments ${isOpen ? 'meeting-attachments--open' : 'meeting-attachments--collapsed'}`}>
+        <div
+            className={`meeting-attachments t-acc ${isOpen ? 'meeting-attachments--open' : 'meeting-attachments--collapsed'}`}
+            data-open={isOpen ? 'true' : 'false'}
+        >
             {/* Compact one-line header — always visible. Clicking it toggles. */}
             <button
                 type="button"
@@ -182,9 +186,7 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
                 aria-expanded={isOpen}
             >
                 <span className="meeting-attachments-bar-icon" aria-hidden>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                    </svg>
+                    <IconPaperclip size={14} />
                 </span>
                 <span className="meeting-attachments-bar-title">{tr.title}</span>
                 {hasItems && (
@@ -196,27 +198,15 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
                 )}
                 <span className="meeting-attachments-bar-spacer" />
                 {hasItems && (
-                    <span className="meeting-attachments-bar-chevron" aria-hidden>
-                        <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 180ms ease' }}
-                        >
-                            <polyline points="6 9 12 15 18 9" />
-                        </svg>
+                    <span className="meeting-attachments-bar-chevron t-acc-chevron" aria-hidden>
+                        <IconChevronDown size={14} strokeWidth={2.25} />
                     </span>
                 )}
             </button>
 
-            {isOpen && (
-                <>
-                    {/* Subtitle + add button row — only when panel is open */}
+            <div className="t-acc-panel">
+                <div className="t-acc-panel-inner" style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: isOpen ? 8 : 0 }}>
+                    {/* Subtitle + add button row */}
                     <div className="meeting-attachments-actions-row">
                         <p className="meeting-attachments-subtitle">{tr.subtitle}</p>
                         <input
@@ -246,64 +236,49 @@ export function MeetingAttachments({ meetingId, onChange }: Props) {
 
                     {overWarnThreshold && (
                         <div className="meeting-attachments-warning" role="alert">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                                <path d="M12 9v4" />
-                                <path d="M12 17h.01" />
-                            </svg>
+                            <IconWarning size={14} />
                             <span>{tr.warnLarge}</span>
                         </div>
                     )}
 
                     {hasItems && (
                         <div className="meeting-attachments-hint">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                <circle cx="12" cy="12" r="10" />
-                                <path d="M12 16v-4" />
-                                <path d="M12 8h.01" />
-                            </svg>
+                            <IconInfo size={12} />
                             <span>{tr.regenerateHint}</span>
                         </div>
                     )}
-                </>
-            )}
 
-            {hasItems && isOpen && (
-                <ul className="meeting-attachments-list">
-                    {items.map((att) => (
-                        <li key={att.id} className="meeting-attachments-item">
-                            <span className="meeting-attachments-icon" aria-hidden>
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                    <polyline points="14 2 14 8 20 8" />
-                                </svg>
-                            </span>
-                            <div className="meeting-attachments-item-body">
-                                <div className="meeting-attachments-item-name" title={att.filename}>
-                                    {att.filename}
-                                </div>
-                                <div className="meeting-attachments-item-meta">
-                                    {formatAttachmentSize(att.size_bytes)} ·{' '}
-                                    {att.mime_type.replace('text/', '')}
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                className="meeting-attachments-delete"
-                                onClick={() => void handleDelete(att)}
-                                disabled={deletingId === att.id}
-                                aria-label={`Delete ${att.filename}`}
-                            >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M3 6h18" />
-                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                </svg>
-                            </button>
-                        </li>
-                    ))}
-                </ul>
-            )}
+                    {hasItems && (
+                        <ul className="meeting-attachments-list">
+                            {items.map((att) => (
+                                <li key={att.id} className="meeting-attachments-item">
+                                    <span className="meeting-attachments-icon" aria-hidden>
+                                        <IconPage size={18} />
+                                    </span>
+                                    <div className="meeting-attachments-item-body">
+                                        <div className="meeting-attachments-item-name" title={att.filename}>
+                                            {att.filename}
+                                        </div>
+                                        <div className="meeting-attachments-item-meta">
+                                            {formatAttachmentSize(att.size_bytes)} ·{' '}
+                                            {att.mime_type.replace('text/', '')}
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="meeting-attachments-delete"
+                                        onClick={() => void handleDelete(att)}
+                                        disabled={deletingId === att.id}
+                                        aria-label={`Delete ${att.filename}`}
+                                    >
+                                        <IconTrash size={16} />
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }

@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { getSettings, detectOfflineAfterFailure, looksLikeNetworkError } from '../lib/api';
-import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
+import { STT_LANGUAGES } from '../lib/language-options';
 import {
     cancelAudioUpload,
     cancelJob,
@@ -34,12 +34,15 @@ import {
 import { CustomSelect } from './CustomSelect';
 import { NetworkOfflineBanner } from './NetworkOfflineBanner';
 import { useToast } from './Toast';
+import { IconAlert, IconCheck, IconClose, IconErrorCircle, IconUpload, IconWarning } from './icons/scribble-icons';
 
 /**
  * Verify the user has configured an API key for the currently selected STT
  * provider BEFORE we start a long upload. Without this, a user who only set
- * up STT-A but flipped the provider to STT-B would burn a multi-minute
- * upload + transcribe attempt only to see "API key missing" at the end.
+ * up Soniox but flipped the provider would burn a multi-minute upload +
+ * transcribe attempt only to see "API key missing" at the end.
+ *
+ * Local (offline) needs no key at all.
  *
  * Masked keys (e.g. "xxxx***xxxx") from the GET /settings response also
  * count as "configured" — the real key sits encrypted in the DB.
@@ -47,11 +50,11 @@ import { useToast } from './Toast';
 async function checkSttProviderConfigured(): Promise<{
     ok: boolean;
     provider: string;
-    missing: 'nvidia' | 'soniox' | null;
+    missing: 'soniox' | null;
 }> {
     try {
         const settings = await getSettings();
-        const provider = (settings.stt_provider || 'nvidia').toLowerCase();
+        const provider = (settings.stt_provider || 'local').toLowerCase();
         const isConfigured = (raw: string | undefined) => {
             const v = (raw || '').trim();
             if (!v) return false;
@@ -60,16 +63,14 @@ async function checkSttProviderConfigured(): Promise<{
             return true;
         };
         // Local/offline runs entirely on-device — no API key required.
-        if (provider === 'local') return { ok: true, provider, missing: null };
-        const nvidiaOk = isConfigured(settings.nvidia_api_key);
-        const sonioxOk = isConfigured(settings.soniox_api_key);
-        if (provider === 'soniox' && !sonioxOk) return { ok: false, provider, missing: 'soniox' };
-        if (provider !== 'soniox' && !nvidiaOk) return { ok: false, provider, missing: 'nvidia' };
+        // Anything unrecognised (e.g. a stale stored value) also falls here.
+        if (provider !== 'soniox') return { ok: true, provider: 'local', missing: null };
+        if (!isConfigured(settings.soniox_api_key)) return { ok: false, provider, missing: 'soniox' };
         return { ok: true, provider, missing: null };
     } catch {
         // Backend unreachable — surface as a generic readiness error upstream;
         // we don't want to block in the false-positive direction here.
-        return { ok: true, provider: 'nvidia', missing: null };
+        return { ok: true, provider: 'local', missing: null };
     }
 }
 
@@ -297,7 +298,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
         // at the very last second.
         const sttCheck = await checkSttProviderConfigured();
         if (!sttCheck.ok) {
-            const providerName = sttCheck.missing === 'soniox' ? 'Soniox' : 'Nvidia';
+            const providerName = 'Soniox';
             showToast(
                 lang === 'vi'
                     ? `Chưa cấu hình ${providerName} API Key. Vào Cài đặt để cấu hình trước khi upload.`
@@ -459,9 +460,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                     <h2 className="upload-modal-title">{tr.title}</h2>
                     {(step === 'pick' || step === 'done' || step === 'error' || step === 'duplicate') && (
                         <button className="upload-modal-close" onClick={onClose} aria-label={tr.close}>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                            </svg>
+                            <IconClose size={18} />
                         </button>
                     )}
                 </div>
@@ -472,11 +471,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                         <p className="upload-modal-subtitle">{tr.subtitle}</p>
 
                         <button className="upload-file-picker" onClick={handlePick} type="button">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <polyline points="17 8 12 3 7 8" />
-                                <line x1="12" x2="12" y1="3" y2="15" />
-                            </svg>
+                            <IconUpload size={20} />
                             <span>{filePath ? basenameFromPath(filePath) : tr.pickFile}</span>
                         </button>
 
@@ -498,7 +493,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                                         className="upload-language-select"
                                         value={language}
                                         onChange={setLanguage}
-                                        options={NVIDIA_STT_LANGUAGES}
+                                        options={STT_LANGUAGES}
                                     />
                                 </div>
                                 <div className="upload-field">
@@ -559,7 +554,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                 {/* ── Step: PIPELINE ─────────────────────────────────── */}
                 {step === 'pipeline' && (
                     <div className="upload-modal-body">
-                        {/* v1.2.14: banner during Soniox/NVIDIA transcribe so
+                        {/* v1.2.14: banner during Soniox transcribe so
                             user knows why chunks are pausing — the per-chunk
                             retry loop will auto-resume when network returns. */}
                         <NetworkOfflineBanner />
@@ -647,15 +642,9 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                                 style={warn ? { background: '#fef3c7', color: '#b45309' } : undefined}
                             >
                                 {warn ? (
-                                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M12 2 2 22h20L12 2Z" />
-                                        <line x1="12" x2="12" y1="9" y2="14" />
-                                        <circle cx="12" cy="17" r="0.5" />
-                                    </svg>
+                                    <IconWarning size={40} />
                                 ) : (
-                                    <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M20 6 9 17l-5-5" />
-                                    </svg>
+                                    <IconCheck size={42} />
                                 )}
                             </div>
                             <h3 className="upload-modal-stage-title">{title}</h3>
@@ -677,9 +666,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                 {step === 'duplicate' && duplicateMeetingId !== null && (
                     <div className="upload-modal-body upload-modal-done">
                         <div className="upload-done-icon" style={{ background: '#fef3c7', color: '#b45309' }}>
-                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <circle cx="12" cy="12" r="9" /><path d="M12 7v6" /><circle cx="12" cy="16" r="0.5" />
-                            </svg>
+                            <IconAlert size={40} />
                         </div>
                         <h3 className="upload-modal-stage-title">{tr.duplicate}</h3>
                         <p className="upload-modal-stage-desc">{tr.duplicateDesc(duplicateMeetingId)}</p>
@@ -699,9 +686,7 @@ export function UploadAudioModal({ open, onClose, onMeetingReady }: Props) {
                 {step === 'error' && (
                     <div className="upload-modal-body upload-modal-done">
                         <div className="upload-done-icon" style={{ background: '#fee2e2', color: '#b91c1c' }}>
-                            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <circle cx="12" cy="12" r="10" /><path d="M15 9l-6 6" /><path d="M9 9l6 6" />
-                            </svg>
+                            <IconErrorCircle size={42} />
                         </div>
                         <h3 className="upload-modal-stage-title">{tr.error}</h3>
                         <p className="upload-modal-stage-desc upload-error-detail">{errorMessage}</p>

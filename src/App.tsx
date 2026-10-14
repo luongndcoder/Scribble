@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useAppStore } from './stores/appStore';
+import { useAppStore, applyTheme, resolveTheme } from './stores/appStore';
 import { MeetingList } from './components/MeetingList';
 import { MeetingDetail } from './components/MeetingDetail';
 import { RecordingBar } from './components/RecordingBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ToastProvider } from './components/Toast';
 import { UpdateChecker } from './components/UpdateChecker';
-import { StartupStatusBar } from './components/StartupStatusBar';
 import { SIDECAR_HTTP_BASES } from './lib/sidecar';
 import { getSettings } from './lib/api';
 import './index.css';
+import { IconMic, IconMoon, IconSettings, IconSun } from './components/icons/scribble-icons';
 
 const queryClient = new QueryClient();
 const SIDECAR_BASES = SIDECAR_HTTP_BASES;
@@ -66,7 +66,7 @@ function handleTopnavMouseDown(e: React.MouseEvent<HTMLElement>) {
 }
 
 function AppInner() {
-  const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline, setNetworkOnline, networkOnline, setAiConfigured } = useAppStore();
+  const { currentView, settingsOpen, setSettingsOpen, lang, setLang, recording, setBackendOnline, setNetworkOnline, networkOnline, setAiConfigured, theme, setTheme } = useAppStore();
   const [backendStatus, setBackendStatusLocal] = useState<'online' | 'offline'>('offline');
   // Mirror local backend state into the global store so unrelated components
   // (MeetingList action buttons, RecordingBar) can gate themselves without
@@ -76,28 +76,20 @@ function AppInner() {
     setBackendOnline(v === 'online');
   };
   const [appVersion, setAppVersion] = useState('');
-  // Startup progress: 0=connecting, 1=sidecar online, 2=diarizer loaded, 3=ready
-  const [startupStep, setStartupStep] = useState(0);
-  const [startupElapsed, setStartupElapsed] = useState(0); // seconds since boot
-  const [showStartupDetails, setShowStartupDetails] = useState(false);
-  const hasBeenOnline = useRef(false);
-  const startupBeganAt = useRef<number>(Date.now());
 
   const showRecBar = currentView === 'recording' || currentView === 'detail';
   const isOffline = backendStatus !== 'online';
 
-  // Tick elapsed-time counter once a second while offline. Resets when we
-  // go online (startupBeganAt is captured on each fresh boot cycle).
+  // Theme: apply on boot, re-apply when the mode changes, and follow the
+  // OS when mode === 'system'.
   useEffect(() => {
-    if (!isOffline) {
-      setStartupElapsed(0);
-      return;
-    }
-    const id = setInterval(() => {
-      setStartupElapsed(Math.floor((Date.now() - startupBeganAt.current) / 1000));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [isOffline]);
+    applyTheme(theme);
+    if (theme !== 'system' || typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => applyTheme('system');
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [theme]);
 
   // Chip reflects TWO independent signals: the local sidecar (backendStatus)
   // AND internet reachability (networkOnline). "Ready" must mean both are up —
@@ -111,10 +103,10 @@ function AppInner() {
 
   const backendLabel = useMemo(() => {
     if (chipState === 'online') {
-      return lang === 'vi' ? '✓ Sẵn sàng' : '✓ Ready';
+      return lang === 'vi' ? 'Sẵn sàng' : 'Ready';
     }
     if (chipState === 'network-offline') {
-      return lang === 'vi' ? '⚠ Mất mạng' : '⚠ Offline';
+      return lang === 'vi' ? 'Mất mạng' : 'Offline';
     }
     // Elapsed time lives in the bottom status strip — no need to also
     // surface it here (duplicate signal, eyes have to scan two corners).
@@ -131,14 +123,13 @@ function AppInner() {
 
   useEffect(() => {
     let active = true;
-    let wasOffline = true;
 
-    // Sequential startup: each step must complete before moving to next
+    // The backend is an axum server inside the Tauri process now (no Python
+    // sidecar to unpack and boot), so it answers almost immediately. The old
+    // multi-step startup (health → wait for the diarizer model → 500 ms
+    // "visual" delay) and its bottom progress strip only added latency; the
+    // speaker model loads lazily when a recording starts.
     const runStartup = async () => {
-      // Reset elapsed-time anchor whenever startup re-runs (initial boot or
-      // a backend hiccup that knocked us offline).
-      startupBeganAt.current = Date.now();
-      // ── Step 0→1: Wait for sidecar to respond to /health ──
       while (active) {
         try {
           const controller = new AbortController();
@@ -147,41 +138,13 @@ function AppInner() {
             cache: 'no-store', signal: controller.signal,
           });
           clearTimeout(timeout);
-          if (res.ok) {
-            setStartupStep(1);
-            break;
-          }
-        } catch {} // expected during startup
-        await new Promise(r => setTimeout(r, 500));
+          if (res.ok) break;
+        } catch {} // server still binding its port
+        await new Promise(r => setTimeout(r, 150));
       }
       if (!active) return;
-
-      // ── Step 1→2: Wait for diarizer model to load ──
-      while (active) {
-        try {
-          const dRes = await fetch(`${SIDECAR_BASES[0]}/diarizer-status`, { cache: 'no-store' });
-          if (dRes.ok) {
-            const dData = await dRes.json();
-            if (dData.model_loaded) {
-              setStartupStep(2);
-              break;
-            }
-          }
-        } catch {}
-        await new Promise(r => setTimeout(r, 500));
-      }
-      if (!active) return;
-
-      // ── Step 2→3: Ready — small delay for visual feedback ──
-      await new Promise(r => setTimeout(r, 500));
-      if (!active) return;
-      setStartupStep(3);
       setBackendStatus('online');
       window.dispatchEvent(new Event('backend-online'));
-      // Drop the "✓ Hệ thống đã sẵn sàng" toast — the topnav status chip
-      // already flips from "Đang khởi động" to "✓ Sẵn sàng" and the bottom
-      // startup strip disappears, so the toast was a third redundant cue.
-      hasBeenOnline.current = true;
 
       // ── Ongoing health check (slow poll) ──
       // v1.2.14: also parses `network` field so UI can surface "Mất mạng"
@@ -195,11 +158,6 @@ function AppInner() {
           if (active) {
             const isOnline = res.ok;
             setBackendStatus(isOnline ? 'online' : 'offline');
-            if (!isOnline && wasOffline) {
-              // Backend went down — reset startup for re-init
-              setStartupStep(0);
-            }
-            wasOffline = !isOnline;
 
             // Parse network reachability if backend returned it.
             if (isOnline) {
@@ -218,7 +176,6 @@ function AppInner() {
           if (active) {
             setBackendStatus('offline');
             setNetworkOnline(null);
-            wasOffline = true;
           }
         }
       }
@@ -266,12 +223,7 @@ function AppInner() {
             <header className="topnav" data-tauri-drag-region onMouseDown={handleTopnavMouseDown}>
               <div className="topnav-left" data-tauri-drag-region>
                 <span className="brand" data-tauri-drag-region>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                    strokeLinecap="round" strokeLinejoin="round" className="brand-icon">
-                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <line x1="12" x2="12" y1="19" y2="22" />
-                  </svg>
+                  <IconMic size={18} className="brand-icon" strokeWidth={2.25} />
                   Scribble
                   {appVersion && <span className="app-version">v{appVersion}</span>}
                 </span>
@@ -294,17 +246,26 @@ function AppInner() {
                 </button>
                 <button
                   className="icon-btn"
+                  onClick={() => setTheme(resolveTheme(theme) === 'dark' ? 'light' : 'dark')}
+                  title={lang === 'vi'
+                    ? `Giao diện: ${theme === 'system' ? 'theo hệ thống' : theme === 'dark' ? 'tối' : 'sáng'} — bấm để đổi`
+                    : `Theme: ${theme} — click to toggle`}
+                  aria-label={lang === 'vi' ? 'Đổi giao diện sáng/tối' : 'Toggle light/dark theme'}
+                >
+                  <span className="t-icon-swap" data-state={resolveTheme(theme) === 'dark' ? 'b' : 'a'}>
+                    <span className="t-icon" data-icon="a"><IconMoon size={18} /></span>
+                    <span className="t-icon" data-icon="b"><IconSun size={18} /></span>
+                  </span>
+                </button>
+                <button
+                  className="icon-btn"
                   id="btnSettings"
                   onClick={() => setSettingsOpen(true)}
                   disabled={recording}
                   title={recording ? (lang === 'vi' ? 'Đang ghi âm — dừng ghi để chỉnh cấu hình' : 'Recording — stop to change settings') : (lang === 'vi' ? 'Cài đặt' : 'Settings')}
                   aria-label="Settings"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                    strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
+                  <IconSettings size={18} />
                 </button>
               </div>
             </header>
@@ -317,20 +278,6 @@ function AppInner() {
               </div>
               {showRecBar && <RecordingBar />}
             </>
-
-            {/* Startup status — slim bottom strip (replaces the old center
-                overlay). App shell stays visible behind so the user can see
-                structure (logo, nav, meeting list shape) instead of staring
-                at a giant blocking modal. */}
-            {isOffline && !recording && (
-              <StartupStatusBar
-                lang={lang}
-                step={startupStep}
-                elapsed={startupElapsed}
-                expanded={showStartupDetails}
-                onToggleExpand={() => setShowStartupDetails((v) => !v)}
-              />
-            )}
 
           </main>
 

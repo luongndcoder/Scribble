@@ -178,6 +178,8 @@ async def diarizer_status():
     return {
         "model_loaded": _diarizer._model_loaded,
         "model_ok": _diarizer._session is not None,
+        "model_id": getattr(_diarizer, "_model_id", None),
+        "embedding_dim": getattr(_diarizer, "_emb_dim", None),
         "source": _diarizer._source,
         "profile_count": len(_diarizer._profiles),
         "config": {

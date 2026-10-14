@@ -1,6 +1,7 @@
 import { useAppStore } from '../stores/appStore';
 import { useUpdaterStore } from '../stores/updaterStore';
 import { formatMB, estimateETA, formatETA } from '../lib/updater';
+import { IconDownload } from './icons/scribble-icons';
 
 /**
  * Slim banner that surfaces an available update or download-in-progress at
@@ -30,11 +31,7 @@ export function UpdateBanner() {
         <div className="update-banner" role="status" aria-live="polite">
             <div className="update-content">
                 <div className="update-icon" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" x2="12" y1="15" y2="3" />
-                    </svg>
+                    <IconDownload size={18} />
                 </div>
                 <div className="update-text">
                     {status === 'available' && (

@@ -1,5 +1,11 @@
 """
-Speaker Diarization — WeSpeaker CAM++ embeddings
+Speaker Diarization — on-device embeddings.
+
+Default engine: hynt Speaker-Embedding ResNet34 (256-d, Vietnamese
+low-quality speech) for every non-Soniox path. Soniox paths keep SDK-side
+diarization. Select via DIARIZE_MODEL=auto|resnet34|resnet293|campplus-legacy
+(auto == resnet34; resnet293 downloads on demand; campplus-legacy is the
+pre-hynt rollback and is no longer bundled).
 """
 
 import os
@@ -12,37 +18,70 @@ from logger import get_logger
 
 _log = get_logger(__name__)
 
+
+def resample_fft(samples: np.ndarray, num: int) -> np.ndarray:
+    """Resample via FFT — matches scipy.signal.resample to float precision.
+
+    scipy.signal.resample IS Fourier-domain resampling; this is the same
+    algorithm (rfft → truncate/pad spectrum → irfft → scale by num/len), so
+    results agree to float precision. Implemented locally to drop the scipy
+    dependency from the sidecar bundle (~29MB).
+
+    When downsampling, the Nyquist bin is zeroed exactly as scipy does — that
+    is what keeps even-length inputs from producing a ringing artifact.
+    """
+    n = len(samples)
+    if n == 0 or num == n:
+        return np.asarray(samples, dtype=np.float32)
+    spectrum = np.fft.rfft(samples)
+    new_spectrum = np.zeros(num // 2 + 1, dtype=complex)
+    keep = min(len(spectrum), len(new_spectrum))
+    new_spectrum[:keep] = spectrum[:keep]
+    if num < n:
+        new_spectrum[-1] = 0
+    out = np.fft.irfft(new_spectrum, num) * (num / n)
+    return out.astype(np.float32)
+
+
 # ── Tunable parameters (configurable via env vars) ────────────────────────────
-# Defaults tuned for CAM++ zh-cn-common 200k (192-dim) on the ONLINE realtime
-# path (identify_speaker_from_samples). At utterance granularity same-speaker
-# cosine ~0.7–0.9 and different ~0.5–0.65, so 0.65 separates well; lower (0.50)
-# collapsed ~82% of turns onto Speaker 1 (EMA profile drift). MAX_SPEAKERS 4
-# was too low for real meetings → 8. (Upload uses a separate cosine-DISTANCE
-# threshold in batch_diarizer, NOT these.) Override via env if needed.
-MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.65"))
-STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.80"))
+# Calibrated 2026-10-09 for hynt ResNet34 on real Vietnamese meeting audio
+# ("Nghiep vu Sale Campaign", 6.7min, 2s windows, pseudo-labeled runs):
+#   same-speaker cos sim: min -0.04 | p10 0.395 | p25 0.499 | p50 0.574
+#   different-speaker:    p50 0.236 | p90 0.344 | p95 0.376 | max 0.510
+# (Upload uses a separate cosine-DISTANCE threshold in batch_diarizer,
+# NOT these.) Full analysis: docs/reports/calibration-2026-10-09-hynt-resnet34-tts.md
+MATCH_THRESHOLD        = float(os.getenv("DIARIZE_MATCH_THRESHOLD",        "0.42"))
+STRONG_MATCH_THRESHOLD = float(os.getenv("DIARIZE_STRONG_MATCH_THRESHOLD", "0.65"))
 MAX_SPEAKERS           = int(os.getenv("DIARIZE_MAX_SPEAKERS",             "8"))
 SWITCH_CONFIRM_HITS    = int(os.getenv("DIARIZE_SWITCH_CONFIRM_HITS",      "2"))
 NEW_SPEAKER_CONFIRM_HITS = int(os.getenv("DIARIZE_NEW_SPEAKER_CONFIRM_HITS", "3"))
 CROSS_GENDER_PENALTY   = float(os.getenv("DIARIZE_CROSS_GENDER_PENALTY",   "0.06"))
-MERGE_SIM_THRESHOLD    = float(os.getenv("DIARIZE_MERGE_SIM_THRESHOLD",    "0.94"))
+MERGE_SIM_THRESHOLD    = float(os.getenv("DIARIZE_MERGE_SIM_THRESHOLD",    "0.80"))
 EMA_UPDATE_MIN_SIM     = float(os.getenv("DIARIZE_EMA_UPDATE_MIN_SIM",     "0.50"))
 
-# Minimum buffered audio before running a diarization embedding. CAM++ needs
-# ~1–1.5s of speech for a stable embedding; shorter clips give noisy embeddings
-# that mis-merge speakers. NOTE: the legacy constant `16000*2` (=32000 bytes)
+# Minimum buffered audio before running a diarization embedding. Embedding
+# models need ~1–1.5s of speech for a stable vector; shorter clips give noisy
+# embeddings that mis-merge speakers (also matches the hynt enrollment spec:
+# min 1500ms net speech). NOTE: the legacy constant `16000*2` (=32000 bytes)
 # was mislabelled "0.5s" but is actually 1.0s @ 16kHz/16-bit/mono. We bump to
-# 1.5s for more robust embeddings with the 200k model. Realtime WS handlers in
+# 1.5s for more robust embeddings. Realtime WS handlers in
 # main.py import this; segments shorter than this keep the previous speaker.
 # bytes = 16000 samples/s * 2 bytes/sample * seconds.
 DIARIZE_MIN_SECONDS    = float(os.getenv("DIARIZE_MIN_SECONDS", "1.5"))
 DIARIZE_MIN_BYTES      = int(16000 * 2 * DIARIZE_MIN_SECONDS)
 
-# Embedding model. CAM++ zh-cn-common 200k (192-dim, trained on 200k Asian
-# speakers) discriminates Vietnamese / same-gender voices well. The legacy
-# voxceleb model was removed — it returned ~0.9 cosine for ALL Vietnamese
-# voices (collapsed everyone to one speaker), so it was useless as a fallback.
-# If this asset is missing, the diarizer falls back to pitch-only (no crash).
+# Embedding model selection.
+# hynt ResNet34 (256-d) is the default on-device engine: 27MB bundled, ~50ms
+# per 2s window on CPU. ResNet293 (256-d, 114MB) is more accurate and is
+# fetched on demand into ~/.voicescribe/models/ (see local.model_registry).
+# The legacy CAM++ zh-cn 200k file is only used with DIARIZE_MODEL=campplus-legacy.
+# NOTE on thresholds: calibrated for hynt ResNet on real VI meeting audio
+# (see Tunable parameters above). Override live via env:
+# DIARIZE_MATCH_THRESHOLD, DIARIZE_DISTANCE_THRESHOLD, ...
+DIARIZE_MODEL = os.getenv("DIARIZE_MODEL", "auto").strip().lower() or "auto"
+if DIARIZE_MODEL == "auto":
+    DIARIZE_MODEL = "resnet34"
+
 MODEL_FILENAMES = [
     "speech_campplus_sv_zh-cn_16k-common.onnx",
 ]
@@ -75,7 +114,10 @@ INSTANT_SWITCH_GAP                  = 0.15
 NEW_SPEAKER_MIN_SECONDS             = 1.5
 SAME_ZONE_WEAK_PITCH_DIFF_FEMALE    = 40.0
 SAME_ZONE_WEAK_PITCH_DIFF_MALE      = 90.0
-NEW_SPEAKER_SELF_SIM                = 0.70
+# Calibrated 2026-10-09: consecutive same-speaker 2s windows on real VI audio
+# average ~0.53 sim, so the CAM++-era 0.70 self-confirm bar would strand real
+# new speakers in pending forever. 0.55 keeps debris out (diff p95 0.376).
+NEW_SPEAKER_SELF_SIM                = 0.55
 NEW_SPEAKER_CONFIRM_WINDOW_SEC      = 20.0  # streaming chunks can be 10-15s apart
 # Mouthprint
 MOUTHPRINT_MIN_FRAMES               = 6
@@ -118,7 +160,8 @@ class SpeakerDiarizer:
         self._session = None
         self._in_name = None       # ONNX input node name (introspected)
         self._out_name = None      # ONNX output node name (introspected)
-        self._emb_dim = None       # embedding dim of loaded model (192 for zh-cn 200k)
+        self._emb_dim = None       # embedding dim of loaded model (256 for hynt)
+        self._model_id = None      # resolved model id (resnet34/resnet293/campplus-legacy)
         self._profiles = []
         self._next_id = 0
         self._model_loaded = False
@@ -169,7 +212,34 @@ class SpeakerDiarizer:
 
             _log.info("[diarize] frozen=%s, _MEIPASS=%s, exe_dir=%s, file_dir=%s", frozen, meipass, exe_dir, file_dir)
 
-            # Build candidate paths in priority order
+            # Resolve the .onnx in priority order: hynt registry
+            # (bundled → download cache, with on-demand fetch for resnet293)
+            # then the legacy candidate dirs below.
+            onnx_path = None
+            model_id = DIARIZE_MODEL
+            try:
+                from local.model_registry import (
+                    CAMPPLUS_LEGACY_FILENAME,
+                    SPEAKER_MODEL_SPECS,
+                    ensure_speaker_model,
+                    speaker_model_path_or_none,
+                )
+            except Exception:
+                SPEAKER_MODEL_SPECS = {}
+                CAMPPLUS_LEGACY_FILENAME = MODEL_FILENAMES[0]
+                speaker_model_path_or_none = None
+                ensure_speaker_model = None
+
+            spec = SPEAKER_MODEL_SPECS.get(model_id)
+            if spec is not None:
+                hit = speaker_model_path_or_none(spec)
+                if hit is None and model_id == "resnet293":
+                    # Too big to bundle — fetch on demand (sha256-verified).
+                    hit = ensure_speaker_model(model_id)
+                if hit is not None:
+                    onnx_path = str(hit)
+
+            # Build candidate paths in priority order (legacy dirs + explicit file)
             candidates = []
             if frozen and meipass:
                 candidates.append(os.path.join(meipass, "models"))
@@ -180,12 +250,13 @@ class SpeakerDiarizer:
             candidates.append(os.path.join(file_dir, "models"))
 
             # Resolve the model file across every candidate dir.
-            onnx_path = None
-            for fname in MODEL_FILENAMES:
+            wanted = ([spec.filename] if spec is not None else []
+                      + ([CAMPPLUS_LEGACY_FILENAME] if model_id == "campplus-legacy" else []))
+            for fname in wanted or MODEL_FILENAMES:
                 for d in candidates:
                     p = os.path.join(d, fname)
                     if os.path.exists(p):
-                        onnx_path = p
+                        onnx_path = onnx_path or p
                         break
                 if onnx_path:
                     break
@@ -206,9 +277,11 @@ class SpeakerDiarizer:
             self._out_name = self._session.get_outputs()[0].name
             out_shape = self._session.get_outputs()[0].shape
             self._emb_dim = out_shape[-1] if isinstance(out_shape[-1], int) else None
+            self._model_id = model_id
             _log.info(
-                "[diarize] ONNX model loaded: %s (in=%s out=%s dim=%s)",
-                os.path.basename(onnx_path), self._in_name, self._out_name, self._emb_dim,
+                "[diarize] ONNX model loaded: %s (id=%s in=%s out=%s dim=%s)",
+                os.path.basename(onnx_path), model_id,
+                self._in_name, self._out_name, self._emb_dim,
             )
             # Clear profiles if their embedding dim no longer matches the model.
             if (self._profiles and self._emb_dim
@@ -227,71 +300,90 @@ class SpeakerDiarizer:
                        num_mel_bins: int = 80, frame_length_ms: float = 25.0,
                        frame_shift_ms: float = 10.0) -> np.ndarray:
         """Compute Kaldi-compatible log-mel filterbank features using numpy.
-        Matches wespeaker's kaldi.fbank() with hamming window, no energy."""
-        from scipy.signal import resample as scipy_resample
+
+        Mirrors torchaudio kaldi.fbank() EXACTLY (hamming, no energy,
+        dither=0 per the hynt model config, preemphasis 0.97, per-frame DC
+        removal, power spectrum, triangular mel over FFT bins excluding
+        Nyquist, log floor at float32 eps, utterance CMN).
+
+        Operation order matters — Kaldi strides FIRST, then per frame:
+        mean-subtract → pre-emphasis (replicate edge) → window. A global
+        pre-emphasis before striding is NOT equivalent.
+
+        Input samples are float32 in [-1, 1]; they are scaled to int16 range
+        first (Kaldi convention — the hynt model REQUIRES int16-scale input)."""
         # Resample to 16kHz if needed
         if sr != 16000:
-            samples = scipy_resample(samples, int(len(samples) * 16000 / sr)).astype(np.float32)
+            samples = resample_fft(samples, int(len(samples) * 16000 / sr))
             sr = 16000
         # Scale by 2^15 (Kaldi convention)
-        samples = samples * (1 << 15)
+        samples = (samples * (1 << 15)).astype(np.float32)
         frame_len = int(sr * frame_length_ms / 1000.0)
         frame_shift = int(sr * frame_shift_ms / 1000.0)
         n_fft = 1
         while n_fft < frame_len:
             n_fft *= 2
-        # Hamming window
+        # Hamming window (symmetric — matches torch.hamming_window(periodic=False))
         window = 0.54 - 0.46 * np.cos(2.0 * np.pi * np.arange(frame_len) / (frame_len - 1))
         window = window.astype(np.float32)
-        # Mel filterbank (cached)
+        # Mel filterbank (cached) — Kaldi layout, excludes Nyquist bin
         if self._mel_basis is None or self._mel_basis.shape[0] != num_mel_bins:
             self._mel_basis = self._create_mel_filterbank(sr, n_fft, num_mel_bins)
-        # Frame the signal
+        # Stride frames (snip_edges: only fully-fitting frames)
         num_frames = max(1, 1 + (len(samples) - frame_len) // frame_shift)
         frames = np.zeros((num_frames, frame_len), dtype=np.float32)
         for i in range(num_frames):
             start = i * frame_shift
             end = min(start + frame_len, len(samples))
             frames[i, :end - start] = samples[start:end]
-        # Apply window
+        # Per-frame DC removal (Kaldi remove_dc_offset=True)
+        frames = frames - np.mean(frames, axis=1, keepdims=True)
+        # Per-frame pre-emphasis 0.97 with replicate edge:
+        # y[0] = 0.03*x[0], y[j] = x[j] - 0.97*x[j-1]
+        prev = np.concatenate(
+            [frames[:, :1], frames[:, :-1]], axis=1
+        ).astype(np.float32)
+        frames = frames - 0.97 * prev
+        # Window → zero-pad FFT → power spectrum (drop Nyquist, like Kaldi)
         frames *= window
-        # FFT -> power spectrum
         fft_out = np.fft.rfft(frames, n=n_fft)
-        power = np.abs(fft_out) ** 2
-        # Mel filterbank -> log
+        power = (np.abs(fft_out) ** 2)[:, :n_fft // 2]
+        # Mel filterbank -> log (floor at float32 eps, like Kaldi)
         mel_spec = np.dot(power, self._mel_basis.T)
-        mel_spec = np.maximum(mel_spec, 1e-10)
+        mel_spec = np.maximum(mel_spec, np.float32(1.1920928955078125e-07))
         log_mel = np.log(mel_spec)
-        # CMN (Cepstral Mean Normalization)
+        # CMN (Cepstral Mean Normalization, per hynt inference recipe)
         log_mel = log_mel - np.mean(log_mel, axis=0)
         return log_mel.astype(np.float32)
 
     @staticmethod
     def _create_mel_filterbank(sr: int, n_fft: int, num_mel_bins: int,
                                low_freq: float = 20.0, high_freq: float = 0.0) -> np.ndarray:
-        """Create mel-scale filterbank matrix (Kaldi compatible)."""
+        """Create mel-scale filterbank matrix, Kaldi layout (torchaudio parity).
+
+        Mirrors torchaudio get_mel_banks(): center frequencies spaced by
+        (mel_high - mel_low) / (num_bins + 1); continuous triangular weights
+        min(up_slope, down_slope) clamped at 0 over FFT bins EXCLUDING Nyquist
+        (Kaldi zero-pads that column afterwards, so it contributes nothing).
+        """
         if high_freq <= 0:
             high_freq = sr / 2.0
-        def hz_to_mel(hz):
-            return 1127.0 * np.log(1.0 + hz / 700.0)
-        def mel_to_hz(mel):
-            return 700.0 * (np.exp(mel / 1127.0) - 1.0)
-        mel_low = hz_to_mel(low_freq)
-        mel_high = hz_to_mel(high_freq)
-        mel_points = np.linspace(mel_low, mel_high, num_mel_bins + 2)
-        hz_points = mel_to_hz(mel_points)
-        bin_points = np.floor((n_fft + 1) * hz_points / sr).astype(int)
-        n_freq = n_fft // 2 + 1
-        filterbank = np.zeros((num_mel_bins, n_freq), dtype=np.float32)
-        for m in range(num_mel_bins):
-            left, center, right = bin_points[m], bin_points[m + 1], bin_points[m + 2]
-            for k in range(left, center):
-                if k < n_freq and center > left:
-                    filterbank[m, k] = (k - left) / (center - left)
-            for k in range(center, right):
-                if k < n_freq and right > center:
-                    filterbank[m, k] = (right - k) / (right - center)
-        return filterbank
+        num_fft_bins = n_fft // 2  # excludes Nyquist (Kaldi parity)
+        fft_bin_width = sr / n_fft
+        mel_low = 1127.0 * np.log(1.0 + low_freq / 700.0)
+        mel_high = 1127.0 * np.log(1.0 + high_freq / 700.0)
+        delta = (mel_high - mel_low) / (num_mel_bins + 1)
+        idx = np.arange(num_mel_bins, dtype=np.float64)[:, None]
+        left_mel = mel_low + idx * delta
+        center_mel = mel_low + (idx + 1.0) * delta
+        right_mel = mel_low + (idx + 2.0) * delta
+        mel_freqs = 1127.0 * np.log(
+            1.0 + (fft_bin_width * np.arange(num_fft_bins)) / 700.0
+        )[None, :]
+        up_slope = (mel_freqs - left_mel) / (center_mel - left_mel)
+        down_slope = (right_mel - mel_freqs) / (right_mel - center_mel)
+        weights = np.maximum(0.0, np.minimum(up_slope, down_slope))
+        return weights.astype(np.float32)
 
     def reset(self):
         with self._lock:
@@ -334,12 +426,11 @@ class SpeakerDiarizer:
 
         # Resample to 16kHz if needed
         if sr != 16000:
-            from scipy.signal import resample as scipy_resample
-            samples = scipy_resample(samples, int(len(samples) * 16000 / sr)).astype(np.float32)
+            samples = resample_fft(samples, int(len(samples) * 16000 / sr))
 
         with self._lock:
             if self._session:
-                return self._identify_campplus(wav_path=None, samples=samples, update_profiles=update_profiles)
+                return self._identify_embedding(wav_path=None, samples=samples, update_profiles=update_profiles)
             else:
                 return self._identify_pitch_from_samples(samples, update_profiles=update_profiles)
 
@@ -460,8 +551,7 @@ class SpeakerDiarizer:
             samples, sr = self._load_audio_numpy(audio_path)
             # Resample to 16kHz if needed
             if sr != 16000:
-                from scipy.signal import resample as scipy_resample
-                samples = scipy_resample(samples, int(len(samples) * 16000 / sr)).astype(np.float32)
+                samples = resample_fft(samples, int(len(samples) * 16000 / sr))
                 sr = 16000
             # Write WAV for pitch/mouthprint helpers
             pcm = (samples * 32767).clip(-32768, 32767).astype(np.int16)
@@ -476,7 +566,7 @@ class SpeakerDiarizer:
         try:
             with self._lock:
                 if self._session:
-                    return self._identify_campplus(wav_path, samples, update_profiles=update_profiles)
+                    return self._identify_embedding(wav_path, samples, update_profiles=update_profiles)
                 else:
                     return self._identify_pitch(wav_path, update_profiles=update_profiles)
         finally:
@@ -485,7 +575,7 @@ class SpeakerDiarizer:
             except Exception:
                 pass
 
-    def _identify_campplus(self, wav_path: str = None, samples: np.ndarray = None,
+    def _identify_embedding(self, wav_path: str = None, samples: np.ndarray = None,
                            update_profiles: bool = True) -> dict:
         try:
             # Load samples if not provided
@@ -849,7 +939,7 @@ class SpeakerDiarizer:
             return _result(sid, is_new=True)
 
         except Exception as e:
-            _log.error("[diarize] CAM++ error: %s — keeping current speaker", e, exc_info=True)
+            _log.error("[diarize] embedding error: %s — keeping current speaker", e, exc_info=True)
             # Don't fall back to pitch — pitch creates 4-dim profiles that corrupt
             # the 512-dim CAM++ profile list, causing all future calls to crash.
             sid = self._last_speaker_id if self._last_speaker_id is not None else 0

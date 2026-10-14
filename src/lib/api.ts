@@ -129,7 +129,8 @@ export const resetDiarize = async () => {
     return res;
 };
 
-// Translation is done directly in TranscriptView via fetch + SSE
+// Live translation arrives via WebSocket events (handled in
+// use-streaming-stt / RecordingBar) and renders per-sentence in MeetingDetail.
 export const summarize = (meetingId: number, language: string) =>
     fetchSidecar('/summarize', {
         method: 'POST',
@@ -161,17 +162,6 @@ export const createDraft = (title: string) =>
         method: 'POST',
         body: JSON.stringify({ title }),
     });
-export const appendDraft = (id: number, textOrPart: string | object, duration: number) =>
-    fetchSidecar(`/drafts/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-            typeof textOrPart === 'string'
-                ? { appendText: textOrPart, audioDuration: duration }
-                : { part: textOrPart, audioDuration: duration }
-        ),
-    });
-
 export const appendDraftAudio = (id: number, audioBlob: Blob, filename = 'recording.webm') => {
     const form = new FormData();
     form.append('audio', audioBlob, filename);
@@ -355,9 +345,12 @@ export interface LocalModelStatus {
     multilingual?: boolean;
     supported_languages?: string[];
 }
-export const getLocalModelStatus = () => request<LocalModelStatus>('/local/model-status');
-export const downloadLocalModel = () =>
-    request<LocalModelStatus>('/local/download-model', { method: 'POST' });
+/** `engine` (zipformer | nemotron) asks about an engine picked in Settings
+ *  but not saved yet; omitted → the saved `local_engine`. */
+export const getLocalModelStatus = (engine?: string) =>
+    request<LocalModelStatus>(`/local/model-status${engine ? `?engine=${encodeURIComponent(engine)}` : ''}`);
+export const downloadLocalModel = (engine?: string) =>
+    request<LocalModelStatus>(`/local/download-model${engine ? `?engine=${encodeURIComponent(engine)}` : ''}`, { method: 'POST' });
 
 export const saveSettings = (data: Record<string, unknown>) =>
     request<{ ok: boolean }>('/settings', {

@@ -15,9 +15,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
-        # ffmpeg removed from this list (v1.2.11+): the sidecar bundles a
-        # static ffmpeg binary via imageio-ffmpeg's wheel, so the runner
-        # doesn't need its own. See src-python/services/audio.py find_ffmpeg().
+        # No ffmpeg here: the app bundles a static one as the scribble-ffmpeg
+        # sidecar (scripts/fetch-build-deps.sh).
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -38,52 +37,14 @@ jobs:
         with:
           version: 9
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Install Python dependencies
-        working-directory: src-python
-        run: uv pip install --system -r requirements.txt
-
-      - name: Download ONNX model
-        working-directory: src-python/models
-        run: |
-          if [ ! -f voxceleb_CAM++.onnx ]; then
-            curl -L -o voxceleb_CAM++.onnx "https://wespeaker-1256283475.cos.ap-shanghai.myqcloud.com/models/voxceleb/voxceleb_CAM++.onnx"
-          fi
-
-      - name: Build sidecar
-        working-directory: src-python
-        run: python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-      - name: Copy sidecar + compress
-        run: |
-          mkdir -p src-tauri/binaries
-          # Strip unnecessary files
-          rm -rf src-python/dist/scribble-sidecar/_internal/grpc_tools 2>/dev/null || true
-          find src-python/dist/scribble-sidecar/_internal -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
-          find src-python/dist/scribble-sidecar/_internal -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-          find src-python/dist/scribble-sidecar/_internal -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
-          # Compress
-          tar --zstd -cf src-tauri/binaries/sidecar-dist.tar.zst -C src-python/dist scribble-sidecar
-          # Create launcher shim
-          cat > src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu << 'SHEOF'
-          #!/bin/bash
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          for candidate in "$DIR/sidecar-dist/scribble-sidecar" "$DIR/../Resources/sidecar-dist/scribble-sidecar"; do
-              if [ -x "$candidate" ]; then exec "$candidate" "$@"; fi
-          done
-          exit 1
-          SHEOF
-          chmod +x src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu
+      # The backend is a Rust axum server inside the Tauri process — no Python
+      # sidecar. This stages the streaming STT model (HuggingFace, sha256
+      # pinned) and the static ffmpeg sidecar (binaries/scribble-ffmpeg-*).
+      - name: Fetch models + ffmpeg
+        run: bash scripts/fetch-build-deps.sh x86_64-unknown-linux-gnu
 
       - name: Install frontend dependencies
         run: pnpm install

@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         with diarizer._lock:
             diarizer._init_model()
         if diarizer._session:
-            log.info("[main] [OK] Diarizer CAM++ model loaded")
+            log.info("[main] [OK] Diarizer model loaded: %s", getattr(diarizer, "_model_id", "?"))
         else:
             log.warning("[main] Diarizer ONNX model not loaded — pitch-only fallback active")
     except Exception as e:
@@ -615,13 +615,15 @@ async def local_stream_ws(websocket: WebSocket):
                 pass
             archive_fh = None
 
-    # Local engine must be available (Tier A nemotron). Guard so the frontend
-    # gets a clear error instead of a silent stall when it isn't.
-    from local_stt import LocalStreamingSTT, _active_tier, _mlx_available
-    if not (_active_tier() == "A" and _mlx_available()):
+    # Local streaming engine — the bundled Vietnamese streaming Zipformer
+    # (hynt, ~50MB fp16, no API key). Guard so the frontend gets a clear error
+    # instead of a silent stall if the model assets are missing.
+    from local_stt import LocalStreamingSTT
+    from local.model_registry import streaming_model_dir
+    if streaming_model_dir() is None:
         _close_archive()
         await websocket.send_json({
-            "error": "Realtime offline chưa hỗ trợ trên máy này. Dùng Upload file.",
+            "error": "Model nhận diện offline chưa sẵn sàng. Cài lại app hoặc dùng Upload file.",
         })
         await websocket.close()
         return
@@ -697,12 +699,39 @@ async def local_stream_ws(websocket: WebSocket):
             if result is None:
                 break
             try:
+                is_final = bool(result.get("is_final", True))
+
+                # Interim segment: forward for the live preview ONLY. It must
+                # not touch transcript_parts, chunk ids, diarization or
+                # translation — the same audio will be re-sent as a final when
+                # the endpoint fires, and treating the partial as a final was
+                # what duplicated text in the transcript (each partial created
+                # a new "chunk" that never got replaced).
+                if not is_final:
+                    if result.get("text"):
+                        try:
+                            await websocket.send_json({
+                                "text": result["text"],
+                                "is_final": False,
+                                "speaker": last_speaker,
+                                "speaker_id": last_speaker_id,
+                            })
+                        except Exception:
+                            pass
+                    continue
+
+                if not result.get("text"):
+                    continue
+
+                chunk_id = f"chunk-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
                 msg = {
                     "text": result["text"], "is_final": True,
                     "speaker": last_speaker, "speaker_id": last_speaker_id,
-                    "chunk_id": current_chunk_id,
+                    "chunk_id": chunk_id,
                 }
-                # Local engine emits final segments only; diarize each one.
+                # Diarize this finalized segment (buffer holds the audio that
+                # produced it, cleared right after so segments don't re-analyze
+                # the same samples).
                 with diarize_buf_lock:
                     buf_bytes = bytes(diarize_buf)
                     diarize_buf.clear()
@@ -720,11 +749,8 @@ async def local_stream_ws(websocket: WebSocket):
                         log.warning("[ws:local] diarize error: %s", e)
 
                 await websocket.send_json(msg)
-                final_chunk_id = current_chunk_id
-                if result["text"]:
-                    last_final_chunk_id = current_chunk_id
-                current_chunk_id = f"chunk-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
-                _accumulate_part(msg["text"], msg["speaker"], msg["speaker_id"], last_final_chunk_id or final_chunk_id, True)
+                last_final_chunk_id = chunk_id
+                _accumulate_part(msg["text"], msg["speaker"], msg["speaker_id"], chunk_id, True)
 
                 if msg["text"].strip() and translate_state["lang"]:
                     _text, _cid, _lang, _src = msg["text"], msg["chunk_id"], translate_state["lang"], stt_lang

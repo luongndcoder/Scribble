@@ -1,13 +1,12 @@
-"""Phase 2 (RED) — config + migration for the CAM++ 200k swap.
+"""Config + migration for the hynt ResNet swap (CAM++ 192-d → ResNet 256-d).
 
-- min audio per embedding bumped 0.5s → 1.0s (CAM++ needs >=1s for a stable
-  embedding; sub-second segments yield noisy embeddings that mis-merge).
-- thresholds re-tuned for the new cosine scale: voxceleb returned 0.87–0.98 for
-  ALL Vietnamese voices; zh-cn-200k spreads 0.14–0.69 (spike data). Keeping
-  MATCH_THRESHOLD=0.68 would put it at the TOP of the new range → severe
-  over-split. Default must drop to the ~0.45–0.55 band.
-- reset() must fully clear state so voxceleb (512) profiles never bleed into a
-  zh-cn (192) session.
+- min audio per embedding stays 1.5s (matches the hynt enrollment spec:
+  min 1500ms net speech; sub-second segments yield noisy embeddings).
+- Absolute MATCH/switch/merge thresholds are NOT pinned here — they were tuned
+  for CAM++ score ranges and are being re-calibrated on real Vietnamese
+  meeting audio. This file pins only the ordering invariants + env override.
+- reset() must fully clear state so legacy (192-d) profiles never bleed into a
+  256-d session (the loader also guards this via dim mismatch).
 """
 
 import importlib
@@ -22,15 +21,29 @@ def test_diarize_min_bytes_is_1_5s():
     assert diarize.DIARIZE_MIN_BYTES == int(16000 * 2 * 1.5)
 
 
-def test_default_match_threshold_tuned_for_192_online():
+def test_threshold_invariants_hold_pending_calibration():
     import diarize
     importlib.reload(diarize)
-    # Online realtime path: utterance-granularity same-speaker cosine ~0.7–0.9,
-    # different ~0.5–0.65 → threshold must sit ~0.6–0.7 (0.50 collapsed to one
-    # speaker). MAX_SPEAKERS raised from 4 for real meetings.
-    assert 0.60 <= diarize.MATCH_THRESHOLD <= 0.72, diarize.MATCH_THRESHOLD
-    assert diarize.MATCH_THRESHOLD < diarize.STRONG_MATCH_THRESHOLD
+    # Ordering invariants that any calibrated set must satisfy. Absolute
+    # values come from the calibration step (real meeting audio) — do NOT
+    # pin CAM++-era bands here.
+    assert 0.0 < diarize.MATCH_THRESHOLD < diarize.STRONG_MATCH_THRESHOLD <= 1.0
     assert diarize.MAX_SPEAKERS >= 6, diarize.MAX_SPEAKERS
+
+
+def test_calibrated_defaults_for_hynt_resnet():
+    """Regression pin for the 2026-10-09 calibration on real VI meeting audio
+    (see docs/reports/calibration-2026-10-09-hynt-resnet34-tts.md).
+    Change deliberately + update the report, never by accident."""
+    import diarize
+    importlib.reload(diarize)
+    assert diarize.MATCH_THRESHOLD == 0.50
+    assert diarize.STRONG_MATCH_THRESHOLD == 0.70
+    assert diarize.MERGE_SIM_THRESHOLD == 0.80
+    assert diarize.NEW_SPEAKER_SELF_SIM == 0.55
+    import services.batch_diarizer as bd
+    importlib.reload(bd)
+    assert bd.DEFAULT_DISTANCE_THRESHOLD == 0.45
 
 
 def test_thresholds_env_overridable(monkeypatch):
@@ -43,16 +56,26 @@ def test_thresholds_env_overridable(monkeypatch):
     importlib.reload(diarize)
 
 
+def test_batch_distance_threshold_env_overridable(monkeypatch):
+    monkeypatch.setenv("DIARIZE_DISTANCE_THRESHOLD", "0.35")
+    import importlib as _il
+    import services.batch_diarizer as bd
+    _il.reload(bd)
+    assert abs(bd.DEFAULT_DISTANCE_THRESHOLD - 0.35) < 1e-9
+    monkeypatch.delenv("DIARIZE_DISTANCE_THRESHOLD", raising=False)
+    _il.reload(bd)
+
+
 def test_reset_clears_all_state():
     import diarize
     importlib.reload(diarize)
     d = diarize.SpeakerDiarizer()
     # Seed fake state (simulate a prior session, possibly old-model profiles).
-    d._profiles = [{"id": 0, "embedding": np.zeros(192, dtype=np.float32), "count": 3}]
+    d._profiles = [{"id": 0, "embedding": np.zeros(256, dtype=np.float32), "count": 3}]
     d._next_id = 1
     d._last_speaker_id = 0
     d._last_speaker_time = 123.0
-    d._pending_new_emb = np.zeros(192, dtype=np.float32)
+    d._pending_new_emb = np.zeros(256, dtype=np.float32)
     d.reset()
     assert d._profiles == []
     assert d._next_id == 0

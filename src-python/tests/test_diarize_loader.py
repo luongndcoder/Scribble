@@ -1,14 +1,14 @@
-"""Phase 1 (RED) — loader + node-name introspection for the CAM++ zh-cn-common
-200k swap.
+"""Loader + node-name introspection for the hynt speaker-embedding swap.
 
 These tests pin the contract of the NEW embedding model:
-  - diarizer loads the 200k model (embedding dim 192, NOT voxceleb's 512)
-  - ONNX input/output node names are introspected (not hardcoded 'feats'/'embs')
-  - batch_diarizer.extract_embedding honors the introspected names + 192 dim
-  - resolves the zh-cn 200k model (legacy voxceleb removed)
+  - diarizer loads ResNet34 by default (DIARIZE_MODEL=auto → resnet34,
+    embedding dim 256, node names feats/embs)
+  - ONNX input/output node names are introspected (not hardcoded)
+  - batch_diarizer.extract_embedding honors the introspected names + 256 dim
+  - ResNet293 resolves through the registry (downloaded on demand)
 
 Synthetic deterministic audio is used — these verify load/dim/determinism, NOT
-speaker discrimination (that is the manual acceptance gate in phase-03).
+speaker discrimination (that is the calibration gate with real meeting audio).
 """
 
 import os
@@ -20,8 +20,8 @@ import pytest
 from diarize import SpeakerDiarizer
 
 MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
-NEW_MODEL = os.path.join(MODELS_DIR, "speech_campplus_sv_zh-cn_16k-common.onnx")
-EXPECTED_DIM = 192
+NEW_MODEL = os.path.join(MODELS_DIR, "speaker_embedding_resnet34.onnx")
+EXPECTED_DIM = 256
 
 
 @pytest.fixture
@@ -58,6 +58,8 @@ def diarizer() -> SpeakerDiarizer:
 def test_model_loads(diarizer):
     assert diarizer._session is not None
     assert diarizer._model_loaded is True
+    assert diarizer._model_id == "resnet34"
+    assert diarizer._emb_dim == EXPECTED_DIM
 
 
 @pytest.mark.skipif(not os.path.exists(NEW_MODEL), reason="new model asset missing")
@@ -69,10 +71,13 @@ def test_node_names_introspected(diarizer):
     sess_out = {o.name for o in diarizer._session.get_outputs()}
     assert diarizer._in_name in sess_in
     assert diarizer._out_name in sess_out
+    # hynt models use feats/embs — introspection must find exactly these.
+    assert diarizer._in_name == "feats"
+    assert diarizer._out_name == "embs"
 
 
 @pytest.mark.skipif(not os.path.exists(NEW_MODEL), reason="new model asset missing")
-def test_embedding_dim_is_192(diarizer, sample_audio):
+def test_embedding_dim_is_256(diarizer, sample_audio):
     res = diarizer.identify_speaker_from_samples(sample_audio, 16000, update_profiles=False)
     emb = res.get("embedding")
     assert emb is not None
@@ -94,7 +99,7 @@ def test_embedding_deterministic(diarizer, sample_audio):
 
 
 @pytest.mark.skipif(not os.path.exists(NEW_MODEL), reason="new model asset missing")
-def test_batch_extract_embedding_dim_192(diarizer, sample_wav):
+def test_batch_extract_embedding_dim_256(diarizer, sample_wav):
     from services.batch_diarizer import extract_embedding
     emb = extract_embedding(diarizer, sample_wav)
     assert emb is not None
@@ -115,11 +120,10 @@ def test_extract_embedding_lazy_inits_uninitialized_diarizer(sample_wav):
     assert emb is not None and np.asarray(emb).shape[-1] == EXPECTED_DIM
 
 
-def test_model_filenames_is_zh_cn_200k():
-    """Loader resolves the CAM++ zh-cn 200k model. The legacy voxceleb model
-    was removed (useless for Vietnamese), so it must NOT be referenced."""
+def test_default_model_is_resnet34():
+    """DIARIZE_MODEL=auto resolves to resnet34; legacy campplus is opt-in only."""
     import diarize
-    names = getattr(diarize, "MODEL_FILENAMES", None)
-    assert names, "MODEL_FILENAMES list missing"
-    assert names[0] == "speech_campplus_sv_zh-cn_16k-common.onnx"
-    assert not any("voxceleb" in n for n in names)
+    assert diarize.DIARIZE_MODEL == "resnet34"
+    from local.model_registry import SPEAKER_MODEL_SPECS
+    assert set(SPEAKER_MODEL_SPECS) == {"resnet34", "resnet293"}
+    assert SPEAKER_MODEL_SPECS["resnet34"].embedding_dim == 256

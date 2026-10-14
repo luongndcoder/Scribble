@@ -41,61 +41,32 @@ jobs:
         with:
           version: 9
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      # The backend is a Rust axum server inside the Tauri process — no Python
+      # sidecar. This stages the streaming STT model (HuggingFace, sha256
+      # pinned) and the static ffmpeg sidecar (binaries/scribble-ffmpeg-*).
+      - name: Fetch models + ffmpeg
+        run: bash scripts/fetch-build-deps.sh aarch64-apple-darwin
 
-      # ffmpeg is bundled via imageio-ffmpeg's Python wheel (v1.2.11+), so the
-      # build runner doesn't need brew install ffmpeg anymore. The wheel ships
-      # a static macOS-aarch64 binary that PyInstaller picks up via
-      # collect_all('imageio_ffmpeg'). See src-python/services/audio.py.
-
-      - name: Install Python dependencies
-        working-directory: src-python
-        run: uv pip install --system -r requirements.txt
-
-      - name: Download ONNX diarization model
-        working-directory: src-python/models
+      # Nemotron on the Apple GPU (MLX) compiles Metal shaders at build time.
+      # Newer Xcode ships the Metal toolchain as a separate component; without
+      # it the app is built without MLX (Nemotron then runs via ONNX on CPU).
+      - name: Metal toolchain (MLX engine)
+        id: metal
         run: |
-          if [ ! -f voxceleb_CAM++.onnx ]; then
-            curl -L -o voxceleb_CAM++.onnx "https://wespeaker-1256283475.cos.ap-shanghai.myqcloud.com/models/voxceleb/voxceleb_CAM++.onnx"
+          if ! xcrun metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain || true
           fi
-
-      - name: Build sidecar
-        working-directory: src-python
-        run: python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-      - name: Copy sidecar + compress
-        run: |
-          mkdir -p src-tauri/binaries
-          # Strip unnecessary files (mirror Linux/Windows workflow)
-          rm -rf src-python/dist/scribble-sidecar/_internal/grpc_tools 2>/dev/null || true
-          find src-python/dist/scribble-sidecar/_internal -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
-          find src-python/dist/scribble-sidecar/_internal -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-          find src-python/dist/scribble-sidecar/_internal -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
-          # Compress
-          tar --zstd -cf src-tauri/binaries/sidecar-dist.tar.zst -C src-python/dist scribble-sidecar
-          # Launcher shim — Tauri externalBin requires a binary named
-          # scribble-sidecar-<target-triple>. We point it at the unpacked dist
-          # tarball at runtime (Tauri ships sidecar-dist.tar.zst as a resource).
-          cat > src-tauri/binaries/scribble-sidecar-aarch64-apple-darwin << 'SHEOF'
-          #!/bin/bash
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          for candidate in "$DIR/sidecar-dist/scribble-sidecar" "$DIR/../Resources/sidecar-dist/scribble-sidecar"; do
-              if [ -x "$candidate" ]; then exec "$candidate" "$@"; fi
-          done
-          exit 1
-          SHEOF
-          chmod +x src-tauri/binaries/scribble-sidecar-aarch64-apple-darwin
+          if xcrun metal --version >/dev/null 2>&1; then
+            echo "mlx=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mlx=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Metal toolchain unavailable — building without the MLX engine."
+          fi
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -199,11 +170,26 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # MLX requires macOS 14; keeps C/C++ deps (mlx-sys CMake) in sync
+          # with tauri.conf.json's minimumSystemVersion.
+          MACOSX_DEPLOYMENT_TARGET: '14.0'
         run: |
           IDENTITY='${{ steps.signing.outputs.identity }}'
           echo "Building with signingIdentity: $IDENTITY"
-          npx tauri build --target aarch64-apple-darwin \
+          FEATURES=""
+          if [ "${{ steps.metal.outputs.mlx }}" = "true" ]; then
+            # mlx-sys writes the compiled shader library here; it is uploaded
+            # with the release below (users download it with the MLX model).
+            export MLX_RS_METAL_PATH="$PWD/src-tauri/target/mlx-metallib"
+            mkdir -p "$MLX_RS_METAL_PATH"
+            FEATURES="--features mlx"
+          fi
+          npx tauri build --target aarch64-apple-darwin $FEATURES \
             --config "{\"bundle\":{\"macOS\":{\"signingIdentity\":\"$IDENTITY\"}}}"
+          if [ -n "$FEATURES" ] && [ ! -f "$MLX_RS_METAL_PATH/mlx.metallib" ]; then
+            echo "::error::mlx.metallib was not produced at $MLX_RS_METAL_PATH"
+            exit 1
+          fi
 
       - name: Get version from tag
         id: version
@@ -255,6 +241,15 @@ jobs:
             else
               echo "⚠️  No signature — macOS auto-update disabled until TAURI_SIGNING_PRIVATE_KEY is set"
             fi
+          fi
+
+          # Metal shaders for the MLX Nemotron engine. Not bundled in the app
+          # (~174MB): the app downloads them from this exact release URL
+          # (stt/model_download.rs metallib_url) together with the MLX model.
+          METALLIB="src-tauri/target/mlx-metallib/mlx.metallib"
+          if [ -f "$METALLIB" ]; then
+            gh release upload "$TAG" "$METALLIB" --clobber
+            echo "✅ Uploaded: mlx.metallib"
           fi
 
           if [ -z "$DMG" ] && [ -z "$TARBALL" ]; then

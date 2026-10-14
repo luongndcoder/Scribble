@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef, createContext, useContext } from 'react';
+import { useState, useCallback, useRef, createContext, useContext, type ReactNode } from 'react';
+import { IconCheckCircle, IconClose, IconErrorCircle, IconInfo, IconWarning } from './icons/scribble-icons';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -19,11 +20,11 @@ export const useToast = () => useContext(ToastContext);
 
 let _nextId = 0;
 
-const ICONS: Record<ToastType, string> = {
-    success: '✓',
-    error: '✕',
-    info: 'ℹ',
-    warning: '⚠',
+const ICONS: Record<ToastType, ReactNode> = {
+    success: <IconCheckCircle size={16} strokeWidth={2} />,
+    error: <IconErrorCircle size={16} strokeWidth={2} />,
+    info: <IconInfo size={16} strokeWidth={2} />,
+    warning: <IconWarning size={16} strokeWidth={2} />,
 };
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
@@ -38,11 +39,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             clearTimeout(timers.remove);
             timersRef.current.delete(id);
         }
-        // Start exit animation
+        // Start exit animation (--toast-close: 250ms)
         setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)));
         setTimeout(() => {
             setToasts((prev) => prev.filter((t) => t.id !== id));
-        }, 300);
+        }, 250);
     }, []);
 
     const showToast = useCallback((message: string, type: ToastType = 'info') => {
@@ -58,7 +59,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         const removeTimer = setTimeout(() => {
             setToasts((prev) => prev.filter((t) => t.id !== id));
             timersRef.current.delete(id);
-        }, dwellMs + 300);
+        }, dwellMs + 250);
 
         timersRef.current.set(id, { exit: exitTimer, remove: removeTimer });
     }, []);
@@ -79,7 +80,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                             className="toast-dismiss"
                             onClick={(e) => { e.stopPropagation(); dismissToast(t.id); }}
                             aria-label="Dismiss"
-                        >✕</button>
+                        ><IconClose size={14} /></button>
                     </div>
                 ))}
             </div>

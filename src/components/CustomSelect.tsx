@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { IconCheck, IconChevronDown } from './icons/scribble-icons';
 
 interface Option {
     value: string;
@@ -19,14 +20,43 @@ interface CustomSelectProps {
 
 export function CustomSelect({ options, value, onChange, disabled, className = '', multiple, selectedValues, onToggle, onOpen }: CustomSelectProps) {
     const [open, setOpen] = useState(false);
+    const [closing, setClosing] = useState(false);
+    const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const ref = useRef<HTMLDivElement>(null);
+
+    const closeDropdown = () => {
+        if (!open || closing) return;
+        setClosing(true);
+        if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = setTimeout(() => {
+            setOpen(false);
+            setClosing(false);
+            closeTimerRef.current = null;
+        }, 150);
+    };
+
+    const openDropdown = () => {
+        if (closeTimerRef.current) {
+            clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = null;
+        }
+        setClosing(false);
+        setOpen(true);
+        if (onOpen) onOpen();
+    };
 
     useEffect(() => {
         const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+            if (ref.current && !ref.current.contains(e.target as Node)) closeDropdown();
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
+    });
+
+    useEffect(() => {
+        return () => {
+            if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+        };
     }, []);
 
     const selected = options.find(o => o.value === value);
@@ -40,26 +70,29 @@ export function CustomSelect({ options, value, onChange, disabled, className = '
                 : `${selectedValues.size} selected`)
         : (selected?.label || value);
 
+    const isExpanded = open && !closing;
+
     return (
-        <div className={`custom-select ${className} ${open ? 'open' : ''} ${disabled ? 'disabled' : ''}`} ref={ref}>
+        <div className={`custom-select ${className} ${isExpanded ? 'open' : ''} ${disabled ? 'disabled' : ''}`} ref={ref}>
             <button
                 className="custom-select-trigger"
                 onClick={() => {
                     if (!disabled) {
-                        const opening = !open;
-                        setOpen(opening);
-                        if (opening && onOpen) onOpen();
+                        if (isExpanded) {
+                            closeDropdown();
+                        } else {
+                            openDropdown();
+                        }
                     }
                 }}
                 type="button"
+                aria-expanded={isExpanded}
             >
                 <span className="custom-select-value">{displayLabel}</span>
-                <svg className="custom-select-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m6 9 6 6 6-6" />
-                </svg>
+                <IconChevronDown size={14} className="custom-select-chevron" />
             </button>
             {open && (
-                <div className="custom-select-dropdown">
+                <div className={`custom-select-dropdown${closing ? ' is-closing' : ' is-open'}`}>
                     {options.map(opt => {
                         const isSelected = multiple && selectedValues
                             ? selectedValues.has(opt.value)
@@ -74,15 +107,13 @@ export function CustomSelect({ options, value, onChange, disabled, className = '
                                         onToggle(opt.value);
                                     } else {
                                         onChange(opt.value);
-                                        setOpen(false);
+                                        closeDropdown();
                                     }
                                 }}
                                 type="button"
                             >
                                 {isSelected && (
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <polyline points="20 6 9 17 4 12" />
-                                    </svg>
+                                    <IconCheck size={14} strokeWidth={2.25} />
                                 )}
                                 <span>{opt.label}</span>
                             </button>

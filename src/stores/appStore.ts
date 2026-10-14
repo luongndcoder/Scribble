@@ -9,6 +9,10 @@ function safeSetItem(key: string, value: string): void {
 }
 
 export interface TranscriptPart {
+    /** Stable identity for React keys — assigned once at creation, NEVER
+     *  mutated by append/replace (chunkId used to be overwritten, which
+     *  remounted the row on every chunk and made the text visibly jump). */
+    id?: string;
     text: string;
     speaker: string;
     speakerId: number;
@@ -19,8 +23,32 @@ export interface TranscriptPart {
     timestamp: string;
     translation: string;
     _baseText?: string; // Text before current in-progress chunk (for replace-in-place)
+    /** Length of the trailing slice of `text` that is still tentative (Soniox
+     *  non-final tokens). Display-only: rendered dimmed while live. */
+    _tentativeLen?: number;
 }
 
+/** Live STT pipeline phase — drives the empty-state copy, the timer and
+ *  whether trailing finals are accepted after Stop. */
+export type LiveStatus = 'idle' | 'connecting' | 'live' | 'stopping';
+
+export type ThemeMode = 'light' | 'dark' | 'system';
+
+/** Resolve the effective theme (system → OS preference). */
+export function resolveTheme(mode: ThemeMode): 'light' | 'dark' {
+    if (mode === 'dark') return 'dark';
+    if (mode === 'light') return 'light';
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
+        return 'dark';
+    }
+    return 'light';
+}
+
+/** Apply the effective theme to <html data-theme>. Call on boot + on change. */
+export function applyTheme(mode: ThemeMode): void {
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.theme = resolveTheme(mode);
+}
 export interface Meeting {
     id: number;
     title: string;
@@ -42,6 +70,7 @@ interface AppState {
     seconds: number;
     draftId: number | null;
     recordingStartedAt: string;
+    liveStatus: LiveStatus;
 
     // Transcript
     transcriptParts: TranscriptPart[];
@@ -87,11 +116,14 @@ interface AppState {
     setSeconds: (v: number) => void;
     setDraftId: (v: number | null) => void;
     setRecordingStartedAt: (v: string) => void;
+    setLiveStatus: (v: LiveStatus) => void;
     addTranscriptPart: (part: TranscriptPart) => void;
-    appendToLastPart: (text: string, endTime: string, chunkId?: string) => void;
-    replaceLastPartText: (text: string, endTime: string, chunkId?: string) => void;
+    appendToLastPart: (text: string, endTime: string, chunkId?: string, tentativeLen?: number) => void;
+    replaceLastPartText: (text: string, endTime: string, chunkId?: string, tentativeLen?: number) => void;
     revertLastPartToBase: () => void;
     updateTranscriptTranslation: (idx: number, translation: string) => void;
+    /** Append raw text (e.g. trailing punctuation) to part `idx`. */
+    appendTextToPart: (idx: number, suffix: string) => void;
     updateTranscriptSpeakerByChunk: (chunkId: string, speakerId: number, speaker: string) => void;
     setTranscriptParts: (parts: TranscriptPart[]) => void;
     clearTranscript: () => void;
@@ -115,6 +147,20 @@ interface AppState {
     setSummaryLang: (v: string) => void;
     setSummaryTemplate: (v: string) => void;
     setCustomPrompt: (v: string) => void;
+    theme: ThemeMode;
+    setTheme: (v: ThemeMode) => void;
+}
+
+let partSeq = 0;
+/** Assign-once stable id for transcript parts (React keys, scroll anchors). */
+export function nextPartId(): string {
+    partSeq += 1;
+    return `p-${Date.now().toString(36)}-${partSeq}`;
+}
+
+/** Canonical stable key — mirrors MeetingDetail's itemKeyFor. */
+export function partKey(part: TranscriptPart, index: number): string {
+    return part.id || part.chunkId || `t-${index}`;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -123,6 +169,7 @@ export const useAppStore = create<AppState>((set) => ({
     seconds: 0,
     draftId: null,
     recordingStartedAt: '',
+    liveStatus: 'idle',
     transcriptParts: [],
     isTranscribing: false,
     interimText: '',
@@ -151,29 +198,36 @@ export const useAppStore = create<AppState>((set) => ({
     setSeconds: (v) => set({ seconds: v }),
     setDraftId: (v) => set({ draftId: v }),
     setRecordingStartedAt: (v) => set({ recordingStartedAt: v }),
+    setLiveStatus: (v) => set({ liveStatus: v }),
     addTranscriptPart: (part) =>
-        set((s) => ({ transcriptParts: [...s.transcriptParts, part] })),
-    appendToLastPart: (text, endTime, chunkId) =>
+        set((s) => ({
+            transcriptParts: [...s.transcriptParts, part.id ? part : { ...part, id: nextPartId() }],
+        })),
+    appendToLastPart: (text, endTime, chunkId, tentativeLen = 0) =>
         set((s) => {
             const parts = [...s.transcriptParts];
             if (parts.length > 0) {
                 const last = { ...parts[parts.length - 1] };
                 // Save current text as base before appending new chunk
                 last._baseText = last.text;
-                last.text += ' ' + text;
+                // Punctuation the model emits only after hearing what follows
+                // (", nhưng…", "? Vì vậy…") closes the previous words: no space.
+                last.text += (/^[,.?!;:…]/.test(text) ? '' : ' ') + text;
                 last.endTime = endTime;
+                last._tentativeLen = tentativeLen;
                 if (chunkId) {
+                    // Extend the id set, but NEVER rewrite last.chunkId:
+                    // it feeds React keys — changing it remounts the row.
                     const ids = Array.isArray(last.chunkIds) ? [...last.chunkIds] : [];
                     if (last.chunkId && !ids.includes(last.chunkId)) ids.push(last.chunkId);
                     if (!ids.includes(chunkId)) ids.push(chunkId);
                     last.chunkIds = ids;
-                    last.chunkId = chunkId; // Update to new chunk_id
                 }
                 parts[parts.length - 1] = last;
             }
             return { transcriptParts: parts };
         }),
-    replaceLastPartText: (text, endTime, chunkId) =>
+    replaceLastPartText: (text, endTime, chunkId, tentativeLen = 0) =>
         set((s) => {
             const parts = [...s.transcriptParts];
             if (parts.length > 0) {
@@ -186,7 +240,9 @@ export const useAppStore = create<AppState>((set) => ({
                     last.text = text;
                 }
                 last.endTime = endTime;
+                last._tentativeLen = tentativeLen;
                 if (chunkId) {
+                    // Same as append: extend chunkIds, keep chunkId (key) stable.
                     const ids = Array.isArray(last.chunkIds) ? [...last.chunkIds] : [];
                     if (last.chunkId && !ids.includes(last.chunkId)) ids.push(last.chunkId);
                     if (!ids.includes(chunkId)) ids.push(chunkId);
@@ -219,6 +275,12 @@ export const useAppStore = create<AppState>((set) => ({
             }
             return { transcriptParts: parts };
         }),
+    appendTextToPart: (idx, suffix) =>
+        set((s) => {
+            const parts = [...s.transcriptParts];
+            if (parts[idx]) parts[idx] = { ...parts[idx], text: parts[idx].text + suffix };
+            return { transcriptParts: parts };
+        }),
     updateTranscriptTranslation: (idx, translation) =>
         set((s) => {
             const parts = [...s.transcriptParts];
@@ -241,7 +303,11 @@ export const useAppStore = create<AppState>((set) => ({
                 return { ...part, speakerId, speaker };
             }),
         })),
-    setTranscriptParts: (parts) => set({ transcriptParts: parts }),
+    setTranscriptParts: (parts) => set({
+        // Backend-loaded parts have no id — assign stable ones once here so
+        // React keys stay put across reloads (never derive keys from index).
+        transcriptParts: parts.map((p) => (p.id ? p : { ...p, id: nextPartId() })),
+    }),
     clearTranscript: () => set({ transcriptParts: [], seconds: 0, transientSummary: '' }),
     setTranslationEnabled: (v) => {
         safeSetItem('scribble:translationEnabled', String(v));
@@ -277,5 +343,11 @@ export const useAppStore = create<AppState>((set) => ({
     setCustomPrompt: (v) => {
         safeSetItem('scribble:customPrompt', v);
         set({ customPrompt: v });
+    },
+    theme: (safeGetItem('scribble:theme', 'system') as ThemeMode) || 'system',
+    setTheme: (v) => {
+        safeSetItem('scribble:theme', v);
+        applyTheme(v);
+        set({ theme: v });
     },
 }));

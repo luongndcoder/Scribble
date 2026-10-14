@@ -9,8 +9,10 @@
  * needs no change — this modal is purely the UI for setting them, then calls
  * back via onConfirm to kick off generation.
  */
+import { useState, useEffect } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { CustomSelect } from '../CustomSelect';
+import { IconClose, IconMinutes } from '../icons/scribble-icons';
 
 interface MinutesOptionsModalProps {
     open: boolean;
@@ -26,25 +28,35 @@ export function MinutesOptionsModal({ open, lang, onClose, onConfirm }: MinutesO
     const setSummaryTemplate = useAppStore((s) => s.setSummaryTemplate);
     const customPrompt = useAppStore((s) => s.customPrompt);
     const setCustomPrompt = useAppStore((s) => s.setCustomPrompt);
+    const [closing, setClosing] = useState(false);
 
-    if (!open) return null;
+    useEffect(() => {
+        if (open) setClosing(false);
+    }, [open]);
+
+    if (!open && !closing) return null;
+
+    const handleClose = () => {
+        if (closing) return;
+        setClosing(true);
+        setTimeout(() => {
+            setClosing(false);
+            onClose();
+        }, 150);
+    };
 
     const vi = lang === 'vi';
 
     return (
-        <div className="minutes-modal-overlay" onClick={onClose}>
-            <div className="minutes-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className={`minutes-modal-overlay${closing ? ' is-closing' : ''}`} onClick={handleClose}>
+            <div className={`minutes-modal${closing ? ' is-closing' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
                 <div className="minutes-modal-header">
                     <div className="minutes-modal-title">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
-                        </svg>
+                        <IconMinutes size={16} />
                         <span>{vi ? 'Tạo biên bản' : 'Create Minutes'}</span>
                     </div>
-                    <button className="minutes-modal-close" onClick={onClose} aria-label={vi ? 'Đóng' : 'Close'}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                        </svg>
+                    <button className="minutes-modal-close" onClick={handleClose} aria-label={vi ? 'Đóng' : 'Close'}>
+                        <IconClose size={16} />
                     </button>
                 </div>
 
@@ -91,13 +103,11 @@ export function MinutesOptionsModal({ open, lang, onClose, onConfirm }: MinutesO
                 </div>
 
                 <div className="minutes-modal-footer">
-                    <button className="action-btn" onClick={onClose}>
+                    <button className="action-btn" onClick={handleClose}>
                         {vi ? 'Huỷ' : 'Cancel'}
                     </button>
                     <button className="action-btn primary minutes-modal-confirm" onClick={onConfirm}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
-                        </svg>
+                        <IconMinutes size={14} />
                         <span>{vi ? 'Tạo biên bản' : 'Create Minutes'}</span>
                     </button>
                 </div>

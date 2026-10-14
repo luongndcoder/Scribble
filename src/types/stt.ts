@@ -42,6 +42,10 @@ export interface SttWsMessage {
      *  real-time STT events when the upstream tokens carry timestamps. */
     start_ms?: number;
     end_ms?: number;
+    /** Trailing slice of `text` built from non-final Soniox tokens. */
+    tentative?: string;
+    /** Local-stream error detail (`type: "error"`). */
+    message?: string;
 }
 
 export interface DiagnoseResult {
@@ -54,13 +58,11 @@ export interface DiagnoseResult {
 }
 
 export interface SettingsData {
-    nvidia_api_key?: string;
     soniox_api_key?: string;
     llm_api_key?: string;
     stt_provider?: string;
     stt_language?: string;
     soniox_language_hints?: string;
-    max_speakers?: string;
     llm_provider?: string;
     llm_model?: string;
     app_language?: string;

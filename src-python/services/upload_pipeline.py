@@ -1675,8 +1675,18 @@ def _merge_saved_and_new_results(
     Newly-processed (in-memory) results take precedence — they have the
     embedding as an np.ndarray. DB rows store embedding as bytes; deserialize
     here so the clustering step sees a uniform shape.
+
+    Model upgrades change the embedding dim (CAM++ 192 → hynt 256): rows
+    saved by an older model are discarded (re-embedded on the next pass)
+    instead of poisoning cosine comparisons.
     """
     import numpy as np
+
+    try:
+        from main import diarizer as _diarizer
+        expected_dim = getattr(_diarizer, "_emb_dim", None)
+    except Exception:
+        expected_dim = None
 
     new_by_idx = {r["idx"]: r for r in new_results}
     chunk_boundaries = {c.idx: (c.start_ms, c.end_ms) for c in chunks}
@@ -1692,6 +1702,10 @@ def _merge_saved_and_new_results(
         if emb_bytes:
             try:
                 embedding = np.frombuffer(emb_bytes, dtype=np.float32).copy()
+                if expected_dim and embedding.shape[0] != expected_dim:
+                    log.info("[pipeline] dropping stale-dim embedding %d (%d != %d)",
+                             idx, embedding.shape[0], expected_dim)
+                    embedding = None
             except Exception as exc:
                 log.warning("[pipeline] failed to decode saved embedding %d: %s", idx, exc)
         start_ms, end_ms = chunk_boundaries.get(

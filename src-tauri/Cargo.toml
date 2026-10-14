@@ -1,9 +1,12 @@
 [package]
 name = "voicescribe"
-version = "1.3.2"
+version = "1.3.3"
 description = "Scribble - Meeting Minutes"
 authors = ["you"]
 edition = "2021"
+# The app is the only binary (dev tools live in examples/); pinned so cargo
+# and Tauri never have to guess.
+default-run = "voicescribe"
 
 [lib]
 name = "voicescribe_lib"
@@ -19,13 +22,21 @@ tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-dialog = "2"
+# Rust `log` records → stdout + rotating file in the OS app-log dir (support).
+tauri-plugin-log = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: JSON objects keep their source key order. Required for
+# byte-faithful parity with Python, where `json.dumps` of a transcript part
+# emits the sender's key order ("text", "speaker", "speakerId", ...) and the
+# draft-append merge relies on CPython dict insertion order. Without it
+# serde_json sorts keys alphabetically and the stored transcript text diverges
+# from what the Python backend wrote.
+serde_json = { version = "1", features = ["preserve_order"] }
 reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
 log = "0.4"
 hound = "3.5"
-tokio = { version = "1", features = ["rt", "time", "macros", "fs", "io-util", "sync"] }
-tokio-tungstenite = "0.24"
+tokio = { version = "1", features = ["rt", "time", "macros", "fs", "io-util", "sync", "rt-multi-thread", "net"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 dirs = "5"
@@ -33,10 +44,44 @@ ringbuf = "0.4"
 uuid = { version = "1", features = ["v4"] }
 zstd = "0.13"
 tar = "0.4"
+# STT only: local streaming/offline recognizer (src/stt/local.rs).
+# The DIARIZER no longer uses this crate — sherpa validates `model_type`
+# metadata and refuses the hynt speaker model. Embeddings use ort + fbank below.
+sherpa-onnx = { version = "1.13.8", default-features = false }
+# Speaker-embedding front end + inference for the diarizer (src/diarize/embedding.rs).
+# `ort` loads ANY valid ONNX graph, so the original hynt ResNet34 model (which
+# sherpa-onnx rejects for lack of `model_type` metadata) runs unmodified, and the
+# thresholds calibrated against that model stay valid.
+# kaldi-native-fbank is a Rust port of Kaldi's fbank and provides OnlineFeature,
+# which owns frame striding — the hynt model was exported for exactly this front end.
+ort = "2.0.0-rc.10"
+kaldi-native-fbank = "0.1"
+# multipart: /drafts/{id}/audio, /meetings/{id}/attachments and
+# /transcribe-diarize all take a `multipart/form-data` body (Python read them
+# via FastAPI's UploadFile), so the extractor is required for those routes.
+axum = { version = "0.7", features = ["ws", "multipart"] }
+tower-http = { version = "0.6", features = ["cors"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+regex = "1"
+# DOCX minutes export: a .docx is a ZIP of XML parts, so only the ZIP writer is
+# needed (see api/docx.rs for why a full OOXML stack is not pulled in).
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# sha256 of an uploaded file, for duplicate-upload detection — the
+# `meetings.file_hash` column the Python uploader populated and
+# `find_meeting_by_hash` looks up.
+sha2 = "0.10"
+
+# The standalone HTTP backend (same router Tauri serves in-process) is a dev
+# tool: `cargo run --example api_server`. As a [[bin]] Tauri shipped it inside
+# the app (+39MB).
 
 # macOS: CoreAudio process tap via cidre (same as Meetily)
 [target.'cfg(target_os = "macos")'.dependencies]
 cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["av"] }
+# Nemotron 3.5 ASR on Apple's MLX (stt::nemotron_mlx). Building the "metal"
+# feature needs Xcode's Metal Toolchain (`xcodebuild -downloadComponent
+# MetalToolchain`) on the BUILD machine only — the shaders ship compiled.
+mlx-rs = { version = "0.32", optional = true }
 
 # Windows: WASAPI loopback for system audio capture
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -49,3 +94,13 @@ windows = { version = "0.58", features = [
 # Linux: WebKitGTK for auto-granting microphone permission
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "=2.0.1"
+
+# MLX (Apple GPU) Nemotron engine — macOS release builds pass `--features mlx`.
+# Off by default because mlx-rs always compiles Metal shaders, which needs
+# the Xcode Metal Toolchain on the build machine.
+[features]
+mlx = ["dep:mlx-rs"]
+
+# Strip debug symbols from release binaries (~150k symbols shipped before).
+[profile.release]
+strip = true

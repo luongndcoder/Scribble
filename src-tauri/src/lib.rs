@@ -1,22 +1,14 @@
-use std::sync::Mutex;
 use tauri::{Manager, Emitter};
 
 pub mod upload;
-
-struct SidecarChild(std::process::Child);
-
-impl SidecarChild {
-    fn kill(mut self) {
-        let pid = self.0.id();
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-        println!("[sidecar] Killed child PID {}", pid);
-    }
-}
-
-struct SidecarState {
-    child: Option<SidecarChild>,
-}
+pub mod stt;
+pub mod llm;
+pub mod diarize;
+pub mod db;
+pub mod api;
+/// File-upload transcription pipeline (VAD chunking → STT → diarize).
+pub mod pipeline;
+pub mod audio_archive;
 
 /// Kill any process listening on the sidecar port (8765).
 /// This works regardless of the process name (handles PyInstaller's `Python` name).
@@ -38,10 +30,6 @@ fn kill_sidecar_port() {
                 }
             }
         }
-        // Also try pkill as fallback for any sidecar-named processes
-        let _ = std::process::Command::new("pkill")
-            .args(["-9", "scribble-sidecar"])
-            .output();
     }
     #[cfg(windows)]
     {
@@ -660,7 +648,11 @@ async fn system_audio_ws_loop<F>(
     use futures_util::{SinkExt, StreamExt};
 
     // Build WS URL based on STT provider
-    let ws_path = if stt_provider == "soniox" { "/ws/soniox-stream" } else { "/ws/nvidia-stream" };
+    let ws_path = match stt_provider {
+        "soniox" => "/ws/soniox-stream",
+        "local" => "/ws/local-stream",
+        _ => "/ws/nvidia-stream",
+    };
     let mut url = format!("ws://127.0.0.1:8765{}?source=system", ws_path);
     if let Some(mid) = meeting_id {
         url.push_str(&format!("&meeting_id={}", mid));
@@ -771,10 +763,19 @@ async fn system_audio_ws_loop<F>(
             break;
         }
     }
+    // Ask the STT server to finalize, then keep relaying until it closes the
+    // socket (all finals delivered) or the deadline passes. Closing + aborting
+    // the reader straight away dropped the utterance in flight at stop time.
+    let _ = ws_tx.send(Message::Text(r#"{"type":"stop"}"#.into())).await;
+    let mut reader = reader;
+    if tokio::time::timeout(std::time::Duration::from_secs(8), &mut reader).await.is_err() {
+        reader.abort();
+    }
     let _ = ws_tx.close().await;
-    reader.abort();
     println!("[system-audio] Streaming stopped");
     app_handle.unlisten(cmd_listener_id);
+    // Lets the frontend stop waiting for trailing transcript events.
+    let _ = app_handle.emit("system-audio-done", ());
 }
 
 
@@ -797,229 +798,6 @@ async fn stop_system_audio(app: tauri::AppHandle) -> Result<String, String> {
     {
         let _ = app;
         Ok("System audio not supported".to_string())
-    }
-}
-
-// ─── Sidecar Management ─────────────────────────────────────────────────────
-
-// Extract a .tar.zst archive in-process (no system tar/zstd dependency).
-// Uniform across Windows / macOS / Ubuntu — GNU tar on Linux would otherwise
-// need a system `zstd` binary that isn't always installed.
-fn extract_tar_zst(archive: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
-    let file = std::fs::File::open(archive)?;
-    let reader = std::io::BufReader::new(file);
-    let decoder = zstd::stream::read::Decoder::new(reader)?;
-    let mut tar = tar::Archive::new(decoder);
-    tar.set_preserve_permissions(true);
-    tar.set_overwrite(true);
-    tar.unpack(dest)?;
-    Ok(())
-}
-
-#[tauri::command]
-async fn start_sidecar(app: tauri::AppHandle) -> Result<String, String> {
-    let state = app.state::<Mutex<SidecarState>>();
-    let mut state = state.lock().map_err(|e| e.to_string())?;
-
-    // Always kill old sidecar to ensure fresh start with latest code
-    if let Some(child) = state.child.take() {
-        child.kill();
-        println!("[sidecar] Killed previous sidecar process");
-        std::thread::sleep(std::time::Duration::from_millis(300));
-    }
-
-    // Kill any stale sidecar processes (handles crash leftovers)
-    #[cfg(unix)]
-    {
-        let _ = std::process::Command::new("pkill")
-            .args(["-9", "scribble-sidecar"])
-            .output();
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "scribble-sidecar.exe"])
-            .creation_flags(0x08000000)
-            .output();
-    }
-
-    // Quick port check — don't over-wait
-    for _ in 0..3 {
-        if std::net::TcpStream::connect_timeout(
-            &"127.0.0.1:8765".parse().unwrap(),
-            std::time::Duration::from_millis(50),
-        ).is_err() {
-            break; // Port is free
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-
-    // --- Resolve sidecar binary from onedir resource folder ---
-    let exe_dir = std::env::current_exe()
-        .map_err(|e| format!("Cannot find current exe: {}", e))?
-        .parent()
-        .ok_or("Cannot find exe parent dir")?
-        .to_path_buf();
-
-    #[cfg(windows)]
-    let sidecar_name = "scribble-sidecar.exe";
-    #[cfg(not(windows))]
-    let sidecar_name = "scribble-sidecar";
-
-    // Determine the platform-specific sidecar folder name
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    let sidecar_folder = "scribble-sidecar-x86_64-pc-windows-msvc";
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    let sidecar_folder = "scribble-sidecar-aarch64-apple-darwin";
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    let sidecar_folder = "scribble-sidecar-x86_64-apple-darwin";
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    let sidecar_folder = "scribble-sidecar-x86_64-unknown-linux-gnu";
-
-    // ── Extract sidecar tar.gz on first launch ──
-    let data_dir = dirs::home_dir().unwrap_or_default().join(".voicescribe");
-    let _ = std::fs::create_dir_all(&data_dir);
-    let cache_dir = data_dir.join("sidecar");
-    // tar extracts to: cache_dir/scribble-sidecar/scribble-sidecar (binary)
-    let cached_bin = cache_dir.join("scribble-sidecar").join(sidecar_name);
-
-    // Find tar.gz in app bundle
-    let tar_candidates = vec![
-        // macOS .app bundle
-        exe_dir.join("../Resources/binaries/sidecar-dist.tar.zst"),
-        exe_dir.join("../Resources/sidecar-dist.tar.zst"),
-        // Windows installer / Linux: resources next to exe
-        exe_dir.join("binaries/sidecar-dist.tar.zst"),
-        exe_dir.join("sidecar-dist.tar.zst"),
-        // Linux deb: /usr/lib/<app>/binaries/
-        exe_dir.join("../lib/scribble/binaries/sidecar-dist.tar.zst"),
-    ];
-    let tar_path = tar_candidates.iter().find(|p| p.exists()).cloned();
-
-    // Cache invalidation: re-extract whenever the bundled tar.gz changes,
-    // not just when Cargo version bumps. Otherwise rebuilding the app
-    // without a version bump (common during a dev cycle) leaves users
-    // running the *previously extracted* sidecar — bytes inside the new
-    // .app never reach disk. Cache key combines version + tar.gz mtime.
-    let app_version = env!("CARGO_PKG_VERSION");
-    let version_file = cache_dir.join(".version");
-    let cached_version = std::fs::read_to_string(&version_file).unwrap_or_default();
-    let tar_mtime_secs: u64 = tar_path
-        .as_ref()
-        .and_then(|p| std::fs::metadata(p).ok())
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let cache_key = format!("{}-{}", app_version, tar_mtime_secs);
-    let needs_extract = !cached_bin.exists() || cached_version.trim() != cache_key;
-
-    if let Some(tar) = &tar_path {
-        if needs_extract {
-            println!("[sidecar] Extracting sidecar from {:?} to {:?}...", tar, cache_dir);
-            let _ = std::fs::remove_dir_all(&cache_dir);
-            let _ = std::fs::create_dir_all(&cache_dir);
-            match extract_tar_zst(tar, &cache_dir) {
-                Ok(()) => {
-                    // Make binary executable (archive should already carry the
-                    // exec bit; this is a defensive fallback).
-                    #[cfg(unix)]
-                    {
-                        let _ = std::process::Command::new("chmod")
-                            .args(["+x", &cached_bin.to_string_lossy()])
-                            .status();
-                    }
-                    let _ = std::fs::write(&version_file, &cache_key);
-                    // Kill old sidecar so new version starts fresh
-                    kill_sidecar_port();
-                    std::thread::sleep(std::time::Duration::from_millis(200));
-                    println!("[sidecar] Extraction complete (key={}): {:?}", cache_key, cached_bin);
-                }
-                Err(e) => println!("[sidecar] extraction failed: {}", e),
-            }
-        } else {
-            println!("[sidecar] Using cached sidecar at {:?}", cached_bin);
-        }
-    }
-
-    // Search order: extracted cache first (fastest), then bundle, then legacy
-    let candidates = vec![
-        cached_bin.clone(),
-        // Dev mode: onedir next to exe
-        exe_dir.join("sidecar-dist").join(sidecar_name),
-        exe_dir.join("../Resources/sidecar-dist").join(sidecar_name),
-    ];
-
-    let sidecar_path = candidates.iter()
-        .find(|p| p.exists())
-        .cloned();
-
-    // Write diagnostic log to ~/.voicescribe/ (visible on all platforms)
-    let log_dir = dirs::home_dir().unwrap_or_default().join(".voicescribe");
-    let _ = std::fs::create_dir_all(&log_dir);
-    let log_path = log_dir.join("sidecar-launch.log");
-    let log_msg = format!(
-        "[{:?}] exe_dir={:?}, candidates={:?}, resolved={:?}\n",
-        std::time::SystemTime::now(),
-        exe_dir, candidates, sidecar_path
-    );
-    let _ = std::fs::write(&log_path, &log_msg);
-
-    let sidecar_path = match sidecar_path {
-        Some(p) => p,
-        None => {
-            let err = format!(
-                "Sidecar binary not found. Searched: {:?}",
-                candidates
-            );
-            let _ = std::fs::write(&log_path, format!("{}{}\n", log_msg, err));
-            return Err(err);
-        }
-    };
-
-    // Redirect sidecar output to log file for diagnostics
-    let sidecar_log = std::fs::File::create(log_dir.join("sidecar-output.log"))
-        .map_err(|e| format!("Cannot create sidecar log: {}", e))?;
-    let sidecar_err = sidecar_log.try_clone()
-        .map_err(|e| format!("Cannot clone log handle: {}", e))?;
-
-    let mut cmd = std::process::Command::new(&sidecar_path);
-    cmd.stdout(sidecar_log)
-       .stderr(sidecar_err);
-
-    // Windows: CREATE_NO_WINDOW flag prevents console flash and some security blocks
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    match cmd.spawn() {
-        Ok(child) => {
-            let pid = child.id();
-            let success_msg = format!("{}Sidecar spawned OK, pid={}\n", log_msg, pid);
-            let _ = std::fs::write(&log_path, &success_msg);
-            state.child = Some(SidecarChild(child));
-            Ok(format!("Sidecar started (direct spawn, pid={})", pid))
-        }
-        Err(e) => {
-            let err_msg = format!("{}Direct spawn FAILED: {}\n", log_msg, e);
-            let _ = std::fs::write(&log_path, &err_msg);
-            Err(format!("Direct spawn failed: {} (path: {:?})", e, sidecar_path))
-        }
-    }
-}
-
-#[tauri::command]
-async fn stop_sidecar(app: tauri::AppHandle) -> Result<String, String> {
-    let state = app.state::<Mutex<SidecarState>>();
-    let mut state = state.lock().map_err(|e| e.to_string())?;
-    if let Some(child) = state.child.take() {
-        child.kill();
-        Ok("Sidecar stopped".to_string())
-    } else {
-        Ok("No sidecar running".to_string())
     }
 }
 
@@ -1135,25 +913,32 @@ async fn download_and_save_file(url: String, filename: String) -> Result<String,
     Err(format!("Download failed after trying all URLs: {}", last_err))
 }
 
-#[tauri::command]
-async fn check_sidecar() -> Result<bool, String> {
-    match reqwest::get("http://127.0.0.1:8765/health").await {
-        Ok(resp) => Ok(resp.status().is_success()),
-        Err(_) => Ok(false),
-    }
-}
-
 // ─── App Entry ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        // Without a logger every `log::*` call in the backend is discarded,
+        // leaving nothing to debug user reports with. Files land in the OS log
+        // dir (macOS: ~/Library/Logs/<bundle id>/), capped and rotated.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("scribble".to_string()),
+                    }),
+                ])
+                .max_file_size(5_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(Mutex::new(SidecarState { child: None }))
         .manage(upload::UploadState::new())
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -1172,17 +957,27 @@ pub fn run() {
             ).is_ok();
 
             if sidecar_alive {
-                println!("[setup] Sidecar already running on port 8765 — reusing");
+                println!("[setup] Backend already running on port 8765 — reusing");
             } else {
-                println!("[setup] Sidecar not running — starting fresh");
+                println!("[setup] Backend not running — starting in-process Rust server");
                 kill_sidecar_port();
                 std::thread::sleep(std::time::Duration::from_millis(100));
 
-                let handle = app.handle().clone();
+                // The backend is now a Rust axum server INSIDE this process.
+                // No Python sidecar, no tarball extraction, no child process.
+                // Same port and same HTTP/WS contract, so the frontend needs no
+                // changes. STT routes merge in here because they hold heavier
+                // state (loaded recognisers) than the REST router does.
                 tauri::async_runtime::spawn(async move {
-                    match start_sidecar(handle).await {
-                        Ok(msg) => println!("[setup] {}", msg),
-                        Err(e) => eprintln!("[setup] Failed to start sidecar: {}", e),
+                    match crate::api::build_router_with_default_db() {
+                        Ok(router) => {
+                            let router = router.merge(crate::stt::router());
+                            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8765));
+                            if let Err(e) = crate::api::serve(router, addr).await {
+                                eprintln!("[setup] Backend server exited: {e}");
+                            }
+                        }
+                        Err(e) => eprintln!("[setup] Failed to build backend router: {e}"),
                     }
                 });
             }
@@ -1212,9 +1007,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            start_sidecar,
-            stop_sidecar,
-            check_sidecar,
             save_audio_file,
             download_and_save_file,
             request_screen_access,
@@ -1225,19 +1017,15 @@ pub fn run() {
             upload::upload_audio_to_sidecar,
             upload::cancel_audio_upload,
         ])
-        .on_window_event(|window, event| {
+        .on_window_event(|_window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
-                    // Synchronously kill sidecar — must complete before process exits
-                    let state = window.app_handle().state::<Mutex<SidecarState>>();
-                    if let Ok(mut guard) = state.lock() {
-                        if let Some(child) = guard.child.take() {
-                            child.kill();
-                        }
-                    }
-                    // Kill by port to catch orphaned/renamed processes
-                    kill_sidecar_port();
-                    println!("[window-close] Sidecar cleanup done");
+                    // The backend is an in-process axum server now, so it dies
+                    // with this process — there is no child to reap. Killing by
+                    // port here would kill our OWN listener, so we only make
+                    // sure STT worker threads stop cleanly.
+                    crate::stt::shutdown_stt_workers();
+                    println!("[window-close] STT workers stopped");
                 }
                 _ => {}
             }
@@ -1245,25 +1033,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        match event {
-            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
-                // Kill sidecar via stored child handle first
-                if let Some(state) = app_handle.try_state::<Mutex<SidecarState>>() {
-                    if let Ok(mut guard) = state.lock() {
-                        if let Some(child) = guard.child.take() {
-                            child.kill();
-                            println!("[exit] Killed sidecar child process");
-                        }
-                    }
-                }
-                // Then kill by port to catch orphaned processes
-                kill_sidecar_port();
-                // Brief wait to ensure process is fully terminated
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                println!("[exit] Sidecar cleanup done");
-            }
-            _ => {}
-        }
-    });
+    // No exit hook: the backend runs in-process and dies with the app. (The
+    // old hook SIGKILLed whatever held port 8765 — now this very process —
+    // cutting short log flushes and the audio archive close.)
+    app.run(|_app_handle, _event| {});
 }

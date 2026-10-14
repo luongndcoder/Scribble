@@ -1,4 +1,25 @@
 /* Scribble — Complete CSS */
+@import "tailwindcss";
+
+/* Tailwind v4: dark: variant follows our data-theme attribute (not the
+   media query), so the in-app toggle + system preference both work. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* App color tokens bridged into Tailwind (bg-bg, text-text-secondary,
+   bg-primary, text-success, …). Values reference the :root / dark vars
+   below, so utilities follow the theme automatically. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-text: var(--text);
+  --color-text-secondary: var(--text-secondary);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+}
 
 /* ─── Design Tokens ─── */
 :root {
@@ -28,7 +49,7 @@
   --indigo-50: #eef2ff;
 
   --bg: var(--white);
-  --bg-sub: var(--gray-50);
+  --bg-sub: var(--bg-sub);
   --bg-app: linear-gradient(135deg, #f8fafc 0%, #f0f4ff 50%, #faf5ff 100%);
   --text: var(--gray-900);
   --text-secondary: var(--gray-500);
@@ -36,12 +57,19 @@
   --border: var(--gray-200);
   --border-light: var(--gray-100);
   --primary: var(--gray-900);
+  --primary-hover: var(--gray-700);
+  --primary-contrast: #ffffff;
+  --success: #16a34a;
+  --danger: #ef4444;
+  --warning: #d97706;
+  --bg-elevated: var(--gray-100);
+  --surface: var(--white);
   --accent: var(--red-500);
 
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
   --radius-full: 9999px;
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -53,14 +81,169 @@
   --shadow-bar: 0 -4px 24px rgba(0, 0, 0, 0.06), 0 0 1px rgba(0, 0, 0, 0.1);
 
   --font: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --duration: 180ms;
+
+  /* ── transitions.dev Motion Tokens — shared scale ─────────────────────── */
+  /* Durations */
+  --duration-stagger: 40ms;     /* per-item stagger offset */
+  --duration-micro: 80ms;       /* tooltip/path delay, shake segment, large stagger */
+  --duration-quick: 150ms;      /* modal/dropdown close, text swap, tooltip appear */
+  --duration-fast: 250ms;       /* icon swap, dropdown/modal open, tabs sliding, page slide */
+  --duration-medium: 350ms;     /* panel close, toast close */
+  --duration-slow: 400ms;       /* panel open, skeleton content reveal, input clear */
+  --duration-very-slow: 500ms;  /* emphasis moments, badge appear, text reveal, success check */
+  /* Easings */
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1); /* modal/dropdown/panel open+close, slide, resize */
+  --ease-in-out: ease-in-out;                        /* icon swap, text swap, text reveal, skeleton reveal */
+  --ease-out: ease-out;                              /* tooltip open / close */
+  --ease-linear: linear;                             /* shimmer, skeleton pulse, spinner */
+  --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);  /* badge pop open */
+  --ease-bounce-strong: cubic-bezier(0.34, 3.85, 0.64, 1); /* bouncy hover-out */
+  /* Distances */
+  --distance-micro: 4px;   /* text swap */
+  --distance-small: 6px;   /* error shake (small segment) */
+  --distance-base: 8px;    /* badge diagonal reveal, page slide */
+  --distance-medium: 12px; /* text reveal */
+  --distance-large: 30px;  /* check badge appear */
+  /* Scales */
+  --scale-large: 0.96;  /* modal open / close */
+  --scale-medium: 0.97; /* dropdown open */
+  --scale-small: 0.98;  /* tooltip open */
+  --scale-tiny: 0.99;   /* dropdown close */
+  /* Blur */
+  --blur-small: 2px;  /* panel reveal, icon swap, text swap, skeleton reveal */
+  --blur-medium: 3px; /* page slide, text reveal */
+  --blur-large: 8px;  /* success check open */
+
+  /* Recipe variables (transitions.dev) */
+  --dropdown-open-dur: var(--duration-fast);
+  --dropdown-close-dur: var(--duration-quick);
+  --dropdown-pre-scale: var(--scale-medium);
+  --dropdown-closing-scale: var(--scale-tiny);
+  --dropdown-ease: var(--ease-smooth-out);
+
+  --modal-open-dur: var(--duration-fast);
+  --modal-close-dur: var(--duration-quick);
+  --modal-scale: var(--scale-large);
+  --modal-scale-close: var(--scale-large);
+  --modal-ease: var(--ease-smooth-out);
+
+  --panel-open-dur: var(--duration-slow);
+  --panel-close-dur: var(--duration-medium);
+  --panel-translate-y: 100px;
+  --panel-blur: var(--blur-small);
+  --panel-ease: var(--ease-smooth-out);
+
+  --icon-swap-dur: var(--duration-fast);
+  --icon-swap-blur: var(--blur-small);
+  --icon-swap-start-scale: 0.25;
+  --icon-swap-ease: var(--ease-in-out);
+
+  --acc-expand: var(--duration-fast);
+  --acc-collapse: var(--duration-fast);
+  --acc-chevron: var(--duration-fast);
+  --acc-ease: var(--ease-smooth-out);
+
+  --toast-open: var(--duration-medium);
+  --toast-close: var(--duration-fast);
+  --toast-distance: 16px;
+  --toast-blur: var(--blur-small);
+  --toast-scale: var(--scale-medium);
+  --toast-ease: var(--ease-smooth-out);
+
+  --stream-gap: 60ms;
+  --stream-fade: var(--duration-medium);
+  --stream-blur: 1px;
+  --stream-ease: var(--ease-smooth-out);
+
+  --ease: var(--ease-smooth-out);
+  --ease-spring: var(--ease-bounce);
+  --duration: var(--duration-quick);
 
   --sidebar-w: 280px;
 }
 
-/* ─── Reset ─── */
+/* ─── Dark theme ───
+   Activated via <html data-theme="dark"> (in-app toggle or OS preference).
+   Only semantic tokens flip — fixed-hue accents (speaker colors, success /
+   danger pills) intentionally stay vivid on both themes. */
+[data-theme="dark"] {
+  /* Obsidian-slate dark palette (Linear / Raycast inspired) */
+  --gray-50: #16181f;
+  --gray-100: #1c1f28;
+  --gray-200: #262934;
+  --gray-300: #343846;
+  --gray-400: #63687a;
+  --gray-500: #8e95a8;
+  --gray-600: #a8afc2;
+  --gray-700: #c9cfde;
+  --gray-800: #e2e6f0;
+  --gray-900: #f3f4f6;
+  /* Light tints used as pill/badge backgrounds become translucent washes. */
+  --red-50: rgba(239, 68, 68, 0.13);
+  --blue-50: rgba(59, 130, 246, 0.14);
+  --green-50: rgba(34, 197, 94, 0.13);
+  --indigo-50: rgba(99, 102, 241, 0.16);
+
+  --white: #171920;
+  --surface: #1c1f28;
+  --bg: #0d0e11;
+  --bg-sub: #12141a;
+  --bg-app: #0d0e11;
+  --bg-elevated: #1e212b;
+  --text: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --border: #262934;
+  --border-light: #1d2029;
+  --primary: #6366f1;
+  --primary-hover: #818cf8;
+  --primary-contrast: #ffffff;
+  --success: #4ade80;
+  --danger: #f87171;
+  --warning: #fbbf24;
+  --accent: #f87171;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 16px 44px rgba(0, 0, 0, 0.65);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --shadow-bar: 0 -4px 24px rgba(0, 0, 0, 0.55), 0 0 1px rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
+}
+
+/* ─── Slim scrollbars app-wide ───
+   Tauri/WKWebView shows classic fat scrollbars; these slim them down.
+   `overflow-x: clip` on the two long lists guarantees no horizontal bar
+   can ever appear (tooltips/menus are the usual culprits) without
+   creating a nested scroll container. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-muted) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.meetings-grid,
+.transcript-list {
+  overflow-x: clip;
+}
 *,
 *::before,
 *::after {
@@ -100,6 +283,15 @@ body {
   outline: 2px solid var(--blue-500);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Primary button driven by theme tokens (dark-safe: light bg + dark text). */
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
 }
 
 .hidden {
@@ -214,11 +406,11 @@ body.electron-app .sub-tabs {
 }
 
 .meeting-item:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
 }
 
 .meeting-item.active {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   font-weight: 600;
 }
 
@@ -284,6 +476,24 @@ body.electron-app .sub-tabs {
   cursor: default;
 }
 
+[data-theme="dark"] .topnav {
+  background: rgba(17, 17, 19, 0.82);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .audio-player {
+  background: var(--white);
+}
+
+[data-theme="dark"] .rec-bar {
+  background: rgba(26, 26, 29, 0.88);
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .rec-bar.recording {
+  background: rgba(26, 26, 29, 0.95);
+}
+
 /* Interactive elements inside the topnav must opt OUT of the drag region —
    otherwise their onClick handlers never fire (the drag swallows the click).
    The status chip stays draggable: it has no click handler, just a tooltip. */
@@ -321,7 +531,7 @@ body.electron-app .sub-tabs {
   padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
-  background: var(--gray-50);
+  background: var(--bg-sub);
   color: var(--text-secondary);
   font-size: 0.72rem;
   font-weight: 600;
@@ -504,7 +714,7 @@ body.electron-app .sub-tabs {
 }
 
 .icon-btn:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   color: var(--text);
 }
 
@@ -600,34 +810,50 @@ body.electron-app .sub-tabs {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  border: none;
-  background: var(--gray-100);
+  border: 1px solid var(--border);
+  background: var(--white);
   border-radius: var(--radius-full);
   font-family: var(--font);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 600;
-  color: var(--primary);
+  color: var(--text);
   cursor: pointer;
-  transition: all var(--duration);
+  box-shadow: var(--shadow-xs);
+  transition:
+    background-color var(--duration-quick) var(--ease-smooth-out),
+    border-color var(--duration-quick) var(--ease-smooth-out),
+    color var(--duration-quick) var(--ease-smooth-out);
 }
 
 .back-btn-compact {
-  padding: 5px 11px;
+  padding: 6px 14px;
   font-size: 0.8rem;
-  gap: 4px;
+  gap: 5px;
 }
 
-.back-btn:hover {
-  background: var(--primary-light);
-  color: var(--indigo-600);
+.back-btn:hover:not(.is-locked) {
+  background: var(--hover);
+  border-color: var(--gray-300);
+  color: var(--text);
+}
+[data-theme="dark"] .back-btn {
+  background: #171920;
+  border-color: rgba(255, 255, 255, 0.09);
+}
+[data-theme="dark"] .back-btn:hover:not(.is-locked) {
+  background: #1f222c;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text);
 }
 
-/* ─── Sub-tabs ─── */
+/* ─── Sub-tabs (transitions.dev 16-tabs-sliding.md) ─── */
 .sub-tabs {
+  position: relative;
   display: inline-flex;
+  align-items: center;
   gap: 4px;
-  padding: 4px;
-  background: var(--gray-100);
+  padding: 3px;
+  background: var(--bg-elevated);
   border-radius: var(--radius-full);
   margin-bottom: 20px;
   border: 1px solid var(--border);
@@ -638,20 +864,38 @@ body.electron-app .sub-tabs {
   padding: 3px;
 }
 
+.sub-tabs-pill {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border-radius: var(--radius-full);
+  background: var(--indigo-600);
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3);
+  transition:
+    transform var(--duration-fast) var(--ease-smooth-out),
+    width var(--duration-fast) var(--ease-smooth-out);
+  will-change: transform, width;
+  z-index: 0;
+  pointer-events: none;
+}
+
 .sub-tab {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 10px 24px;
+  padding: 8px 18px;
   border: none;
   background: transparent;
   border-radius: var(--radius-full);
   font-family: var(--font);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all var(--duration) var(--ease);
+  transition: color var(--duration-fast) var(--ease-smooth-out), background var(--duration-quick) var(--ease-smooth-out);
 }
 
 .sub-tabs-compact .sub-tab {
@@ -660,15 +904,18 @@ body.electron-app .sub-tabs {
   gap: 5px;
 }
 
-.sub-tab:hover {
+.sub-tab:hover:not(.active) {
   color: var(--text);
   background: rgba(99, 102, 241, 0.08);
 }
 
 .sub-tab.active {
-  background: var(--indigo-600);
+  background: transparent;
   color: #fff;
   font-weight: 700;
+}
+.sub-tabs:not(.has-pill) .sub-tab.active {
+  background: var(--indigo-600);
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
 }
 
@@ -764,22 +1011,27 @@ body.electron-app .sub-tabs {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 18px;
+  padding: 7px 16px;
   border: 1px solid var(--border);
   background: var(--white);
   border-radius: var(--radius-full);
   font-family: var(--font);
-  font-size: 0.82rem;
-  font-weight: 500;
+  font-size: 0.8rem;
+  font-weight: 600;
   color: var(--gray-700);
   cursor: pointer;
-  transition: all 200ms var(--ease);
+  transition:
+    background-color var(--duration-quick) var(--ease-smooth-out),
+    border-color var(--duration-quick) var(--ease-smooth-out),
+    color var(--duration-quick) var(--ease-smooth-out),
+    box-shadow var(--duration-quick) var(--ease-smooth-out),
+    transform var(--duration-quick) var(--ease-smooth-out);
   white-space: nowrap;
   box-shadow: var(--shadow-xs);
 }
 
 .action-btn:hover {
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border-color: var(--gray-300);
   box-shadow: var(--shadow-sm);
   transform: translateY(-1px);
@@ -787,13 +1039,13 @@ body.electron-app .sub-tabs {
 
 .action-btn.primary {
   background: var(--primary);
-  color: var(--white);
+  color: var(--primary-contrast, #ffffff);
   border-color: transparent;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
 }
 
 .action-btn.primary:hover {
-  opacity: 0.9;
+  background: var(--primary-hover);
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.25);
   transform: translateY(-1px);
 }
@@ -854,7 +1106,7 @@ body.electron-app .sub-tabs {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--gray-100), var(--indigo-50));
+  background: linear-gradient(135deg, var(--bg-elevated), var(--indigo-50));
   border-radius: 50%;
   margin-bottom: 20px;
   color: var(--indigo-500);
@@ -888,8 +1140,15 @@ body.electron-app .sub-tabs {
    - `--open`: bar + subtitle row + file list + hint
    Empty meetings always render open so users can discover the feature. */
 .meeting-attachments {
-  border-bottom: 1px solid var(--border, #e5e7eb);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: var(--radius-md);
   background: var(--bg-elevated, rgba(99, 102, 241, 0.03));
+  margin: 4px 12px 0;
+  overflow: hidden;
+}
+[data-theme="dark"] .meeting-attachments {
+  background: #15171e;
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .meeting-attachments--open {
@@ -1142,7 +1401,7 @@ body.electron-app .sub-tabs {
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid var(--gray-200);
+  border: 3px solid var(--border);
   border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -1163,6 +1422,10 @@ body.electron-app .sub-tabs {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding-right: 4px;
+  /* Breathing room above the fixed bottom recording bar + below the
+     audio player so the first/last rows are never half-covered. */
+  padding-bottom: 88px;
+  scroll-padding-bottom: 88px;
   gap: 2px;
 }
 
@@ -1359,12 +1622,14 @@ body.electron-app .sub-tabs {
 @keyframes fadeSlide {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(var(--distance-base));
+    filter: blur(var(--blur-small));
   }
 
   to {
     opacity: 1;
     transform: none;
+    filter: blur(0);
   }
 }
 
@@ -1415,6 +1680,88 @@ body.electron-app .sub-tabs {
   border-radius: var(--radius-full);
   margin-left: 4px;
   letter-spacing: 0.05em;
+}
+
+/* ── Live interim preview row (streaming, not yet committed) ── */
+.transcript-item.interim {
+  opacity: 0.75;
+}
+.transcript-item.interim .transcript-time::after {
+  content: '···';
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-left: 4px;
+  letter-spacing: 0.1em;
+}
+.transcript-interim-text {
+  animation: interim-pulse 1.6s ease-in-out infinite;
+}
+@keyframes interim-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+.transcript-interim-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+/* Interim words inline at the end of the live paragraph — same flow as the
+   committed text, so a final lands in place instead of jumping rows. */
+.transcript-interim-inline {
+  color: var(--text-muted);
+  font-style: italic;
+}
+/* Soniox non-final tokens already in the paragraph — may still change.
+   Aligned with transitions.dev Streaming Text (30-streaming-text.md). */
+.transcript-tentative {
+  color: var(--text-muted);
+  transition:
+    color var(--stream-fade) var(--stream-ease),
+    opacity var(--stream-fade) var(--stream-ease),
+    filter var(--stream-fade) var(--stream-ease);
+}
+.transcript-interim-inline::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: live-caret 1s steps(2, start) infinite;
+}
+@keyframes live-caret {
+  to { visibility: hidden; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .transcript-interim-inline::after { animation: none; }
+}
+
+/* "Jump to latest" — appears while recording when the user scrolled away. */
+.jump-live-btn {
+  position: sticky;
+  /* Clear the floating recording bar that overlays the list's bottom
+     padding (see .transcript-list padding-bottom). */
+  bottom: 92px;
+  align-self: center;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+.jump-live-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* ── Playback follow: segment currently being spoken ── */
@@ -1591,7 +1938,7 @@ body.electron-app .sub-tabs {
 
 .minutes-body code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   border-radius: 6px;
   padding: 1px 5px;
   font-size: 0.86em;
@@ -1606,18 +1953,18 @@ body.electron-app .sub-tabs {
 
 .minutes-body th,
 .minutes-body td {
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border);
   padding: 8px 12px;
   text-align: left;
 }
 
 .minutes-body th {
-  background: var(--gray-50);
+  background: var(--bg-sub);
   font-weight: 600;
 }
 
 .minutes-body tr:nth-child(even) {
-  background: var(--gray-50);
+  background: var(--bg-sub);
 }
 
 .minutes-body blockquote {
@@ -1631,7 +1978,7 @@ body.electron-app .sub-tabs {
 .summary-loading-spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid var(--gray-200);
+  border: 3px solid var(--border);
   border-top-color: var(--primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -1646,10 +1993,16 @@ body.electron-app .sub-tabs {
 }
 
 .meeting-card {
+  position: relative;
+  z-index: 1;
   padding: 16px 20px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  transition: all 200ms var(--ease);
+  transition:
+    border-color var(--duration-quick) var(--ease-smooth-out),
+    box-shadow var(--duration-quick) var(--ease-smooth-out),
+    background-color var(--duration-quick) var(--ease-smooth-out),
+    transform var(--duration-quick) var(--ease-smooth-out);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1659,9 +2012,16 @@ body.electron-app .sub-tabs {
 }
 
 .meeting-card:hover {
-  border-color: rgba(0, 0, 0, 0.1);
+  border-color: var(--gray-300);
   box-shadow: var(--shadow-card-hover);
   transform: translateY(-1px);
+}
+
+/* Keep the card whose overflow menu is open above every sibling card so the
+   dropdown and pointer events never collide with the card below it. */
+.meeting-card.menu-open {
+  z-index: 60;
+  transform: none;
 }
 
 
@@ -1717,7 +2077,7 @@ body.electron-app .sub-tabs {
 .card-inline-btn {
   height: 30px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-full);
   background: var(--white);
   padding: 0 8px;
   font-size: 0.74rem;
@@ -1728,7 +2088,7 @@ body.electron-app .sub-tabs {
 }
 
 .card-inline-btn:hover {
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border-color: var(--gray-300);
 }
 
@@ -1747,6 +2107,74 @@ body.electron-app .sub-tabs {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
+  position: relative; /* anchor for the overflow menu */
+}
+
+/* Overflow (⋯) menu — transitions.dev 05-menu-dropdown.md */
+.card-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  min-width: 176px;
+  padding: 5px;
+  background: var(--surface, var(--white));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transform-origin: top right;
+  animation: dropdownSlideDown var(--dropdown-open-dur) var(--dropdown-ease) both;
+  will-change: transform, opacity;
+}
+.card-menu.is-closing {
+  pointer-events: none;
+  animation: dropdownClose var(--dropdown-close-dur) var(--dropdown-ease) forwards !important;
+}
+.card-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-quick) var(--ease-smooth-out),
+              color var(--duration-quick) var(--ease-smooth-out);
+}
+.card-menu-item:hover:not(:disabled) {
+  background: var(--hover);
+}
+.card-menu-item:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.card-menu-item.danger {
+  color: var(--danger, #ef4444);
+}
+.card-menu-item.danger:hover:not(:disabled) {
+  background: var(--red-50);
+}
+
+/* Don't show the hover tooltip while its overflow menu is open or focused. */
+.card-menu-btn[aria-expanded="true"]::after,
+.meeting-card.menu-open .card-action-btn[data-tooltip]::after {
+  display: none !important;
+}
+
+/* The ⋯ button always sits at the card's right edge: a centered tooltip
+   would spill past the card and force a horizontal scrollbar (invisible
+   opacity-0 tooltips still count toward scrollWidth). Right-align it. */
+.meeting-card-actions .card-menu-btn[data-tooltip]::after {
+  left: auto;
+  right: -6px;
+  transform: translateY(-3px);
 }
 
 .card-action-btn {
@@ -1764,13 +2192,13 @@ body.electron-app .sub-tabs {
   transition: all var(--duration);
 }
 
-/* Fast custom tooltip (native title has ~1s delay) */
+/* Fast custom tooltip — transitions.dev 17-tooltip.md (150ms in w/ 80ms intent delay, 50ms instant out) */
 .card-action-btn[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
   top: calc(100% + 6px);
   left: 50%;
-  transform: translateX(-50%) translateY(-3px);
+  transform: translateX(-50%) translateY(-3px) scale(var(--scale-small));
   padding: 4px 8px;
   background: var(--gray-900);
   color: var(--white);
@@ -1782,13 +2210,20 @@ body.electron-app .sub-tabs {
   box-shadow: var(--shadow-md);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 110ms var(--ease), transform 110ms var(--ease);
+  transition: opacity 50ms var(--ease-out) 0ms, transform 50ms var(--ease-out) 0ms;
   z-index: 300;
 }
 
 .card-action-btn[data-tooltip]:hover::after {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateX(-50%) translateY(0) scale(1);
+  transition: opacity var(--duration-quick) var(--ease-out) var(--duration-micro),
+              transform var(--duration-quick) var(--ease-out) var(--duration-micro);
+}
+
+.meeting-card-actions .card-menu-btn[data-tooltip]:hover::after,
+.meeting-card-actions .card-menu-btn[data-tooltip]:focus-visible::after {
+  transform: translateY(0) scale(1);
 }
 
 .audio-player {
@@ -1849,7 +2284,7 @@ body.electron-app .sub-tabs {
   background: linear-gradient(
     to right,
     var(--indigo-500) var(--audio-progress, 0%),
-    var(--gray-200) var(--audio-progress, 0%)
+    var(--border) var(--audio-progress, 0%)
   );
   cursor: pointer;
   outline: none;
@@ -1878,7 +2313,7 @@ body.electron-app .sub-tabs {
 }
 
 .card-action-btn:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   color: var(--gray-700);
 }
 
@@ -1888,7 +2323,7 @@ body.electron-app .sub-tabs {
 }
 
 .card-action-btn:disabled:hover {
-  background: var(--gray-50);
+  background: var(--bg-sub);
   color: var(--gray-500);
 }
 
@@ -1937,7 +2372,7 @@ body.electron-app .sub-tabs {
   border-radius: 50%;
   border: none;
   background: linear-gradient(135deg, var(--red-500), var(--red-600));
-  color: var(--white);
+  color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2019,7 +2454,7 @@ body.electron-app .sub-tabs {
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border-radius: var(--radius-full);
   font-size: 0.82rem;
   font-weight: 500;
@@ -2161,7 +2596,7 @@ body.electron-app .sub-tabs {
   height: 36px;
   border-radius: 50%;
   border: none;
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   color: var(--gray-700);
   display: flex;
   align-items: center;
@@ -2172,7 +2607,7 @@ body.electron-app .sub-tabs {
 }
 
 .rec-stop-btn:hover {
-  background: var(--gray-200);
+  background: var(--border);
 }
 
 .rec-pause-btn {
@@ -2180,7 +2615,7 @@ body.electron-app .sub-tabs {
   height: 36px;
   border-radius: 50%;
   border: none;
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   color: var(--gray-700);
   display: flex;
   align-items: center;
@@ -2237,7 +2672,7 @@ body.electron-app .sub-tabs {
 .rec-download-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-  background: var(--gray-50);
+  background: var(--bg-sub);
 }
 
 .rec-timer {
@@ -2308,12 +2743,12 @@ body.electron-app .sub-tabs {
 
 .summarize-group .summary-lang-select .custom-select-trigger:hover,
 .summarize-group .summary-template-select .custom-select-trigger:hover {
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border-color: var(--gray-300);
 }
 
 .summarize-group .custom-select.open .custom-select-trigger {
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border-color: var(--gray-900);
   box-shadow: none;
 }
@@ -2356,8 +2791,8 @@ body.electron-app .sub-tabs {
   height: 34px;
   padding: 0 16px;
   background: var(--primary);
-  color: var(--white);
-  border: none;
+  color: var(--primary-contrast, #ffffff);
+  border: 1px solid transparent;
   border-radius: var(--radius-full);
   font-family: var(--font);
   font-size: 0.8rem;
@@ -2411,7 +2846,7 @@ body.electron-app .sub-tabs {
 
 .rec-summarize-btn.needs-setup:hover {
   transform: none;
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border-color: var(--gray-300);
   box-shadow: none;
 }
@@ -2433,7 +2868,7 @@ body.electron-app .sub-tabs {
   justify-content: center;
   z-index: 300;
   padding: 24px;
-  animation: fadeIn 0.16s ease;
+  animation: fadeIn var(--modal-open-dur) var(--modal-ease);
 }
 
 .minutes-modal {
@@ -2443,7 +2878,19 @@ body.electron-app .sub-tabs {
   width: 100%;
   max-width: 380px;
   overflow: visible; /* let the select dropdowns escape the card */
-  animation: chipFadeIn 0.18s var(--ease);
+  transform-origin: center;
+  animation: tModalOpen var(--modal-open-dur) var(--modal-ease);
+}
+
+@keyframes tModalOpen {
+  from {
+    opacity: 0;
+    transform: scale(var(--modal-scale));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .minutes-modal-header {
@@ -2482,7 +2929,7 @@ body.electron-app .sub-tabs {
 }
 
 .minutes-modal-close:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
 }
 
 .minutes-modal-body {
@@ -2517,7 +2964,8 @@ body.electron-app .sub-tabs {
   bottom: auto;
   top: calc(100% + 6px);
   z-index: 320;
-  animation: dropdownSlideDown 160ms var(--ease);
+  transform-origin: top left;
+  animation: dropdownSlideDown var(--dropdown-open-dur) var(--dropdown-ease);
 }
 
 .minutes-modal-footer {
@@ -2555,7 +3003,7 @@ body.electron-app .sub-tabs {
   -webkit-backdrop-filter: blur(16px);
   display: flex;
   justify-content: flex-end;
-  animation: fadeIn var(--duration) var(--ease);
+  animation: fadeIn var(--duration-fast) var(--panel-ease);
 }
 
 .settings-overlay.hidden {
@@ -2574,16 +3022,18 @@ body.electron-app .sub-tabs {
   display: flex;
   flex-direction: column;
   box-shadow: -12px 0 48px rgba(0, 0, 0, 0.12), -2px 0 8px rgba(0, 0, 0, 0.04);
-  animation: slideInRight 280ms var(--ease);
+  animation: slideInRight var(--panel-open-dur) var(--panel-ease);
 }
 
 @keyframes slideInRight {
   from {
     transform: translateX(100%);
+    filter: blur(var(--panel-blur));
   }
 
   to {
     transform: none;
+    filter: blur(0);
   }
 }
 
@@ -2742,25 +3192,30 @@ body.electron-app .sub-tabs {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
-  border: 1px solid var(--indigo-500);
+  padding: 6px 14px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-full);
   background: var(--white);
-  color: var(--indigo-600);
+  color: var(--text);
   font-family: var(--font);
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
+  box-shadow: var(--shadow-xs);
+  transition:
+    background-color var(--duration-quick) var(--ease-smooth-out),
+    border-color var(--duration-quick) var(--ease-smooth-out),
+    color var(--duration-quick) var(--ease-smooth-out);
   flex-shrink: 0;
 }
 
 .settings-test-btn:hover:not(:disabled) {
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--hover);
+  border-color: var(--gray-300);
 }
 
 .settings-test-btn:active:not(:disabled) {
-  background: rgba(99, 102, 241, 0.16);
+  transform: scale(0.98);
 }
 
 .settings-test-btn:disabled {
@@ -2860,7 +3315,7 @@ body.electron-app .sub-tabs {
 /* ── Provider Tab Selector ── */
 .setting-provider-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
 }
 
@@ -2868,13 +3323,17 @@ body.electron-app .sub-tabs {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  padding: 8px 10px;
+  justify-content: center;
+  gap: 4px;
+  padding: 9px 12px;
   background: var(--gray-50);
-  border: 2px solid var(--border);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 200ms var(--ease);
+  transition:
+    background-color var(--duration-quick) var(--ease-smooth-out),
+    border-color var(--duration-quick) var(--ease-smooth-out),
+    box-shadow var(--duration-quick) var(--ease-smooth-out);
   font-family: var(--font);
   text-align: center;
 }
@@ -2882,13 +3341,12 @@ body.electron-app .sub-tabs {
 .provider-tab:hover {
   background: var(--gray-100);
   border-color: var(--gray-300);
-  transform: translateY(-1px);
 }
 
 .provider-tab.active {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(99, 102, 241, 0.12));
   border-color: var(--indigo-500);
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.15), 0 2px 8px rgba(99, 102, 241, 0.1);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2);
 }
 
 .provider-tab strong {
@@ -2906,6 +3364,116 @@ body.electron-app .sub-tabs {
   color: var(--text-muted);
 }
 
+/* ── Tabbed settings body ──
+   One settings group per tab, so the body is a single column with the tab
+   switcher on top. Styled with the app's own tokens (segmented control on
+   --bg-elevated, white active pill) to stay inside the main design. */
+.settings-panel-body.tabbed {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.settings-tabs {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+}
+
+.settings-tabs-pill {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  background: var(--surface);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-xs);
+  transition:
+    transform var(--duration-fast) var(--ease-smooth-out),
+    width var(--duration-fast) var(--ease-smooth-out);
+  will-change: transform, width;
+  z-index: 0;
+  pointer-events: none;
+}
+[data-theme="dark"] .settings-tabs-pill {
+  background: var(--border);
+}
+
+.settings-tab {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  font-family: var(--font);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-smooth-out);
+}
+
+.settings-tab:hover {
+  color: var(--text);
+}
+
+.settings-tab.active {
+  background: transparent;
+  color: var(--text);
+}
+.settings-tabs:not(.has-pill) .settings-tab.active {
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.settings-tab.active svg {
+  color: var(--indigo-500);
+}
+
+.settings-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Kept for markup compatibility — sections are single-column. */
+.setting-group--full {
+  grid-column: 1 / -1;
+}
+
+/* Primary action inside a section (e.g. download the offline model). */
+.settings-solid-btn {
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  font-family: var(--font);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--duration) var(--ease);
+}
+
+.settings-solid-btn:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.settings-solid-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ── Soniox Language Chips ── */
 .soniox-lang-grid {
   display: flex;
@@ -2920,7 +3488,7 @@ body.electron-app .sub-tabs {
   padding: 6px 12px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-full);
-  background: var(--gray-50);
+  background: var(--bg-sub);
   cursor: pointer;
   transition: all 180ms ease;
   font-size: 0.8rem;
@@ -2934,7 +3502,7 @@ body.electron-app .sub-tabs {
 
 .soniox-lang-chip:hover {
   border-color: var(--gray-300);
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   transform: translateY(-1px);
 }
 
@@ -2956,7 +3524,7 @@ body.electron-app .sub-tabs {
 }
 
 .settings-info-card code {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.78rem;
@@ -2979,7 +3547,7 @@ body.electron-app .sub-tabs {
   padding: 8px 16px 10px;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
@@ -3002,7 +3570,7 @@ body.electron-app .sub-tabs {
   gap: 6px;
   padding: 12px;
   border-radius: var(--radius-sm);
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border: 1px solid var(--border-light);
   font-size: 0.82rem;
 }
@@ -3120,7 +3688,7 @@ body.electron-app .sub-tabs {
 /* Optional & unset — neutral, NOT a warning. Used where a field is genuinely
    optional (e.g. the AI assistant) so STT-only users aren't nudged to fill it. */
 .config-status-badge.optional-unset {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   color: var(--gray-500);
 }
 
@@ -3133,7 +3701,7 @@ body.electron-app .sub-tabs {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--gray-500);
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
   vertical-align: middle;
@@ -3143,12 +3711,13 @@ body.electron-app .sub-tabs {
 .settings-panel .custom-select-dropdown {
   bottom: auto;
   top: calc(100% + 6px);
-  animation: dropdownSlideDown 180ms var(--ease);
+  transform-origin: top left;
+  animation: dropdownSlideDown var(--dropdown-open-dur) var(--dropdown-ease);
 }
 
 @keyframes dropdownSlideDown {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(calc(-1 * var(--distance-micro))) scale(var(--dropdown-pre-scale)); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* Setting lang select full width */
@@ -3168,7 +3737,7 @@ body.electron-app .sub-tabs {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border-radius: var(--radius-sm);
   font-size: 0.85rem;
 }
@@ -3225,7 +3794,7 @@ body.electron-app .sub-tabs {
   align-items: center;
   gap: 4px;
   padding: 14px 10px;
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border: 2px solid transparent;
   border-radius: var(--radius-sm);
   transition: all var(--duration);
@@ -3233,13 +3802,13 @@ body.electron-app .sub-tabs {
 }
 
 .radio-card-inner:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
 }
 
 .radio-card.active .radio-card-inner,
 .radio-card input:checked+.radio-card-inner {
   border-color: var(--primary);
-  background: var(--gray-100);
+  background: var(--bg-elevated);
 }
 
 .radio-card-icon {
@@ -3258,7 +3827,7 @@ body.electron-app .sub-tabs {
 
 .setting-input {
   padding: 6px 10px;
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
@@ -3293,7 +3862,7 @@ body.electron-app .sub-tabs {
 
 .setting-select:hover {
   border-color: var(--gray-300);
-  background-color: var(--gray-50);
+  background-color: var(--bg-sub);
 }
 
 .setting-select:focus,
@@ -3316,7 +3885,7 @@ body.electron-app .sub-tabs {
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border: 2px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -3326,7 +3895,7 @@ body.electron-app .sub-tabs {
 }
 
 .stt-toggle-btn:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   border-color: var(--gray-300);
 }
 
@@ -3383,7 +3952,7 @@ body.electron-app .sub-tabs {
   inset: 0;
   background: var(--gray-300);
   border-radius: var(--radius-full);
-  transition: background var(--duration);
+  transition: background var(--duration-fast) var(--ease-smooth-out);
 }
 
 .toggle-slider::after {
@@ -3395,8 +3964,9 @@ body.electron-app .sub-tabs {
   height: 18px;
   background: white;
   border-radius: 50%;
-  transition: transform var(--duration);
+  transition: transform 350ms cubic-bezier(0.34, 1.35, 0.64, 1);
   box-shadow: var(--shadow-sm);
+  will-change: transform;
 }
 
 .toggle input:checked+.toggle-slider {
@@ -3412,7 +3982,7 @@ body.electron-app .sub-tabs {
   appearance: none;
   width: 100%;
   height: 4px;
-  background: var(--gray-200);
+  background: var(--border);
   border-radius: 2px;
   outline: none;
 }
@@ -3462,10 +4032,10 @@ body.electron-app .sub-tabs {
 
 /* ─── Language Toggle ─── */
 .lang-toggle {
-  background: var(--gray-50);
+  background: var(--bg-sub);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  padding: 4px 10px;
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -3476,7 +4046,7 @@ body.electron-app .sub-tabs {
 }
 
 .lang-toggle:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   border-color: var(--gray-400);
   color: var(--text-primary, #333);
 }
@@ -3632,7 +4202,7 @@ body.electron-app .draft-recovery-banner {
 
 .export-option:hover {
   border-color: var(--gray-900);
-  background: var(--gray-50);
+  background: var(--bg-sub);
 }
 
 .export-option:disabled {
@@ -3690,7 +4260,7 @@ body.electron-app .draft-recovery-banner {
 }
 
 .transcript-action-btn:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   color: var(--gray-900);
   border-color: var(--gray-300);
 }
@@ -3780,7 +4350,7 @@ body.electron-app .draft-recovery-banner {
 }
 
 .speaker-edit-btn:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   color: var(--text);
 }
 
@@ -3808,7 +4378,7 @@ body.electron-app .draft-recovery-banner {
   justify-content: center;
   gap: 12px;
   padding: 4px 14px 6px;
-  background: var(--gray-50);
+  background: var(--bg-sub);
   /* No top border — the rec-bar above already has bottom contrast. Removing
      this border visually merges the two bars into one band. */
   border-top: 0;
@@ -3835,7 +4405,8 @@ body.electron-app .draft-recovery-banner {
   min-width: 170px;
 }
 
-.audio-source-select .custom-select-trigger {
+.audio-source-select .custom-select-trigger,
+.translation-lang-select .custom-select-trigger {
   height: 34px;
   padding: 0 12px;
   font-size: 0.8rem;
@@ -3880,7 +4451,7 @@ body.electron-app .draft-recovery-banner {
 
 .custom-select-trigger:hover {
   border-color: var(--gray-300);
-  background: var(--gray-50);
+  background: var(--bg-sub);
 }
 
 .custom-select.open .custom-select-trigger {
@@ -3890,12 +4461,19 @@ body.electron-app .draft-recovery-banner {
 
 .custom-select-chevron {
   color: var(--gray-400);
-  transition: transform 200ms var(--ease);
+  display: inline-flex;
+  transform: scaleY(1);
+  transform-origin: center;
+  transition: transform var(--acc-chevron) var(--acc-ease);
   flex-shrink: 0;
 }
 
+.custom-select-chevron path {
+  vector-effect: non-scaling-stroke;
+}
+
 .custom-select.open .custom-select-chevron {
-  transform: rotate(180deg);
+  transform: scaleY(-1);
 }
 
 .custom-select-dropdown {
@@ -3911,15 +4489,26 @@ body.electron-app .draft-recovery-banner {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.08);
   padding: 6px;
   z-index: 100;
-  animation: dropdownSlideUp 180ms var(--ease);
+  transform-origin: bottom left;
+  animation: dropdownSlideUp var(--dropdown-open-dur) var(--dropdown-ease);
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
+.custom-select-dropdown.is-closing {
+  pointer-events: none;
+  animation: dropdownClose var(--dropdown-close-dur) var(--dropdown-ease) forwards !important;
+}
+
 @keyframes dropdownSlideUp {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(var(--distance-micro)) scale(var(--dropdown-pre-scale)); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes dropdownClose {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(var(--dropdown-closing-scale)); }
 }
 
 .custom-select-option {
@@ -3942,7 +4531,7 @@ body.electron-app .draft-recovery-banner {
 }
 
 .custom-select-option:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
 }
 
 .custom-select-option.selected {
@@ -4025,70 +4614,64 @@ body.electron-app .draft-recovery-banner {
   border-radius: var(--radius-full);
 }
 
-/* ─── 2-Column Transcript Layout ─── */
-.transcript-columns {
+/* ─── Bilingual layout — stacked ───
+   Source text on top, translation directly beneath it (no side column).
+   The two halves can never drift apart; no reading-fight between a left
+   column and a right column. Zebra striping keeps the eye on the pair. */
+.sentence-pairs-mode {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 2px;
   width: 100%;
 }
-
-.transcript-list.with-translation .transcript-columns {
-  flex-direction: row;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-  margin-top: 8px;
+.sentence-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  align-items: stretch;
 }
-
-.transcript-list.with-translation .transcript-item:first-child .transcript-columns {
-  border-top: none;
-  padding-top: 0;
+.sentence-pair.alt {
+  background: rgba(99, 102, 241, 0.045);
+}
+.sentence-pair .translation-text,
+.sentence-pair .transcript-text {
   margin-top: 0;
 }
 
-.transcript-col-text,
-.transcript-col-translation {
-  flex: 1;
-  min-width: 0; /* prevent flex blowout */
+/* Vertical stack (interim + non-sentence rows): source, then translation. */
+.transcript-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+.transcript-stack .translation-text {
+  margin: 0 0 0 14px;
 }
 
-/* Base translation style outside of sentences */
+/* ─── (old 2-column layout removed in the stacked-bilingual redesign) ─── */
+
+/* Base translation style: quiet subtitle under the source text. */
 .translation-text {
-  font-size: 0.9rem;
-  color: #2563eb;
-  line-height: 1.6;
-  padding-left: 12px;
-  border-left: 3px solid #bfdbfe;
-  background: rgba(239, 246, 255, 0.4);
-  padding: 8px 12px;
-  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+  color: #64748b;
+  line-height: 1.55;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-top: 2px;
 }
 
-.translation-text.live-translation {
-  font-style: italic;
-  color: #64748b;
-  border-left-color: #cbd5e1;
-  background: transparent;
-  padding: 0 0 0 12px;
+[data-theme="dark"] .translation-text {
+  color: var(--text-secondary);
 }
 
 /* ─── Translation Text ─── */
-.transcript-translation {
-  font-size: 0.82rem;
-  color: #2563eb;
-  font-style: italic;
-  padding: 4px 0 0;
-  line-height: 1.5;
-  border-left: 2px solid #93c5fd;
-  padding-left: 10px;
-  margin-top: 4px;
-  min-height: 1.2em;
-}
-
-.transcript-translation.streaming::after {
-  content: '▍';
+.blink-cursor {
   animation: blink-cursor 0.7s infinite;
-  color: #2563eb;
 }
 
 @keyframes blink-cursor {
@@ -4154,7 +4737,8 @@ body.electron-app .draft-recovery-banner {
   gap: 4px;
 }
 
-.sentence-delete-btn {
+.sentence-delete-btn,
+.sentence-edit-btn {
   flex-shrink: 0;
   width: 20px;
   height: 20px;
@@ -4172,13 +4756,27 @@ body.electron-app .draft-recovery-banner {
 }
 
 .sentence-row:hover .sentence-delete-btn,
-.sentence-group:hover .sentence-delete-btn {
+.sentence-group:hover .sentence-delete-btn,
+.sentence-row:hover .sentence-edit-btn,
+.sentence-group:hover .sentence-edit-btn {
   opacity: 1;
 }
 
 .sentence-delete-btn:hover {
   color: #ef4444;
   background: rgba(239, 68, 68, 0.08);
+}
+
+.sentence-edit-btn:hover {
+  color: var(--accent, #6366f1);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+/* Action buttons row above the sentence list (sentence mode) */
+.sentence-actions-row {
+  justify-content: flex-end;
+  gap: 2px;
+  min-height: 0;
 }
 
 .sentence-translation {
@@ -4208,141 +4806,7 @@ body.electron-app .draft-recovery-banner {
   line-height: 1.4;
 }
 
-/* ─── Backend Log Panel ─── */
-.log-panel {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 1500;
-  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
-}
-
-.log-panel__toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 14px;
-  background: #1e1e2e;
-  color: #a6adc8;
-  border: none;
-  border-top: 1px solid #313244;
-  cursor: pointer;
-  font-size: 0.72rem;
-  font-family: inherit;
-  width: 100%;
-  text-align: left;
-  transition: background 0.15s;
-}
-
-.log-panel__toggle:hover {
-  background: #262637;
-}
-
-.log-panel__badge {
-  background: #45475a;
-  color: #cdd6f4;
-  font-size: 0.65rem;
-  padding: 1px 6px;
-  border-radius: 99px;
-  margin-left: auto;
-  margin-right: 4px;
-}
-
-.log-panel__body {
-  background: #1e1e2e;
-  border-top: 1px solid #313244;
-  display: flex;
-  flex-direction: column;
-  height: 240px;
-}
-
-.log-panel__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-bottom: 1px solid #313244;
-}
-
-.log-panel__filter {
-  flex: 1;
-  background: #11111b;
-  border: 1px solid #313244;
-  border-radius: 4px;
-  padding: 4px 8px;
-  color: #cdd6f4;
-  font-size: 0.72rem;
-  font-family: inherit;
-  outline: none;
-}
-
-.log-panel__filter:focus {
-  border-color: #89b4fa;
-}
-
-.log-panel__filter::placeholder {
-  color: #585b70;
-}
-
-.log-panel__clear {
-  background: none;
-  border: 1px solid #45475a;
-  color: #a6adc8;
-  border-radius: 4px;
-  padding: 3px 8px;
-  cursor: pointer;
-  font-size: 0.72rem;
-  transition: all 0.15s;
-}
-
-.log-panel__clear:hover {
-  background: #45475a;
-  color: #f38ba8;
-}
-
-.log-panel__scroll {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px 10px;
-  font-size: 0.7rem;
-  line-height: 1.55;
-}
-
-.log-panel__scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.log-panel__scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.log-panel__scroll::-webkit-scrollbar-thumb {
-  background: #45475a;
-  border-radius: 3px;
-}
-
-.log-line {
-  color: #a6adc8;
-  white-space: pre-wrap;
-  word-break: break-all;
-  padding: 1px 0;
-}
-
-.log-line--error {
-  color: #f38ba8;
-  font-weight: 600;
-}
-
-.log-line--warn {
-  color: #fab387;
-}
-
-.log-line--diarize {
-  color: #89dceb;
-}
-
-/* ─── Toast Notifications ─── */
+/* ─── Toast Notifications (Sonner / Linear surface style + transitions.dev 22-toast.md) ─── */
 .toast-container {
   position: fixed;
   top: 16px;
@@ -4350,7 +4814,7 @@ body.electron-app .draft-recovery-banner {
   z-index: 10000;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   pointer-events: none;
 }
 
@@ -4358,102 +4822,97 @@ body.electron-app .draft-recovery-banner {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 18px;
-  border-radius: 10px;
-  font-size: 13.5px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
   font-weight: 500;
-  color: #fff;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.08);
+  color: var(--text);
+  background: var(--white);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
   pointer-events: auto;
-  animation: toast-in 0.35s cubic-bezier(0.21, 1.02, 0.73, 1) forwards;
+  animation: toast-in var(--toast-open) var(--toast-ease) forwards;
   max-width: 380px;
   min-width: 220px;
   position: relative;
-  overflow: hidden;
   cursor: pointer;
+  will-change: transform, opacity, filter;
 }
 
-.toast::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.35);
-  animation: toast-progress 3.5s linear forwards;
+[data-theme="dark"] .toast {
+  background: #1e1e22;
+  border-color: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .toast-exit {
-  animation: toast-out 0.3s ease-in forwards;
-}
-
-.toast-exit::after {
-  animation: none;
-}
-
-.toast-success {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.94), rgba(22, 163, 74, 0.94));
-}
-
-.toast-error {
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.94), rgba(220, 38, 38, 0.94));
-}
-
-.toast-info {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.94), rgba(37, 99, 235, 0.94));
-}
-
-.toast-warning {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.94), rgba(217, 119, 6, 0.94));
+  animation: toast-out var(--toast-close) var(--toast-ease) forwards;
 }
 
 .toast-icon {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
   flex-shrink: 0;
   line-height: 1;
+}
+
+.toast-success .toast-icon {
+  color: var(--success, #16a34a);
+}
+
+.toast-error .toast-icon {
+  color: var(--danger, #ef4444);
+}
+
+.toast-info .toast-icon {
+  color: var(--indigo-500, #6366f1);
+}
+
+.toast-warning .toast-icon {
+  color: var(--warning, #d97706);
 }
 
 .toast-msg {
   flex: 1;
-  line-height: 1.35;
-  letter-spacing: 0.01em;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  color: var(--text);
 }
 
 .toast-dismiss {
-  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   cursor: pointer;
-  padding: 2px;
-  font-size: 14px;
-  line-height: 1;
+  padding: 0;
   flex-shrink: 0;
-  transition: color 0.15s;
+  transition: color var(--duration-quick) var(--ease-smooth-out),
+              background var(--duration-quick) var(--ease-smooth-out);
 }
 
 .toast-dismiss:hover {
-  color: #fff;
+  color: var(--text);
+  background: var(--bg-elevated);
 }
 
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(-12px) scale(0.96);
+    transform: translateY(calc(-1 * var(--toast-distance))) scale(var(--toast-scale));
+    filter: blur(var(--toast-blur));
   }
 
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+    filter: blur(0);
   }
 }
 
@@ -4461,11 +4920,13 @@ body.electron-app .draft-recovery-banner {
   from {
     opacity: 1;
     transform: translateY(0) scale(1);
+    filter: blur(0);
   }
 
   to {
     opacity: 0;
-    transform: translateY(-8px) scale(0.96);
+    transform: translateY(calc(-0.5 * var(--toast-distance))) scale(var(--toast-scale));
+    filter: blur(var(--toast-blur));
   }
 }
 
@@ -4548,7 +5009,7 @@ body.electron-app .draft-recovery-banner {
   align-items: center;
   justify-content: center;
   border: none;
-  background: var(--gray-200);
+  background: var(--border);
   border-radius: 50%;
   color: var(--gray-600);
   cursor: pointer;
@@ -4596,7 +5057,7 @@ body.electron-app .draft-recovery-banner {
 
 .setting-eye-btn:hover {
   color: var(--text);
-  background: var(--gray-100);
+  background: var(--bg-elevated);
 }
 
 /* ─── Word Count Badge ─── */
@@ -4723,6 +5184,14 @@ body.electron-app .draft-recovery-banner {
 @keyframes startup-strip-in {
   from { opacity: 0; transform: translateY(20px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+[data-theme="dark"] .startup-status {
+  background: rgba(30, 41, 59, 0.96);
+  border-color: rgba(129, 140, 248, 0.35);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
 .startup-status-bar {
@@ -4942,7 +5411,7 @@ body.electron-app .draft-recovery-banner {
   justify-content: center;
   z-index: 10001;
   padding: 24px;
-  animation: fadeIn 0.18s ease;
+  animation: fadeIn var(--modal-open-dur) var(--modal-ease);
 }
 
 .update-modal {
@@ -4955,11 +5424,12 @@ body.electron-app .draft-recovery-banner {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: updateModalIn 0.2s ease;
+  transform-origin: center;
+  animation: updateModalIn var(--modal-open-dur) var(--modal-ease);
 }
 
 @keyframes updateModalIn {
-  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  from { opacity: 0; transform: translateY(var(--distance-base)) scale(var(--modal-scale)); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -5138,7 +5608,7 @@ body.electron-app .draft-recovery-banner {
 
 .update-modal-btn {
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-full);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -5203,19 +5673,27 @@ body.electron-app .draft-recovery-banner {
   margin-top: 2px;
 }
 .settings-update-check-btn {
-  padding: 6px 12px;
-  border-radius: 7px;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  font-family: var(--font);
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  background: var(--bg, #fff);
-  border: 1px solid var(--indigo-500, #6366f1);
-  color: var(--indigo-500, #6366f1);
-  transition: background 0.15s, color 0.15s;
+  background: var(--white);
+  border: 1px solid var(--border);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+  transition:
+    background-color var(--duration-quick) var(--ease-smooth-out),
+    border-color var(--duration-quick) var(--ease-smooth-out),
+    color var(--duration-quick) var(--ease-smooth-out);
 }
 .settings-update-check-btn:hover:not(:disabled) {
-  background: var(--indigo-500, #6366f1);
-  color: #fff;
+  background: var(--hover);
+  border-color: var(--gray-300);
 }
 .settings-update-check-btn:disabled {
   cursor: not-allowed;
@@ -5229,6 +5707,54 @@ body.electron-app .draft-recovery-banner {
 .settings-update-status.success { color: #16a34a; }
 .settings-update-status.error   { color: #dc2626; }
 
+/* ─── Settings: dark theme ───
+   Light-theme rules above use fixed --gray-* tones that do not flip in dark
+   mode (white theme/provider cards, light header wash, light update list).
+   Only dark overrides here so the light design stays exactly as it was. */
+[data-theme="dark"] .settings-panel {
+  border-left-color: var(--border);
+}
+[data-theme="dark"] .settings-panel-header {
+  background: var(--bg);
+  border-bottom-color: var(--border);
+}
+[data-theme="dark"] .provider-tab {
+  background: var(--bg-elevated);
+  border-color: var(--border);
+}
+[data-theme="dark"] .provider-tab:hover {
+  background: var(--bg-elevated);
+  border-color: var(--text-muted);
+}
+[data-theme="dark"] .provider-tab.active {
+  background: rgba(99, 102, 241, 0.16);
+  border-color: var(--indigo-500);
+}
+[data-theme="dark"] .provider-tab.active strong {
+  color: #a5b4fc;
+}
+/* --surface is darker than the --bg-elevated track in dark mode, which made
+   the active tab look pressed in; lift it above the track instead. */
+[data-theme="dark"] .settings-tabs:not(.has-pill) .settings-tab.active {
+  background: var(--border);
+}
+[data-theme="dark"] .settings-update-list {
+  background: var(--bg-sub);
+  border-color: var(--border);
+}
+[data-theme="dark"] .settings-update-row {
+  border-top-color: var(--border);
+}
+/* --primary turns light grey in dark mode, so a white knob on it vanished. */
+[data-theme="dark"] .toggle-slider {
+  background: var(--border);
+}
+[data-theme="dark"] .toggle input:checked + .toggle-slider {
+  background: var(--indigo-500);
+}
+
+
+/* ─── Settings: Update controls ──────────────────────────────────────── */
 /* ─── Upload Audio Modal ─────────────────────────────────────────────── */
 
 .upload-modal-overlay {
@@ -5242,11 +5768,11 @@ body.electron-app .draft-recovery-banner {
   /* Extra top padding keeps the card clear of the draggable topnav
      (which floats above this overlay so the window stays draggable). */
   padding: 56px 24px 24px;
-  animation: fadeIn 0.18s ease;
+  animation: fadeIn var(--modal-open-dur) var(--modal-ease);
 }
 
 .upload-modal-card {
-  background: #ffffff;
+  background: var(--white);
   border-radius: 18px;
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.18), 0 6px 18px rgba(0, 0, 0, 0.08);
   width: 100%;
@@ -5258,6 +5784,8 @@ body.electron-app .draft-recovery-banner {
      the card and render above sibling rows when it opens upward. With
      `hidden` only the middle slice of the 13-item language list showed. */
   overflow: visible;
+  transform-origin: center;
+  animation: tModalOpen var(--modal-open-dur) var(--modal-ease);
 }
 
 .upload-modal-header {
@@ -5337,7 +5865,7 @@ body.electron-app .draft-recovery-banner {
 
 .upload-file-picker:hover {
   border-color: var(--indigo-400, #818cf8);
-  background: #fff;
+  background: var(--white);
 }
 
 .upload-file-picker svg {
@@ -5369,11 +5897,11 @@ body.electron-app .draft-recovery-banner {
 .upload-field-input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--gray-200, #e2e8f0);
+  border: 1px solid var(--border);
   border-radius: 9px;
   font-size: 13px;
-  color: var(--text, #0f172a);
-  background: #fff;
+  color: var(--text);
+  background: var(--white);
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -5566,11 +6094,11 @@ body.electron-app .draft-recovery-banner {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 14px;
   margin-bottom: 10px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
   box-shadow: var(--shadow-xs);
 }
 
@@ -5619,7 +6147,7 @@ body.electron-app .draft-recovery-banner {
 }
 
 .transcript-search-clear:hover {
-  background: var(--gray-100);
+  background: var(--bg-elevated);
   color: var(--text);
 }
 
@@ -5637,10 +6165,16 @@ mark.transcript-hl {
   padding: 0 1px;
 }
 
+.action-btn.active,
 .action-btn.icon-only.active {
   background: var(--indigo-50);
   color: var(--indigo-600);
-  border-color: var(--indigo-500);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+[data-theme="dark"] .action-btn.active,
+[data-theme="dark"] .action-btn.icon-only.active {
+  color: #818cf8;
+  border-color: rgba(129, 140, 248, 0.35);
 }
 
 /* Lock config/navigation while recording (a stop saves a draft first). */
@@ -5652,4 +6186,510 @@ mark.transcript-hl {
 .back-btn.is-locked {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ─── Dark theme: comprehensive surface & contrast system ─── */
+[data-theme="dark"] .topnav {
+  background: rgba(13, 14, 17, 0.84);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+[data-theme="dark"] .brand {
+  background: linear-gradient(135deg, #ffffff 0%, #a5b4fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+[data-theme="dark"] .backend-status-chip.online {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.28);
+  color: #4ade80;
+}
+[data-theme="dark"] .backend-status-chip.offline {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.28);
+  color: #f87171;
+}
+[data-theme="dark"] .backend-status-chip.starting {
+  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+}
+[data-theme="dark"] .backend-status-chip.network-offline {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+[data-theme="dark"] .meeting-card {
+  background: #15171e;
+  border-color: rgba(255, 255, 255, 0.07);
+}
+[data-theme="dark"] .meeting-card:hover {
+  background: #1a1d26;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+[data-theme="dark"] .card-menu,
+[data-theme="dark"] .custom-select-dropdown,
+[data-theme="dark"] .minutes-modal,
+[data-theme="dark"] .upload-modal-card,
+[data-theme="dark"] .update-modal,
+[data-theme="dark"] .export-picker,
+[data-theme="dark"] .confirm-box {
+  background: #1b1e28;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+[data-theme="dark"] .custom-select-option.selected {
+  background: rgba(99, 102, 241, 0.18);
+  color: #a5b4fc;
+}
+[data-theme="dark"] .card-action-btn[data-tooltip]::after {
+  background: #252836;
+  color: #f3f4f6;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+[data-theme="dark"] .action-btn,
+[data-theme="dark"] .settings-test-btn,
+[data-theme="dark"] .settings-update-check-btn {
+  background: #171920;
+  border-color: rgba(255, 255, 255, 0.09);
+  color: var(--gray-700);
+}
+[data-theme="dark"] .action-btn:hover:not(:disabled),
+[data-theme="dark"] .settings-test-btn:hover:not(:disabled),
+[data-theme="dark"] .settings-update-check-btn:hover:not(:disabled) {
+  background: #1f222c;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text);
+}
+[data-theme="dark"] .action-btn.primary,
+[data-theme="dark"] .rec-summarize-btn:not(.needs-setup),
+[data-theme="dark"] .settings-solid-btn {
+  background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 2px 10px rgba(79, 70, 229, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+[data-theme="dark"] .action-btn.primary:hover:not(:disabled),
+[data-theme="dark"] .rec-summarize-btn:not(.needs-setup):hover:not(:disabled),
+[data-theme="dark"] .settings-solid-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #7174f4 0%, #5b52eb 100%);
+  box-shadow: 0 4px 16px rgba(79, 70, 229, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+[data-theme="dark"] .action-btn.danger {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.22);
+}
+[data-theme="dark"] .action-btn.danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fca5a5;
+}
+[data-theme="dark"] .rec-bar {
+  background: rgba(18, 20, 26, 0.9);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+[data-theme="dark"] .rec-bar.recording {
+  background: rgba(20, 22, 29, 0.95);
+  border-color: rgba(239, 68, 68, 0.28);
+}
+[data-theme="dark"] .translation-bar {
+  background: #12141a;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+[data-theme="dark"] .settings-section {
+  background: #15171e;
+  border-color: rgba(255, 255, 255, 0.07);
+}
+[data-theme="dark"] .settings-panel-footer {
+  background: #12141a;
+  border-top-color: rgba(255, 255, 255, 0.07);
+}
+[data-theme="dark"] .setting-input,
+[data-theme="dark"] .custom-select-trigger,
+[data-theme="dark"] .meetings-search-input,
+[data-theme="dark"] .transcript-search {
+  background: #13151c;
+  border-color: rgba(255, 255, 255, 0.09);
+  color: var(--text);
+}
+[data-theme="dark"] .setting-input:focus,
+[data-theme="dark"] .meetings-search-input:focus,
+[data-theme="dark"] .transcript-search:focus-within,
+[data-theme="dark"] .custom-select.open .custom-select-trigger {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+[data-theme="dark"] .transcript-item:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+[data-theme="dark"] .transcript-item.live {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.1), transparent);
+}
+[data-theme="dark"] .transcript-item.playing {
+  background: rgba(99, 102, 241, 0.12);
+}
+[data-theme="dark"] .sentence-translation,
+[data-theme="dark"] .translation-text {
+  color: #93c5fd;
+}
+[data-theme="dark"] .card-delete-btn:hover,
+[data-theme="dark"] .t-delete-btn:hover { background: rgba(239, 68, 68, 0.14); }
+[data-theme="dark"] .draft-badge { background: rgba(245, 158, 11, 0.14); color: #fbbf24; }
+[data-theme="dark"] .rec-pause-btn:hover,
+[data-theme="dark"] .rec-bar.paused .rec-pause-btn { background: rgba(245, 158, 11, 0.16); }
+[data-theme="dark"] .transcript-text.editing { background: rgba(59, 130, 246, 0.1); }
+[data-theme="dark"] .config-badge.configured { background: rgba(34, 197, 94, 0.14); color: #4ade80; }
+[data-theme="dark"] .config-badge.not-configured { background: rgba(245, 158, 11, 0.14); color: #fbbf24; }
+[data-theme="dark"] .update-modal-error { background: rgba(239, 68, 68, 0.12); }
+[data-theme="dark"] .upload-done-icon { background: rgba(34, 197, 94, 0.14); }
+[data-theme="dark"] mark.transcript-hl { background: rgba(250, 204, 21, 0.3); color: inherit; }
+
+/* ─── Icon button affordance (both themes) ───
+   Hover existed per component but was nearly invisible (a 2-3% background
+   shift, icon colour unchanged) — in dark mode especially. One shared layer
+   makes every icon button answer the pointer the same way: a clear hover
+   wash, the icon lifting to full text colour, a press-in on click and a
+   keyboard focus ring. Destructive buttons keep their own red hover. */
+:root { --hover: var(--gray-100); }
+[data-theme="dark"] { --hover: #252836; }
+
+:is(.icon-btn, .card-action-btn, .card-menu-btn, .transcript-action-btn,
+    .setting-eye-btn, .speaker-edit-btn, .settings-close-btn, .lang-toggle,
+    .sentence-edit-btn, .sentence-delete-btn, .t-delete-btn, .card-delete-btn,
+    .rec-pause-btn, .rec-download-btn, .transcript-seek-btn, .settings-tab) {
+  cursor: pointer;
+  transition: background-color 140ms var(--ease), color 140ms var(--ease),
+    border-color 140ms var(--ease), transform 140ms var(--ease);
+}
+:is(.icon-btn, .card-action-btn, .card-menu-btn, .transcript-action-btn,
+    .setting-eye-btn, .speaker-edit-btn, .settings-close-btn, .lang-toggle,
+    .settings-tab):hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+:is(.icon-btn, .card-action-btn, .card-menu-btn, .transcript-action-btn,
+    .setting-eye-btn, .speaker-edit-btn, .sentence-edit-btn,
+    .sentence-delete-btn, .t-delete-btn, .card-delete-btn, .rec-pause-btn,
+    .rec-download-btn, .transcript-seek-btn) svg {
+  transition: transform 140ms var(--ease);
+}
+:is(.icon-btn, .card-action-btn, .card-menu-btn, .transcript-action-btn,
+    .setting-eye-btn, .speaker-edit-btn, .sentence-edit-btn,
+    .sentence-delete-btn, .t-delete-btn, .card-delete-btn, .rec-pause-btn,
+    .rec-download-btn, .transcript-seek-btn):hover:not(:disabled) svg {
+  transform: scale(1.1);
+}
+:is(.icon-btn, .card-action-btn, .card-menu-btn, .transcript-action-btn,
+    .setting-eye-btn, .speaker-edit-btn, .sentence-edit-btn,
+    .sentence-delete-btn, .t-delete-btn, .card-delete-btn, .rec-pause-btn,
+    .rec-download-btn, .lang-toggle):active:not(:disabled) {
+  transform: scale(0.94);
+}
+/* Keep the active settings tab distinct from a hovered one. */
+.settings-tabs:not(.has-pill) .settings-tab.active:hover { background: var(--surface); }
+[data-theme="dark"] .settings-tabs:not(.has-pill) .settings-tab.active:hover { background: var(--border); }
+:is(.icon-btn, .card-action-btn, .card-menu-btn, .transcript-action-btn,
+    .setting-eye-btn, .speaker-edit-btn, .settings-close-btn, .lang-toggle,
+    .sentence-edit-btn, .sentence-delete-btn, .t-delete-btn, .card-delete-btn,
+    .rec-pause-btn, .rec-download-btn, .transcript-seek-btn, .settings-tab,
+    .rec-main-btn):focus-visible {
+  outline: 2px solid var(--indigo-500);
+  outline-offset: 2px;
+}
+/* ── transitions.dev portable utility classes (t-dropdown, t-modal, t-icon-swap, t-toast, t-stream-w) ── */
+.t-dropdown {
+  transform-origin: top left;
+  transform: scale(var(--dropdown-pre-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-open-dur) var(--dropdown-ease),
+    opacity   var(--dropdown-open-dur) var(--dropdown-ease);
+  will-change: transform, opacity;
+}
+.t-dropdown[data-origin="top-right"]     { transform-origin: top right; }
+.t-dropdown[data-origin="top-center"]    { transform-origin: top center; }
+.t-dropdown[data-origin="bottom-left"]   { transform-origin: bottom left; }
+.t-dropdown[data-origin="bottom-center"] { transform-origin: bottom center; }
+.t-dropdown[data-origin="bottom-right"]  { transform-origin: bottom right; }
+.t-dropdown.is-open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+.t-dropdown.is-closing {
+  transform: scale(var(--dropdown-closing-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dropdown-close-dur) var(--dropdown-ease),
+    opacity   var(--dropdown-close-dur) var(--dropdown-ease);
+}
+
+.t-modal {
+  transform-origin: center;
+  transform: scale(var(--modal-scale));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--modal-open-dur) var(--modal-ease),
+    opacity   var(--modal-open-dur) var(--modal-ease);
+  will-change: transform, opacity;
+}
+.t-modal.is-open {
+  transform: scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+.t-modal.is-closing {
+  transform: scale(var(--modal-scale-close));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--modal-close-dur) var(--modal-ease),
+    opacity   var(--modal-close-dur) var(--modal-ease);
+}
+
+.t-icon-swap {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+.t-icon-swap .t-icon {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    opacity   var(--icon-swap-dur) var(--icon-swap-ease),
+    filter    var(--icon-swap-dur) var(--icon-swap-ease),
+    transform var(--icon-swap-dur) var(--icon-swap-ease);
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="a"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="b"] {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="b"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="a"] {
+  opacity: 0;
+  filter: blur(var(--icon-swap-blur));
+  transform: scale(var(--icon-swap-start-scale));
+}
+
+.t-stream-w {
+  opacity: 0;
+  filter: blur(var(--stream-blur));
+  transition:
+    opacity var(--stream-fade) var(--stream-ease),
+    filter var(--stream-fade) var(--stream-ease);
+}
+.t-stream-w.is-in {
+  opacity: 1;
+  filter: blur(0);
+}
+
+/* ── Page side-by-side & Pane reveal (08-page-side-by-side.md / 07-panel-reveal.md) ── */
+@keyframes tPageFromLeft {
+  from {
+    opacity: 0;
+    transform: translateX(calc(-1 * var(--distance-base)));
+    filter: blur(var(--blur-medium));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+@keyframes tPageFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(var(--distance-base));
+    filter: blur(var(--blur-medium));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+@keyframes tPaneReveal {
+  from {
+    opacity: 0;
+    transform: translateY(var(--distance-micro));
+    filter: blur(var(--blur-small));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes slideOutRight {
+  from {
+    transform: translateX(0);
+    filter: blur(0);
+  }
+  to {
+    transform: translateX(100%);
+    filter: blur(var(--panel-blur));
+  }
+}
+@keyframes tModalClose {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(var(--modal-scale-close));
+  }
+}
+
+.t-page-enter-left {
+  animation: tPageFromLeft var(--duration-fast) var(--ease-smooth-out) both;
+}
+.t-page-enter-right {
+  animation: tPageFromRight var(--duration-fast) var(--ease-smooth-out) both;
+}
+.t-pane-enter,
+.settings-section {
+  animation: tPaneReveal var(--duration-fast) var(--ease-smooth-out) both;
+}
+
+.settings-overlay.is-closing {
+  pointer-events: none;
+  animation: fadeOut var(--duration-quick) var(--panel-ease) forwards !important;
+}
+.settings-panel.is-closing {
+  pointer-events: none;
+  animation: slideOutRight var(--panel-close-dur) var(--panel-ease) forwards !important;
+}
+
+.minutes-modal-overlay.is-closing,
+.upload-modal-overlay.is-closing {
+  pointer-events: none;
+  animation: fadeOut var(--modal-close-dur) var(--modal-ease) forwards !important;
+}
+.minutes-modal.is-closing,
+.upload-modal-card.is-closing {
+  pointer-events: none;
+  animation: tModalClose var(--modal-close-dur) var(--modal-ease) forwards !important;
+}
+
+/* ── Accordion expand (21-accordion.md) ── */
+.t-acc-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] .t-acc-panel {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--acc-expand) var(--acc-ease);
+}
+.t-acc-panel-inner {
+  overflow: hidden;
+  min-height: 0;
+  opacity: 0;
+  filter: blur(2px);
+  transition:
+    opacity var(--acc-collapse) var(--acc-ease),
+    filter var(--acc-collapse) var(--acc-ease);
+}
+.t-acc[data-open="true"] .t-acc-panel-inner {
+  opacity: 1;
+  filter: blur(0);
+  transition:
+    opacity var(--acc-expand) var(--acc-ease),
+    filter var(--acc-expand) var(--acc-ease);
+}
+.t-acc-chevron {
+  display: inline-flex;
+  transform: scaleY(1);
+  transform-origin: center;
+  transition: transform var(--acc-chevron) var(--acc-ease);
+}
+.t-acc-chevron path {
+  vector-effect: non-scaling-stroke;
+}
+.t-acc[data-open="true"] .t-acc-chevron {
+  transform: scaleY(-1);
+}
+
+/* ── Texts reveal staggered entrance (18-texts-reveal.md) ── */
+@keyframes tStaggerRise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--distance-medium));
+    filter: blur(var(--blur-medium));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+.welcome-state > *,
+.listening-state > *,
+.list-empty > * {
+  animation: tStaggerRise var(--duration-very-slow) var(--ease-smooth-out) both;
+}
+.welcome-state > *:nth-child(2),
+.listening-state > *:nth-child(2),
+.list-empty > *:nth-child(2) {
+  animation-delay: var(--duration-stagger);
+}
+.welcome-state > *:nth-child(3),
+.listening-state > *:nth-child(3),
+.list-empty > *:nth-child(3) {
+  animation-delay: calc(var(--duration-stagger) * 2);
+}
+
+/* ── Shimmer text (15-shimmer-text.md) ── */
+.t-shimmer {
+  position: relative;
+  display: inline-block;
+  color: var(--text-secondary);
+}
+.t-shimmer::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--text) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: 400% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: t-shimmer 2000ms var(--ease-linear) infinite;
+}
+@keyframes t-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: 0% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.icon-btn, .card-action-btn, .card-menu-btn, .transcript-action-btn,
+      .setting-eye-btn, .speaker-edit-btn, .sentence-edit-btn,
+      .sentence-delete-btn, .t-delete-btn, .card-delete-btn, .rec-pause-btn,
+      .rec-download-btn, .transcript-seek-btn) svg { transition: none; transform: none !important; }
+  .t-dropdown, .t-modal, .t-icon-swap .t-icon, .t-stream-w, .custom-select-chevron {
+    transition: none !important;
+    animation: none !important;
+  }
 }

@@ -3,6 +3,7 @@ import { useAppStore } from '../stores/appStore';
 import { useUpdaterStore } from '../stores/updaterStore';
 import { downloadAndInstall, formatMB, estimateETA, formatETA } from '../lib/updater';
 import { Markdown } from '../lib/markdown';
+import { IconClose, IconDownload } from './icons/scribble-icons';
 
 /**
  * Full release-notes modal. Opens from the banner's "View" button or from
@@ -53,11 +54,7 @@ export function UpdateModal() {
             <div className="update-modal">
                 <div className="update-modal-header">
                     <div className="update-modal-title">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" x2="12" y1="15" y2="3" />
-                        </svg>
+                        <IconDownload size={22} />
                         <div>
                             <h3>
                                 {lang === 'vi'
@@ -79,7 +76,7 @@ export function UpdateModal() {
                             onClick={() => setModalOpen(false)}
                             aria-label={lang === 'vi' ? 'Đóng' : 'Close'}
                         >
-                            ×
+                            <IconClose size={16} />
                         </button>
                     )}
                 </div>

@@ -70,3 +70,13 @@ releases/
 # pytest coverage
 .coverage
 src-python/.coverage
+
+# Offline models — fetched by scripts/fetch-build-deps.sh (sha256-pinned).
+# Only tokens.txt (generated, not on HF) and the in-house converted speaker
+# model src-tauri/models/speaker_embedding_resnet34.onnx are committed.
+src-tauri/resources/models/local/sherpa-onnx-zipformer-vi-streaming-30M/*.onnx
+src-tauri/resources/models/local/sherpa-onnx-zipformer-vi-streaming-30M/bpe.model
+src-tauri/resources/models/local/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09/
+src-tauri/models/speaker_eres2net_base.onnx
+src-python/models/
+.claude/

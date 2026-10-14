@@ -4,12 +4,16 @@
 #   ./build.sh           # Build for current platform
 #   ./build.sh macos     # Build macOS DMG
 #   ./build.sh windows   # Build Windows NSIS installer (requires Windows or cross-compile)
+#
+# NOTE (2026-10-09): the backend is now a Rust axum server running INSIDE the
+# Tauri process. The Python FastAPI sidecar was removed entirely, so this
+# script no longer runs PyInstaller, strips a sidecar binary, or compresses a
+# `sidecar-dist.tar.zst`. All that remains: build the frontend, build the Rust
+# app, and bundle the offline models + ffmpeg sidecar (tauri.conf.json).
 
 set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-SIDECAR_DIR="$ROOT/src-python"
-BINARIES_DIR="$ROOT/src-tauri/binaries"
 
 PLATFORM="${1:-auto}"
 if [ "$PLATFORM" = "auto" ]; then
@@ -22,121 +26,54 @@ fi
 
 echo "🔨 Building Scribble for: $PLATFORM"
 
-# ── Step 1: Build Python sidecar (AV-optimized: no UPX, excludes, version info) ──
+# ── Step 1: Stage the offline models + ffmpeg sidecar ──
+# They ship inside the app, so a missing file would produce an app that
+# cannot transcribe. Same script as CI; downloads are sha256-pinned and
+# cached, so re-runs are instant.
 echo ""
-echo "📦 Building Python sidecar..."
-cd "$SIDECAR_DIR"
+bash "$ROOT/scripts/fetch-build-deps.sh"
 
-# Activate venv if exists, otherwise use system python3
-if [ -f "$SIDECAR_DIR/.venv/bin/activate" ]; then
-    source "$SIDECAR_DIR/.venv/bin/activate"
-fi
-PYTHON_CMD="${PYTHON_CMD:-python3}"
-
-$PYTHON_CMD -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-# ── onedir: copy entire directory to binaries + create launcher shim ──
-SIDECAR_DIST="$SIDECAR_DIR/dist/scribble-sidecar"
-if [ ! -d "$SIDECAR_DIST" ]; then
-    echo "❌ onedir output not found at $SIDECAR_DIST"
-    exit 1
-fi
-
-# Clean old sidecar files
-rm -rf "$BINARIES_DIR"/scribble-sidecar-*
-rm -rf "$BINARIES_DIR"/sidecar-dist
-
-# ── Strip unnecessary files before compression ──
-echo "🗑️  Stripping sidecar-dist..."
-DIST_INT="$SIDECAR_DIST/_internal"
-rm -rf "$DIST_INT/grpc_tools" 2>/dev/null || true
-find "$DIST_INT" -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
-find "$DIST_INT" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-find "$DIST_INT" -name "*.pyc" -delete 2>/dev/null || true
-# NOTE: do NOT strip *.dist-info — transformers (Tier A nemotron MLX) reads
-# package metadata at runtime via importlib.metadata (e.g. tqdm>=4.27). Removing
-# dist-info breaks "No package metadata was found for tqdm" → nemotron won't load.
-
-# ── Compress into tar.zst (fast decompress at first launch) ──
-echo "📦 Compressing sidecar-dist..."
-STRIPPED_SIZE=$(du -sh "$SIDECAR_DIST" | cut -f1)
-echo "   Uncompressed: $STRIPPED_SIZE"
-# Strip macOS xattrs first, then tar with COPYFILE_DISABLE=1 so macOS does NOT
-# embed AppleDouble `._*` companion files. The Rust extractor (tar crate) does
-# not understand AppleDouble and would extract them as literal files — e.g.
-# transformers/models/._foo.py — which transformers' import scanner then reads
-# as UTF-8 source and crashes ("can't decode byte 0xa3"). Breaks Tier A nemotron.
-xattr -cr "$SIDECAR_DIST" 2>/dev/null || true
-COPYFILE_DISABLE=1 tar --zstd -cf "$BINARIES_DIR/sidecar-dist.tar.zst" -C "$SIDECAR_DIR/dist" scribble-sidecar
-COMPRESSED_SIZE=$(du -sh "$BINARIES_DIR/sidecar-dist.tar.zst" | cut -f1)
-echo "   Compressed:   $COMPRESSED_SIZE"
-
-# Clean raw directory — only ship compressed
-rm -rf "$BINARIES_DIR/sidecar-dist"
-
-# Create thin launcher script that Tauri can execute as externalBin
-if [ "$PLATFORM" = "windows" ]; then
-    SIDECAR_NAME="scribble-sidecar-x86_64-pc-windows-msvc.exe"
-    # Windows: create batch launcher
-    cat > "$BINARIES_DIR/$SIDECAR_NAME" << 'WINEOF'
-@echo off
-"%~dp0sidecar-dist\scribble-sidecar.exe" %*
-WINEOF
-elif [ "$PLATFORM" = "macos" ]; then
-    ARCH="$(uname -m)"
-    if [ "$ARCH" = "arm64" ]; then
-        SIDECAR_NAME="scribble-sidecar-aarch64-apple-darwin"
-    else
-        SIDECAR_NAME="scribble-sidecar-x86_64-apple-darwin"
-    fi
-    # macOS/Linux: create shell launcher that checks multiple locations
-    cat > "$BINARIES_DIR/$SIDECAR_NAME" << 'SHEOF'
-#!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
-# Check: same dir (dev), then Resources (macOS .app bundle)
-for candidate in \
-    "$DIR/sidecar-dist/scribble-sidecar" \
-    "$DIR/../Resources/sidecar-dist/scribble-sidecar"; do
-    if [ -x "$candidate" ]; then
-        exec "$candidate" "$@"
-    fi
-done
-echo "[sidecar-launcher] ERROR: scribble-sidecar not found" >&2
-exit 1
-SHEOF
-    chmod +x "$BINARIES_DIR/$SIDECAR_NAME"
-elif [ "$PLATFORM" = "linux" ]; then
-    SIDECAR_NAME="scribble-sidecar-x86_64-unknown-linux-gnu"
-    cat > "$BINARIES_DIR/$SIDECAR_NAME" << 'SHEOF'
-#!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
-for candidate in \
-    "$DIR/sidecar-dist/scribble-sidecar" \
-    "$DIR/../Resources/sidecar-dist/scribble-sidecar"; do
-    if [ -x "$candidate" ]; then
-        exec "$candidate" "$@"
-    fi
-done
-echo "[sidecar-launcher] ERROR: scribble-sidecar not found" >&2
-exit 1
-SHEOF
-    chmod +x "$BINARIES_DIR/$SIDECAR_NAME"
-fi
-echo "✅ Sidecar built (onedir): $SIDECAR_NAME + sidecar-dist/"
-
-# ── Step 2: Build Tauri app ──
+# ── Step 2: Frontend ──
 echo ""
-echo "🏗️  Building Tauri app..."
+echo "🎨 Building frontend..."
 cd "$ROOT"
+npx vite build
 
-if [ "$PLATFORM" = "macos" ]; then
-    npx tauri build -b dmg --verbose
-elif [ "$PLATFORM" = "windows" ]; then
-    npx tauri build -b nsis --verbose
-elif [ "$PLATFORM" = "linux" ]; then
-    npx tauri build -b deb --verbose
-fi
+# ── Step 3: Rust app (Tauri bundles the models per tauri.conf.json) ──
+echo ""
+echo "🦀 Building Tauri app..."
+case "$PLATFORM" in
+    macos)
+        # Nemotron on the Apple GPU (MLX) needs Xcode's Metal Toolchain to
+        # compile shaders at build time; without it, ship the ONNX path only.
+        if xcrun metal --version >/dev/null 2>&1; then
+            # mlx-sys writes the compiled shader library to MLX_RS_METAL_PATH;
+            # pin it so the exact file matching this build can be published.
+            export MLX_RS_METAL_PATH="$ROOT/src-tauri/target/mlx-metallib"
+            mkdir -p "$MLX_RS_METAL_PATH"
+            ( cd "$ROOT/src-tauri" && cargo build --release --features mlx --lib )
+            if [ ! -f "$MLX_RS_METAL_PATH/mlx.metallib" ]; then
+                echo "❌ mlx.metallib was not produced at $MLX_RS_METAL_PATH" >&2
+                exit 1
+            fi
+            npx tauri build --bundles app,dmg --features mlx
+            # The shaders (~174MB) are NOT bundled: users who pick Nemotron MLX
+            # download them with the model from this version's GitHub Release.
+            VERSION=$(grep -m1 '"version"' "$ROOT/src-tauri/tauri.conf.json" | sed -E 's/.*"([0-9.]+)".*/\1/')
+            cp "$MLX_RS_METAL_PATH/mlx.metallib" "$ROOT/src-tauri/target/release/bundle/mlx.metallib"
+            echo "📦 Upload the MLX shaders with the release:"
+            echo "   gh release upload v$VERSION src-tauri/target/release/bundle/mlx.metallib --clobber"
+        else
+            echo "⚠️  Metal Toolchain missing — building without the MLX engine."
+            echo "   Install: xcodebuild -downloadComponent MetalToolchain"
+            npx tauri build --bundles app,dmg
+        fi
+        ;;
+    windows) npx tauri build --bundles nsis ;;
+    linux)   npx tauri build --bundles deb,appimage ;;
+    *)       npx tauri build ;;
+esac
 
 echo ""
-echo "🎉 Build complete!"
-echo "   Output: src-tauri/target/release/bundle/"
+echo "✅ Build complete."
+echo "   Artifacts: src-tauri/target/release/bundle/"

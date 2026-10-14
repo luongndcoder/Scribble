@@ -127,6 +127,13 @@ export function useSummarize() {
             });
 
             let accumulated = "";
+            // A mid-stream `error` leaves a truncated document in `accumulated`.
+            // Saving it would overwrite the previous (complete) minutes, so on
+            // failure keep the old summary and only show the error.
+            let failed = false;
+            const previousSummary = mid
+                ? useAppStore.getState().meetings.find((m) => m.id === mid)?.summary
+                : undefined;
             await consumeSseResponse(res, {
                 onToken: (token) => {
                     accumulated += token;
@@ -157,6 +164,14 @@ export function useSummarize() {
                 },
                 onErrorEvent: (message) => {
                     console.warn("[summarize] SSE error:", message);
+                    failed = true;
+                    if (mid) {
+                        useAppStore.setState((s) => ({
+                            meetings: s.meetings.map((m) =>
+                                m.id === mid ? { ...m, summary: previousSummary ?? "" } : m,
+                            ),
+                        }));
+                    }
                     setTransientSummary(
                         lang === "vi"
                             ? `Không thể tạo biên bản: ${message}`
@@ -166,7 +181,7 @@ export function useSummarize() {
             });
 
             // Save final summary to DB
-            if (mid && accumulated) {
+            if (mid && accumulated && !failed) {
                 try {
                     const extractedTitle = extractMinutesTitle(accumulated);
                     const putBody: Record<string, unknown> = { summary: accumulated, status: "saved" };

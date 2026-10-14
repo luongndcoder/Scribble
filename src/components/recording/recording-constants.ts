@@ -9,7 +9,6 @@ export const SILENCE_RMS_THRESHOLD = 0.015;
 
 // WebSocket
 export const WS_CONNECT_TIMEOUT_MS = 1800;
-export const WS_PATH_NVIDIA = "/ws/nvidia-stream";
 export const WS_PATH_SONIOX = "/ws/soniox-stream";
 export const WS_PATH_LOCAL = "/ws/local-stream";
 

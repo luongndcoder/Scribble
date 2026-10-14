@@ -1,6 +1,6 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
-import { resetDiarize, createDraft, downloadTextFile, getSettings } from '../lib/api';
+import { resetDiarize, createDraft, downloadTextFile, getSettings, getLocalModelStatus } from '../lib/api';
 import { fetchSidecar, waitForSidecarReady } from '../lib/sidecar';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
@@ -17,6 +17,30 @@ import {
     useStreamingStt, openStreamingWebSocket, attachSocketHandlers,
 } from './recording/use-streaming-stt';
 import { MinutesOptionsModal } from './recording/minutes-options-modal';
+import { applySttMessage, type SttStreamContext } from './recording/stt-message-reducer';
+import type { SttWsMessage } from '../types/stt';
+import { IconDownload, IconMic, IconMinutes, IconPause, IconPlay, IconRecord, IconSpinner, IconStop, IconTranslate } from './icons/scribble-icons';
+
+/** Upper bound on waiting for trailing finals after Stop. A local final may
+ *  wait ~2.5s on its speaker verdict, so this covers a short backlog. */
+const STOP_DRAIN_TIMEOUT_MS = 6000;
+
+/** How often the live transcript is written to the draft while recording, so
+ *  a crash or force-quit mid-meeting loses at most this much text. */
+const AUTOSAVE_INTERVAL_MS = 30_000;
+
+type SavedPart = ReturnType<typeof useAppStore.getState>['transcriptParts'][number];
+
+/** Transcript JSON exactly as Stop persists it (autosave uses the same shape). */
+function serializeTranscriptParts(parts: SavedPart[]): string {
+    return JSON.stringify(
+        parts.map(p => ({
+            text: p.text, speaker: p.speaker, speakerId: p.speakerId,
+            startTime: p.startTime, endTime: p.endTime,
+            chunkId: p.chunkId, chunkIds: p.chunkIds, translation: p.translation || '',
+        }))
+    );
+}
 
 
 export function RecordingBar() {
@@ -24,19 +48,19 @@ export function RecordingBar() {
         recording, paused, seconds, transcriptParts, currentMeetingId, meetings,
         translationEnabled, translationLang,
         setRecording, setPaused, setSeconds, clearTranscript,
-        addTranscriptPart,
         setTranslationEnabled, setTranslationLang, lang,
         setIsTranscribing, setInterimText, setInterimSpeaker,
-        summaryLoading,
+        summaryLoading, liveStatus, setLiveStatus,
     } = useAppStore();
+    const stopping = liveStatus === 'stopping';
 
     const [audioSource, setAudioSource] = useState<'mic' | 'system' | 'both'>('mic');
     const [barHeights, setBarHeights] = useState(['4px', '4px', '4px']);
-    const sttProviderRef = useRef('nvidia');
+    const sttProviderRef = useRef('local');
     // Reactive copy of the saved STT provider for UI gating. Cabin translation
-    // is Nvidia NMT (cloud) — there is no offline translate model — so when the
-    // user picks Local (offline) we disable the toggle entirely.
-    const [sttProvider, setSttProvider] = useState('nvidia');
+    // is a cloud-only feature — there is no offline translate model — so when
+    // the user picks Local (offline) we disable the toggle entirely.
+    const [sttProvider, setSttProvider] = useState('local');
     const cabinDisabled = sttProvider === 'local';
     const { showToast } = useToast();
 
@@ -52,7 +76,7 @@ export function RecordingBar() {
     const { analyserRef, startDrawing, stopDrawing, setBarHeightsFn } = useWaveform();
     const { archiveRecorderRef, startDraftAudioArchive, stopDraftAudioArchive } = useDraftArchive();
     const { mediaRecorderRef, inflightChunksRef, startChunkRecording } = useChunkRecording();
-    const { wsRef, connectPcmStream, disconnectPcmStream, closeWebSocket } = useStreamingStt();
+    const { wsRef, connectPcmStream, disconnectPcmStream, closeWebSocket, drainWebSocket } = useStreamingStt();
     const { summarize } = useSummarize();
 
     const streamRef = useRef<MediaStream | null>(null);
@@ -73,8 +97,8 @@ export function RecordingBar() {
         const lower = rawMsg.toLowerCase();
         if (lower.includes('402') || lower.includes('budget exhausted')) {
             userMsg = lang === 'vi'
-                ? 'Soniox đã hết quota tháng. Vui lòng nạp thêm hoặc đổi sang Nvidia trong Cài đặt.'
-                : 'Soniox monthly budget exhausted. Top up or switch to Nvidia in Settings.';
+                ? 'Soniox đã hết quota tháng. Vui lòng nạp thêm hoặc đổi sang Local (offline) trong Cài đặt.'
+                : 'Soniox monthly budget exhausted. Top up or switch to Local (offline) in Settings.';
         } else if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid api key')) {
             userMsg = lang === 'vi'
                 ? 'Soniox API Key không hợp lệ. Vui lòng kiểm tra lại trong Cài đặt.'
@@ -96,7 +120,7 @@ export function RecordingBar() {
         let alive = true;
         const refresh = () => {
             getSettings()
-                .then((s) => { if (alive) setSttProvider((s.stt_provider || 'nvidia').toLowerCase()); })
+                .then((s) => { if (alive) setSttProvider((s.stt_provider || 'local').toLowerCase()); })
                 .catch(() => {});
         };
         refresh();
@@ -118,7 +142,7 @@ export function RecordingBar() {
         translationToggleRef.current = { enabled: translationEnabled, lang: translationLang };
         if (!changed || !recording) return;
 
-        if (sttProviderRef.current === 'nvidia' || sttProviderRef.current === 'local') {
+        if (sttProviderRef.current === 'local') {
             // local WS accepts live TRANSLATE: commands too (no reconnect needed)
             const cmd = translationEnabled ? `TRANSLATE:${translationLang}` : 'TRANSLATE:off';
             if (isTauri && audioSource === 'both') {
@@ -172,15 +196,35 @@ export function RecordingBar() {
         };
     }, []);
 
-    // ── Timer ──
+    // ── Timer ── (frozen while stopping: the drain is not recording time)
     useEffect(() => {
-        if (recording && !paused) {
+        if (recording && !paused && !stopping) {
             timerRef.current = window.setInterval(() => {
                 useAppStore.setState((s) => ({ seconds: s.seconds + 1 }));
             }, 1000);
         }
         return () => { if (timerRef.current) clearInterval(timerRef.current); };
-    }, [recording, paused]);
+    }, [recording, paused, stopping]);
+
+    // ── Autosave ── every AUTOSAVE_INTERVAL_MS while recording, only when the
+    // transcript changed. Stop still does the final, authoritative save.
+    useEffect(() => {
+        if (!recording) return;
+        let lastSaved = '';
+        const id = window.setInterval(() => {
+            const s = useAppStore.getState();
+            if (!s.draftId || s.transcriptParts.length === 0) return;
+            const json = serializeTranscriptParts(s.transcriptParts);
+            if (json === lastSaved) return;
+            lastSaved = json;
+            fetchSidecar(`/meetings/${s.draftId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transcript: json, audioDuration: s.seconds }),
+            }).catch(e => console.warn('[autosave] failed:', e));
+        }, AUTOSAVE_INTERVAL_MS);
+        return () => clearInterval(id);
+    }, [recording]);
 
     // ── Permissions ──
     const ensureSystemCapturePermission = useCallback(async (): Promise<boolean> => {
@@ -195,160 +239,26 @@ export function RecordingBar() {
     // ── System audio transcript handler (Tauri events) ──
     const setupSystemAudioListener = useCallback(async (_sttProvider: string) => {
         const { listen } = await import('@tauri-apps/api/event');
+        // System audio restarts its stream on pause/translation toggles without
+        // this listener knowing, so its ms offsets are not trusted.
+        const ctx: SttStreamContext = {
+            speakerIdOffset: SYSTEM_SPEAKER_ID_OFFSET,
+            useStreamClock: false,
+            streamOffsetSec: 0,
+            setIsTranscribing,
+        };
         const unlisten = await listen<string>('system-audio-transcript', (event) => {
-            try {
-                const state = useAppStore.getState();
-                if (!state.recording || state.paused) {
-                    useAppStore.getState().setInterimText('');
-                    setIsTranscribing(false);
-                    return;
-                }
-                const data = JSON.parse(event.payload);
-                if (data.error) {
-                    setIsTranscribing(false);
-                    useAppStore.getState().setInterimText('');
-                    // Terminal STT error (Soniox 402, auth fail) — stop the
-                    // recording + toast. Before fix: error text leaked through
-                    // as a "System" speaker transcript segment.
-                    if (data.terminal || data.error === true) {
-                        const fallbackErr = useAppStore.getState().lang === 'vi' ? 'Lỗi nhận dạng giọng nói' : 'STT error';
-                        const msg = (typeof data.error === 'string' ? data.error : '') || data.text || fallbackErr;
-                        handleSttTerminalError(msg);
-                    } else {
-                        console.error('[system-audio]', data.error);
-                    }
-                    return;
-                }
-                // Reconnect heartbeat — show as interim banner, do NOT add a part.
-                // Own the display string (localized) instead of echoing the
-                // backend's English text so it matches the UI language.
-                if (data.info || data.type === 'info') {
-                    const reconnecting = useAppStore.getState().lang === 'vi' ? 'Đang kết nối lại...' : 'Reconnecting...';
-                    useAppStore.getState().setInterimText(`🔄 ${reconnecting}`);
-                    return;
-                }
-
-                // Translation event
-                if (data.type === 'translation' && data.translation) {
-                    if (data.chunk_id) {
-                        const currentParts = useAppStore.getState().transcriptParts;
-                        const targetIdx = currentParts.findIndex(
-                            (p) => p.chunkId === data.chunk_id || (p.chunkIds && p.chunkIds.includes(data.chunk_id))
-                        );
-                        if (targetIdx >= 0) {
-                            useAppStore.getState().updateTranscriptTranslation(targetIdx, data.translation);
-                            return;
-                        }
-                    }
-                    // No chunk_id: accumulated block translation — always persist to last part
-                    const parts = useAppStore.getState().transcriptParts;
-                    if (parts.length > 0) {
-                        const lastIdx = parts.length - 1;
-                        const prevTrans = parts[lastIdx].translation || '';
-                        console.log(`[sys-audio-trans] idx=${lastIdx} prev=${prevTrans.length}ch new=${data.translation.length}ch`);
-                        useAppStore.getState().updateTranscriptTranslation(lastIdx, data.translation);
-                        useAppStore.getState().setInterimTranslation('');
-                    } else {
-                        useAppStore.getState().setInterimTranslation(data.translation);
-                    }
-                    return;
-                }
-
-                // Speaker split event
-                if (data.type === 'speaker_split') {
-                    const preState = useAppStore.getState();
-                    if (preState.interimTranslation && preState.transcriptParts.length > 0) {
-                        useAppStore.getState().updateTranscriptTranslation(
-                            preState.transcriptParts.length - 1, preState.interimTranslation
-                        );
-                        useAppStore.getState().setInterimTranslation('');
-                    }
-                    useAppStore.getState().setInterimText('');
-                    useAppStore.getState().setInterimSpeaker(
-                        data.speaker || 'System', (data.speaker_id ?? 0) + SYSTEM_SPEAKER_ID_OFFSET
-                    );
-                    return;
-                }
-
-                // Speaker correction event
-                if (data.type === 'speaker_correction' && data.chunk_id) {
-                    useAppStore.getState().updateTranscriptSpeakerByChunk(
-                        data.chunk_id, (data.speaker_id ?? 0) + SYSTEM_SPEAKER_ID_OFFSET,
-                        data.speaker || `Speaker ${(data.speaker_id ?? 0) + 1}`
-                    );
-                    return;
-                }
-
-                // Streaming mode: speaker info at top level
-                // Chunked mode (/transcribe-diarize): speaker info inside segments[0]
-                const seg = data.segments?.[0] || {};
-                const text = (seg.text || data.text || '').trim();
-                if (!text) return;
-
-                const rawSpeakerId = seg.speaker_id ?? data.speaker_id ?? 0;
-                const speakerId = rawSpeakerId + SYSTEM_SPEAKER_ID_OFFSET;
-                const speaker = seg.speaker || data.speaker || `Speaker ${rawSpeakerId + 1}`;
-                const chunkId = seg.chunk_id || data.chunk_id || '';
-                const ts = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-
-                if (data.is_final) {
-                    useAppStore.getState().setInterimText('');
-                    setIsTranscribing(false);
-
-                    // Same-chunk: replace in-place (streaming update for same segment)
-                    const lastPart = state.transcriptParts[state.transcriptParts.length - 1];
-                    const lastChunkIds = new Set<string>();
-                    if (lastPart?.chunkId) lastChunkIds.add(lastPart.chunkId);
-                    if (Array.isArray(lastPart?.chunkIds)) {
-                        lastPart.chunkIds.forEach(id => { if (id) lastChunkIds.add(id); });
-                    }
-                    const sameChunk = Boolean(chunkId) && lastChunkIds.has(chunkId);
-                    const sameSpeaker = Boolean(lastPart) && Number(lastPart.speakerId) === Number(speakerId);
-
-                    if (sameChunk) {
-                        useAppStore.getState().replaceLastPartText(text, String(state.seconds), chunkId || undefined);
-                    } else if (sameSpeaker) {
-                        // Don't clear interimTranslation — accumulated translation updates via translation event
-                        useAppStore.getState().appendToLastPart(text, String(state.seconds), chunkId || undefined);
-                    } else {
-                        // New speaker — commit pending translation first
-                        const prevTrans = useAppStore.getState().interimTranslation;
-                        if (prevTrans && state.transcriptParts.length > 0) {
-                            useAppStore.getState().updateTranscriptTranslation(
-                                state.transcriptParts.length - 1, prevTrans
-                            );
-                            useAppStore.getState().setInterimTranslation('');
-                        }
-                        addTranscriptPart({
-                            text, speaker, speakerId,
-                            chunkId: chunkId || undefined,
-                            chunkIds: chunkId ? [chunkId] : undefined,
-                            startTime: String(Math.max(0, state.seconds - 5)),
-                            endTime: String(state.seconds),
-                            timestamp: ts,
-                            translation: data.translation || '',
-                        });
-                    }
-
-                    // Inline translation on final (Soniox sends translation with each final event)
-                    if (data.translation) {
-                        const updatedParts = useAppStore.getState().transcriptParts;
-                        if (updatedParts.length > 0) {
-                            const li = updatedParts.length - 1;
-                            useAppStore.getState().updateTranscriptTranslation(li, data.translation);
-                            useAppStore.getState().setInterimTranslation('');
-                        }
-                    }
-                } else {
-                    // Interim: show as preview
-                    useAppStore.getState().setInterimText(text);
-                    useAppStore.getState().setInterimSpeaker(speaker, speakerId);
-                    setIsTranscribing(true);
-                }
-            } catch {}
+            let data: SttWsMessage;
+            try { data = JSON.parse(event.payload); } catch { return; }
+            const outcome = applySttMessage(data, ctx);
+            if (outcome.kind !== 'error') return;
+            // Terminal STT error (Soniox 402, auth fail, model load) — stop the
+            // recording + toast instead of leaking the text as a transcript part.
+            if (outcome.terminal) handleSttTerminalError(outcome.message);
+            else console.error('[system-audio]', outcome.message);
         });
         return unlisten;
-    }, [addTranscriptPart, setIsTranscribing, handleSttTerminalError]);
+    }, [setIsTranscribing, handleSttTerminalError]);
 
     // ── Start recording ──
     const startRecording = useCallback(async () => {
@@ -362,34 +272,42 @@ export function RecordingBar() {
             setIsTranscribing(false);
 
             // ── Validate STT configuration before recording ──
+            // Soniox is the only provider needing a credential. Local (offline)
+            // needs no key but DOES need the bundled model on disk — refuse to
+            // start rather than open a stream that would fail silently.
+            let resolvedProvider = 'local';
             try {
                 const settings = await getSettings();
-                const provider = settings.stt_provider || 'nvidia';
-                const hasNvidiaKey = !!(settings.nvidia_api_key && settings.nvidia_api_key !== '' && !settings.nvidia_api_key.startsWith('***'));
-                const hasSonioxKey = !!(settings.soniox_api_key && settings.soniox_api_key !== '' && !settings.soniox_api_key.startsWith('***'));
-                // Masked keys show as "xxxx***xxxx" — check if real key was saved (masked = has value)
-                const nvidiaConfigured = hasNvidiaKey || (settings.nvidia_api_key || '').includes('***');
-                const sonioxConfigured = hasSonioxKey || (settings.soniox_api_key || '').includes('***');
+                const provider = (settings.stt_provider || 'local').toLowerCase();
+                // Anything that isn't Soniox is treated as Local.
+                resolvedProvider = provider === 'soniox' ? 'soniox' : 'local';
 
-                if (provider === 'nvidia' && !nvidiaConfigured) {
-                    showToast(
-                        lang === 'vi'
-                            ? 'Vui lòng cấu hình Nvidia API Key trong Cài đặt trước khi ghi âm'
-                            : 'Please configure Nvidia API Key in Settings before recording',
-                        'error'
-                    );
-                    useAppStore.getState().setSettingsOpen(true);
-                    return;
-                }
-                if (provider === 'soniox' && !sonioxConfigured) {
-                    showToast(
-                        lang === 'vi'
-                            ? 'Vui lòng cấu hình Soniox API Key trong Cài đặt trước khi ghi âm'
-                            : 'Please configure Soniox API Key in Settings before recording',
-                        'error'
-                    );
-                    useAppStore.getState().setSettingsOpen(true);
-                    return;
+                if (resolvedProvider === 'soniox') {
+                    const hasSonioxKey = !!(settings.soniox_api_key && settings.soniox_api_key !== '' && !settings.soniox_api_key.startsWith('***'));
+                    // Masked keys show as "xxxx***xxxx" — masked = a real key is saved.
+                    const sonioxConfigured = hasSonioxKey || (settings.soniox_api_key || '').includes('***');
+                    if (!sonioxConfigured) {
+                        showToast(
+                            lang === 'vi'
+                                ? 'Vui lòng cấu hình Soniox API Key trong Cài đặt trước khi ghi âm'
+                                : 'Please configure Soniox API Key in Settings before recording',
+                            'error'
+                        );
+                        useAppStore.getState().setSettingsOpen(true);
+                        return;
+                    }
+                } else {
+                    const status = await getLocalModelStatus();
+                    if (!status.cached && status.status !== 'done') {
+                        showToast(
+                            lang === 'vi'
+                                ? 'Model nhận diện offline chưa sẵn sàng. Vào Cài đặt → Giọng nói để tải model, hoặc chuyển sang Soniox.'
+                                : 'The offline speech model is not ready. Open Settings → Speech to download it, or switch to Soniox.',
+                            'error'
+                        );
+                        useAppStore.getState().setSettingsOpen(true);
+                        return;
+                    }
                 }
             } catch (e) {
                 // Backend not ready — overlay should be showing, but guard anyway
@@ -414,6 +332,7 @@ export function RecordingBar() {
 
             try { await resetDiarize(); } catch {} // best-effort, non-critical
 
+            setLiveStatus('connecting');
             if (resumeDraftId) {
                 useAppStore.getState().setDraftId(resumeDraftId);
                 setRecording(true);
@@ -437,10 +356,10 @@ export function RecordingBar() {
             }
 
             // Detect STT provider
-            let sttProvider = 'nvidia';
+            let sttProvider = 'local';
             try {
                 const settingsData = await getSettings();
-                sttProvider = settingsData.stt_provider || 'nvidia';
+                sttProvider = (settingsData.stt_provider || 'local').toLowerCase() === 'soniox' ? 'soniox' : 'local';
                 sttProviderRef.current = sttProvider;
             } catch {}
 
@@ -465,6 +384,7 @@ export function RecordingBar() {
                     window.__systemBarInterval = barInterval;
                     const unlisten = await setupSystemAudioListener(sttProvider);
                     window.__systemAudioUnlisten = unlisten;
+                    setLiveStatus('live');
                     return;
                 }
                 // Browser system audio
@@ -474,7 +394,9 @@ export function RecordingBar() {
                 displayStream.getVideoTracks().forEach(t => t.stop());
                 stream = new MediaStream(displayStream.getAudioTracks());
             } else if (audioSource === 'both') {
-                const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.info('[rec] requesting microphone');
+            const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            console.info('[rec] microphone granted:', micStream.getAudioTracks()[0]?.label || '(unlabelled)');
                 if (isTauri) {
                     stream = micStream;
                     try {
@@ -496,6 +418,9 @@ export function RecordingBar() {
                     });
                     displayStream.getVideoTracks().forEach(t => t.stop());
                     const audioCtx = new AudioContext();
+                    if (audioCtx.state === 'suspended') {
+                        try { await audioCtx.resume(); } catch { /* non-fatal */ }
+                    }
                     const micSource = audioCtx.createMediaStreamSource(micStream);
                     const displaySource = audioCtx.createMediaStreamSource(displayStream);
                     const merger = audioCtx.createChannelMerger(2);
@@ -507,11 +432,34 @@ export function RecordingBar() {
                     (stream as MediaStream & { _sources?: MediaStream[] })._sources = [micStream, displayStream];
                 }
             } else {
-                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.info('[rec] requesting microphone (mic only)');
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            console.info('[rec] microphone granted');
             }
 
             streamRef.current = stream;
+
+            // AudioContext construction costs ~370ms (measured) and is
+            // independent of the backend. Sequence the two in PARALLEL: the
+            // readiness probe was previously awaited only AFTER the audio graph
+            // was built, so the two delays added up and the user stared at an
+            // empty transcript for ~1.5s after pressing record.
+            const readyBasePromise = waitForSidecarReady();
+
             const audioCtx = new AudioContext();
+            // A NEW AudioContext can start in the `suspended` state under
+            // WebKit's autoplay policy, in which case `onaudioprocess` never
+            // fires and NO audio reaches the recognizer — the transcript stays
+            // empty even though the UI says it is recording. This is why the
+            // first recording after launching the app produced nothing while a
+            // later one worked: by then the context had been resumed by some
+            // other gesture. Resume explicitly and wait for it to actually run.
+            if (audioCtx.state === 'suspended') {
+                console.info('[rec] AudioContext suspended — resuming');
+                try { await audioCtx.resume(); } catch (e) { console.warn('[rec] resume failed:', e); }
+            }
+            console.info('[rec] AudioContext state:', audioCtx.state, '@', audioCtx.sampleRate, 'Hz');
+
             const source = audioCtx.createMediaStreamSource(stream);
             analyserRef.current = audioCtx.createAnalyser();
             analyserRef.current.fftSize = 2048;
@@ -520,7 +468,7 @@ export function RecordingBar() {
             startDraftAudioArchive(stream);
 
             // Try WebSocket streaming, fallback to chunk mode
-            const readyBase = await waitForSidecarReady();
+            const readyBase = await readyBasePromise;
             let chunkFallbackStarted = false;
             const fallbackToChunkMode = () => {
                 if (chunkFallbackStarted) return;
@@ -528,15 +476,22 @@ export function RecordingBar() {
                 closeWebSocket();
                 disconnectPcmStream();
                 startChunkRecording(stream, analyserRef);
+                setLiveStatus('live');
             };
 
             const { translationEnabled: tlEnabled, translationLang: tlLang } = useAppStore.getState();
+            const tWs = performance.now();
             const ws = await openStreamingWebSocket(sttProvider, readyBase, tlEnabled ? tlLang : undefined);
+            console.info(
+                '[rec] ws', ws ? 'OPEN' : 'FAILED',
+                `${Math.round(performance.now() - tWs)}ms`,
+                'base=', readyBase, 'provider=', sttProvider,
+            );
             if (!ws) {
                 // ALL WS bases rejected — usually sidecar offline or WS handshake
                 // refused (firewall, port collision). Tell the user why instead
                 // of silently downgrading to file-chunk mode and looking broken.
-                const providerName = sttProvider === 'soniox' ? 'Soniox' : sttProvider === 'local' ? 'Local (offline)' : 'Nvidia';
+                const providerName = sttProvider === 'soniox' ? 'Soniox' : 'Local (offline)';
                 showToast(
                     lang === 'vi'
                         ? `Không kết nối được tới ${providerName}. Đang chuyển sang chế độ chunk (chậm hơn). Kiểm tra mạng / API Key trong Cài đặt.`
@@ -546,35 +501,76 @@ export function RecordingBar() {
                 fallbackToChunkMode();
             } else {
                 wsRef.current = ws;
+                console.info('[rec] streaming attached; PCM capture starting');
                 attachSocketHandlers(ws, {
                     wsRef, sttProvider, readyBase, fallbackToChunkMode, setIsTranscribing,
                     onTerminalError: handleSttTerminalError,
                 });
                 connectPcmStream(audioCtx, source);
+                setLiveStatus('live');
             }
         } catch (err) {
             console.error('Audio access error:', err);
             setRecording(false);
+            setLiveStatus('idle');
         }
     }, [
         audioSource, clearTranscript, setRecording, setSeconds, startDrawing, startChunkRecording,
-        startDraftAudioArchive, addTranscriptPart, lang, setInterimText, setInterimSpeaker,
+        startDraftAudioArchive, lang, setInterimText, setInterimSpeaker,
         setIsTranscribing, ensureSystemCapturePermission, setupSystemAudioListener,
         wsRef, connectPcmStream, disconnectPcmStream, closeWebSocket, analyserRef,
-        showToast, handleSttTerminalError,
+        showToast, handleSttTerminalError, setLiveStatus,
     ]);
 
     // ── Stop recording ──
+    // Stop system audio and wait for its trailing finals: Rust drains its STT
+    // socket after `stop_system_audio` and then emits `system-audio-done`.
+    const drainSystemAudio = useCallback(async () => {
+        const unlisten = window.__systemAudioUnlisten;
+        window.__systemAudioUnlisten = null;
+        // Paused system audio was already stopped — nothing is in flight.
+        if (!isTauri || !unlisten || useAppStore.getState().paused) {
+            await safeInvoke('stop_system_audio').catch(() => {});
+            unlisten?.();
+            return;
+        }
+        const { listen } = await import('@tauri-apps/api/event');
+        let resolveDone: () => void = () => {};
+        const done = new Promise<void>((r) => { resolveDone = r; });
+        const unlistenDone = await listen('system-audio-done', () => resolveDone()).catch(() => null);
+        const timer = window.setTimeout(() => resolveDone(), STOP_DRAIN_TIMEOUT_MS);
+        await safeInvoke('stop_system_audio').catch(() => {});
+        await done;
+        window.clearTimeout(timer);
+        unlistenDone?.();
+        unlisten();
+    }, []);
+
     const stopRecording = useCallback(async () => {
+        const pre = useAppStore.getState();
+        // Double-click / terminal-error re-entry guard.
+        if (!pre.recording || pre.liveStatus === 'stopping') return;
+        setLiveStatus('stopping');
+
+        // 1. Stop capturing, then let every pipeline finish what it already
+        //    has. Finals that land during the drain are still committed
+        //    (recording stays true until the drain is done).
+        disconnectPcmStream();
         mediaRecorderRef.current?.stop();
         const inflight = Array.from(inflightChunksRef.current);
-        if (inflight.length > 0) await Promise.allSettled(inflight);
+        await Promise.all([
+            inflight.length > 0 ? Promise.allSettled(inflight) : Promise.resolve(),
+            drainWebSocket(STOP_DRAIN_TIMEOUT_MS),
+            drainSystemAudio(),
+        ]);
 
         // Flush interim text
         const state = useAppStore.getState();
         const dId = state.draftId;
         const interimText = state.interimText?.trim();
-        if (interimText) {
+        // Status banners (reconnecting / warnings) share the interim slot —
+        // never persist them as speech.
+        if (interimText && !/^(🔄|⚠)/u.test(interimText)) {
             const ts = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
             state.addTranscriptPart({
                 text: interimText,
@@ -602,13 +598,7 @@ export function RecordingBar() {
         if (dId) {
             const allParts = useAppStore.getState().transcriptParts;
             if (allParts.length > 0) {
-                const transcriptJson = JSON.stringify(
-                    allParts.map(p => ({
-                        text: p.text, speaker: p.speaker, speakerId: p.speakerId,
-                        startTime: p.startTime, endTime: p.endTime,
-                        chunkId: p.chunkId, chunkIds: p.chunkIds, translation: p.translation || '',
-                    }))
-                );
+                const transcriptJson = serializeTranscriptParts(allParts);
                 await fetchSidecar(`/meetings/${dId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -617,7 +607,7 @@ export function RecordingBar() {
             }
         }
 
-        setRecording(false); setPaused(false);
+        setRecording(false); setPaused(false); setLiveStatus('idle');
         setIsTranscribing(false); setInterimText(''); setInterimSpeaker('Speaker 1', 0);
         mediaRecorderRef.current?.stop();
         stopDraftAudioArchive();
@@ -634,17 +624,9 @@ export function RecordingBar() {
         clearInterval(window.__vadInterval);
         clearInterval(window.__systemBarInterval);
         setBarHeights(['4px', '4px', '4px']);
-        safeInvoke('stop_system_audio').catch(() => {});
-
-        const systemUnlisten = window.__systemAudioUnlisten;
-        if (systemUnlisten) {
-            window.__systemAudioUnlisten = null;
-            const tid = setTimeout(() => systemUnlisten(), 3000);
-            window.__systemUnlistenTimeout = tid;
-        }
-    }, [setRecording, setPaused, setIsTranscribing, setInterimText, setInterimSpeaker,
-        stopDraftAudioArchive, closeWebSocket, disconnectPcmStream, stopDrawing,
-        mediaRecorderRef, inflightChunksRef]);
+    }, [setRecording, setPaused, setIsTranscribing, setInterimText, setInterimSpeaker, setLiveStatus,
+        stopDraftAudioArchive, closeWebSocket, drainWebSocket, drainSystemAudio, disconnectPcmStream,
+        stopDrawing, mediaRecorderRef, inflightChunksRef]);
 
     // Keep stopRecording reachable from callbacks defined ABOVE this point
     // (handleSttTerminalError needs to invoke it without creating a render-loop
@@ -670,7 +652,7 @@ export function RecordingBar() {
             const { draftId, translationEnabled: tlE, translationLang: tlL } = useAppStore.getState();
             const sysArgs: Record<string, unknown> = {};
             if (draftId) sysArgs.draftId = draftId;
-            sysArgs.sttProvider = sttProviderRef.current || 'nvidia';
+            sysArgs.sttProvider = sttProviderRef.current || 'local';
             if (tlE) sysArgs.translateLang = tlL;
             safeInvoke('start_system_audio', sysArgs).catch(() => {});
         }
@@ -732,26 +714,23 @@ export function RecordingBar() {
                 <button
                     className={`rec-main-btn ${recording ? 'active' : ''}`}
                     onClick={recording ? stopRecording : startRecording}
+                    disabled={stopping}
                     title={recording ? (lang === 'vi' ? 'Dừng ghi âm' : 'Stop recording') : recordBtnLabel}
                     aria-label={recording ? (lang === 'vi' ? 'Dừng ghi âm' : 'Stop recording') : recordBtnLabel}
                 >
-                    <span className="rec-main-icon">
-                        {recording ? (
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-                        ) : (
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8" /></svg>
-                        )}
+                    <span className="rec-main-icon t-icon-swap" data-state={recording ? 'b' : 'a'}>
+                        <span className="t-icon" data-icon="a"><IconRecord size={20} /></span>
+                        <span className="t-icon" data-icon="b"><IconStop size={20} /></span>
                     </span>
                 </button>
 
                 {recording && (
                     <>
-                        <button className="rec-pause-btn" onClick={togglePause} aria-label={paused ? 'Resume' : 'Pause'}>
-                            {paused ? (
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21" /></svg>
-                            ) : (
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-                            )}
+                        <button className="rec-pause-btn" onClick={togglePause} disabled={stopping} aria-label={paused ? 'Resume' : 'Pause'}>
+                            <span className="t-icon-swap" data-state={paused ? 'b' : 'a'}>
+                                <span className="t-icon" data-icon="a"><IconPause size={14} /></span>
+                                <span className="t-icon" data-icon="b"><IconPlay size={14} /></span>
+                            </span>
                         </button>
                         <div className="audio-bars">
                             <div className="bar" style={{ height: barHeights[0] }} />
@@ -760,18 +739,19 @@ export function RecordingBar() {
                         </div>
                         <div className="rec-status" role="status" aria-live="polite">
                             <div className="rec-dot" aria-hidden="true" />
-                            <span>{paused ? (lang === 'vi' ? 'Tạm dừng' : 'Paused') : (lang === 'vi' ? 'Đang ghi' : 'Recording')} • {formatTime(seconds)}</span>
+                            <span>
+                                {stopping
+                                    ? (lang === 'vi' ? 'Đang hoàn tất câu cuối...' : 'Finishing last sentence...')
+                                    : paused ? (lang === 'vi' ? 'Tạm dừng' : 'Paused') : (lang === 'vi' ? 'Đang ghi' : 'Recording')}
+                                {' • '}{formatTime(seconds)}
+                            </span>
                         </div>
                     </>
                 )}
 
                 {!recording && translationEnabled && transcriptParts.length > 0 && (
                     <button className="rec-download-btn" onClick={downloadTranslation} disabled={!hasTranslatedParts}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" x2="12" y1="15" y2="3" />
-                        </svg>
+                        <IconDownload size={13} />
                         <span>{lang === 'vi' ? 'Tải bản dịch' : 'Download translation'}</span>
                     </button>
                 )}
@@ -789,17 +769,12 @@ export function RecordingBar() {
                             : (lang === 'vi' ? 'Chọn tuỳ chọn rồi tạo biên bản' : 'Pick options, then create minutes')}>
                         {summaryLoading ? (
                             <>
-                                <svg className="rec-btn-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none">
-                                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-                                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                                </svg>
+                                <IconSpinner size={14} className="rec-btn-spinner" />
                                 <span>{lang === 'vi' ? 'Đang tạo biên bản...' : 'Creating minutes...'}</span>
                             </>
                         ) : (
                             <>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
-                                </svg>
+                                <IconMinutes size={14} />
                                 <span>{lang === 'vi' ? 'Tạo biên bản' : 'Create Minutes'}</span>
                             </>
                         )}
@@ -818,9 +793,7 @@ export function RecordingBar() {
             {/* Translation Bar */}
             <div className="translation-bar">
                 <div className="audio-source-wrap">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M2 10v3a7 7 0 0 0 14 0v-3" /><path d="M9 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                    </svg>
+                    <IconMic size={14} />
                     <CustomSelect className="audio-source-select" value={audioSource}
                         onChange={(v) => setAudioSource(v as 'mic' | 'system' | 'both')}
                         options={[
@@ -835,14 +808,12 @@ export function RecordingBar() {
                     className="translation-toggle-wrap"
                     title={cabinDisabled
                         ? (lang === 'vi'
-                            ? 'Dịch cabin cần Nvidia (chưa hỗ trợ dịch offline) — không khả dụng ở chế độ Local'
-                            : 'Cabin translation needs Nvidia (no offline translate model) — unavailable in Local mode')
+                            ? 'Dịch cabin cần Soniox (chưa hỗ trợ dịch offline) — không khả dụng ở chế độ Local'
+                            : 'Cabin translation needs Soniox (no offline translate model) — unavailable in Local mode')
                         : undefined}
                     style={cabinDisabled ? { opacity: 0.45 } : undefined}
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" />
-                    </svg>
+                    <IconTranslate size={16} />
                     <span>{lang === 'vi' ? 'Dịch cabin' : 'Translate'}</span>
                     <label className="toggle toggle-sm">
                         <input type="checkbox" checked={translationEnabled && !cabinDisabled} disabled={cabinDisabled}

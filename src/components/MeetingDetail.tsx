@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { TranscriptPart, Meeting, useAppStore } from '../stores/appStore';
+import { TranscriptPart, Meeting, partKey, useAppStore } from '../stores/appStore';
 import { getMeeting, getMeetings, updateMeeting, downloadMeetingAudio, downloadMeetingMinutes, downloadTextFile, retryFailedChunks, meetingAudioStreamUrl } from '../lib/api';
 import AudioPlayer, { type AudioPlayerHandle } from './AudioPlayer';
 import { subscribeJobEvents } from '../lib/upload-audio';
@@ -8,6 +8,8 @@ import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
 import { MeetingAttachments } from './MeetingAttachments';
 import { NetworkOfflineBanner } from './NetworkOfflineBanner';
+import { splitTextIntoSentences, splitTranslationForSentences } from '../lib/transcriptUtils';
+import { IconArrowDown, IconChevronLeft, IconClose, IconCopy, IconDownload, IconEdit, IconMic, IconMinutes, IconPage, IconPlay, IconSearch, IconSpeaker, IconTranslate, IconTrash, IconWarning } from './icons/scribble-icons';
 
 const SPEAKER_COLORS = ['#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 type LegacyMinutes = {
@@ -410,17 +412,91 @@ function htmlToMarkdown(html: string): string {
     return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/**
+ * Live interim preview row. Subscribes ONLY to interim fields via selectors,
+ * so every streaming WS message re-renders just this row — the committed
+ * transcript list above never re-renders for interim updates.
+ */
+function InterimRow() {
+    const recording = useAppStore((s) => s.recording);
+    const lastSpeakerId = useAppStore((s) =>
+        s.transcriptParts.length ? s.transcriptParts[s.transcriptParts.length - 1].speakerId : null);
+    const interimText = useAppStore((s) => s.interimText);
+    const interimSpeaker = useAppStore((s) => s.interimSpeaker);
+    const interimSpeakerId = useAppStore((s) => s.interimSpeakerId);
+    const interimTranslation = useAppStore((s) => s.interimTranslation);
+    const translationEnabled = useAppStore((s) => s.translationEnabled);
+    const seconds = useAppStore((s) => s.seconds);
+
+    if (!recording || !interimText.trim()) return null;
+    // Same speaker as the live paragraph → shown inline at its end
+    // (LiveInterimTail), so committing the final doesn't move the text.
+    if (lastSpeakerId === interimSpeakerId) return null;
+    const speakerColor = SPEAKER_COLORS[interimSpeakerId % SPEAKER_COLORS.length];
+    const mm = Math.floor(seconds / 60);
+    const ss = Math.floor(seconds % 60).toString().padStart(2, '0');
+
+    return (
+        <div className="transcript-item interim" aria-live="polite">
+            <div className="transcript-time">
+                <span className="speaker-badge" style={{ '--speaker-color': speakerColor } as React.CSSProperties}>
+                    {interimSpeaker}
+                </span>
+                <span className="transcript-interim-hint">{mm}:{ss}</span>
+            </div>
+            <div className="transcript-stack">
+                <div className="transcript-text transcript-interim-text">{interimText}</div>
+                {translationEnabled && interimTranslation ? (
+                    <div className="translation-text">{interimTranslation}</div>
+                ) : null}
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Interim words of the live paragraph's speaker, rendered dimmed right after
+ * its committed text. Subscribes narrowly so streaming updates re-render only
+ * this span — the paragraph itself re-renders only when a final lands, and the
+ * words stay exactly where they were (no row appearing/disappearing).
+ */
+function LiveInterimTail({ speakerId }: { speakerId: number }) {
+    const recording = useAppStore((s) => s.recording);
+    const interimText = useAppStore((s) => s.interimText);
+    const interimSpeakerId = useAppStore((s) => s.interimSpeakerId);
+    const text = interimText.trim();
+    if (!recording || !text || interimSpeakerId !== speakerId) return null;
+    return <span className="transcript-interim-inline">{' '}{text}</span>;
+}
+
+/** Live paragraph text: settled words, tentative tail (Soniox non-final
+ *  tokens), then the interim preview. */
+function LiveText({ text, tentativeLen, speakerId }: { text: string; tentativeLen: number; speakerId: number }) {
+    const cut = Math.max(0, text.length - tentativeLen);
+    return (
+        <>
+            {text.slice(0, cut)}
+            {cut < text.length && <span className="transcript-tentative">{text.slice(cut)}</span>}
+            <LiveInterimTail speakerId={speakerId} />
+        </>
+    );
+}
+
 export function MeetingDetail() {
     const {
         recording, paused, transcriptParts,
         setCurrentView, lang, activeTab, setActiveTab,
-        currentMeetingId, draftId, setTranscriptParts, isTranscribing,
+        currentMeetingId, draftId, setTranscriptParts,
         meetings, transientSummary,
-        summaryLoading, translationEnabled, aiConfigured, setSettingsOpen,
+        summaryLoading, translationEnabled, setTranslationEnabled,
+        aiConfigured, setSettingsOpen, liveStatus,
     } = useAppStore();
+    // Boolean selector: re-renders only when interim appears/disappears, not
+    // on every streamed word.
+    const hasInterim = useAppStore((s) => s.recording && s.interimText.trim().length > 0);
 
     // Live translation: read via subscription + DOM ref (avoids re-render of entire list)
-    const liveTranslationRef = useRef<HTMLDivElement>(null);
+    const liveTranslationRef = useRef<HTMLElement>(null);
     useEffect(() => {
         // Subscribe to interimTranslation changes and update DOM directly
         const unsub = useAppStore.subscribe((state, prev) => {
@@ -431,9 +507,6 @@ export function MeetingDetail() {
         return unsub;
     }, []);
 
-    const wordCount = useMemo(() => {
-        return transcriptParts.reduce((acc, p) => acc + (p.text || '').trim().split(/\s+/).filter(Boolean).length, 0);
-    }, [transcriptParts]);
     const { showToast } = useToast();
     const viewingMeetingId = currentMeetingId || draftId;
 
@@ -585,8 +658,10 @@ export function MeetingDetail() {
     // ── Playback ↔ transcript sync helpers ──────────────────────────────
     // Stable itemKey identical to the one used in the render map below, so
     // `activeChunkId` matches the DOM `data-chunk-id` for scroll targeting.
+    // Priority: immutable part.id → first chunkId (never rewritten on append)
+    // → index fallback (shifts on delete; last resort only).
     const itemKeyFor = useCallback(
-        (part: TranscriptPart, absoluteIdx: number) => part.chunkId || `t-${absoluteIdx}`,
+        (part: TranscriptPart, absoluteIdx: number) => partKey(part, absoluteIdx),
         [],
     );
 
@@ -1222,15 +1297,67 @@ export function MeetingDetail() {
     // Auto-scroll: only when the user is near the bottom AND tail is open
     // (so we don't yank them away while they're reading mid-transcript via
     // the sliding window). 80px tolerance = roughly one transcript row.
+    // Fires ONLY when content actually grows (new part or longer last text) —
+    // never on interim toggles or translation-token updates, which used to
+    // restart the smooth scroll dozens of times per second (visible stutter).
+    const lastScrollSigRef = useRef('');
+    // Live follow: "stuck to bottom" is decided by where the USER left the
+    // scroll (onScroll below), not by measuring after content grew — a new
+    // multi-line paragraph alone exceeded the old 80px threshold and silently
+    // stopped auto-follow mid-meeting.
+    const stickToBottomRef = useRef(true);
+    const isTailOpenRef = useRef(isTailOpen);
+    isTailOpenRef.current = isTailOpen;
+    const [showJumpLive, setShowJumpLive] = useState(false);
     useEffect(() => {
         const el = transcriptRef.current;
         if (!el) return;
         if (!isTailOpen) return; // user scrolled up — don't fight them
+        const last = transcriptParts[transcriptParts.length - 1];
+        const sig = `${transcriptParts.length}:${last ? last.text.length : 0}`;
+        if (sig === lastScrollSigRef.current) return;
+        lastScrollSigRef.current = sig;
+        if (recording) {
+            // Instant: smooth scrolls restarted on every final and stuttered.
+            if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+            return;
+        }
         const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
         if (distanceFromBottom < 80) {
             el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
         }
-    }, [transcriptParts, isTranscribing, isTailOpen]);
+    }, [transcriptParts, isTailOpen, recording]);
+    // Interim words grow the live paragraph without touching transcriptParts;
+    // follow them via a store subscription (no MeetingDetail re-render).
+    useEffect(() => useAppStore.subscribe((state, prev) => {
+        if (!state.recording || state.interimText === prev.interimText) return;
+        const el = transcriptRef.current;
+        if (el && isTailOpenRef.current && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+    }), []);
+    useEffect(() => {
+        if (recording) {
+            stickToBottomRef.current = true;
+        } else {
+            setShowJumpLive(false);
+        }
+    }, [recording]);
+    const handleTranscriptScroll = (e: React.UIEvent<HTMLDivElement>) => {
+        const el = e.currentTarget;
+        const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+        stickToBottomRef.current = distance < 48;
+        setShowJumpLive(recording && (distance > 240 || !isTailOpenRef.current));
+    };
+    const jumpToLive = () => {
+        // Re-open the sliding window at the tail, then pin to the bottom.
+        setTopAnchorChunkId(null);
+        setBottomAnchorChunkId(null);
+        stickToBottomRef.current = true;
+        setShowJumpLive(false);
+        requestAnimationFrame(() => {
+            const el = transcriptRef.current;
+            if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        });
+    };
 
 
     // Translation is now handled inline by the backend (cabin-style).
@@ -1253,8 +1380,19 @@ export function MeetingDetail() {
     );
     const hasMinutes = minutesMarkdown.trim().length > 0;
 
+    const subTabsRef = useRef<HTMLElement>(null);
+    const [subTabPill, setSubTabPill] = useState<{ left: number; width: number } | null>(null);
+    useEffect(() => {
+        const nav = subTabsRef.current;
+        if (!nav) return;
+        const activeBtn = nav.querySelector<HTMLElement>('.sub-tab.active');
+        if (activeBtn) {
+            setSubTabPill({ left: activeBtn.offsetLeft, width: activeBtn.offsetWidth });
+        }
+    }, [activeTab, lang]);
+
     return (
-        <section className="view active detail-view">
+        <section className="view active detail-view t-page-enter-right">
             {/* Compact toolbar: back button + tab switcher on ONE row.
                 Earlier these lived on two separate rows (~90px combined). */}
             <div className="detail-toolbar">
@@ -1278,18 +1416,23 @@ export function MeetingDetail() {
                         setCurrentView('list');
                     }}
                 >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="m15 18-6-6 6-6" />
-                    </svg>
+                    <IconChevronLeft size={14} strokeWidth={2.25} />
                     <span>{lang === 'vi' ? 'Cuộc họp' : 'Meetings'}</span>
                 </button>
 
-                <nav className="sub-tabs sub-tabs-compact">
+                <nav ref={subTabsRef} className={`sub-tabs sub-tabs-compact${subTabPill ? ' has-pill' : ''}`}>
+                    {subTabPill && (
+                        <span
+                            className="sub-tabs-pill"
+                            aria-hidden="true"
+                            style={{
+                                transform: `translateX(${subTabPill.left}px)`,
+                                width: `${subTabPill.width}px`,
+                            }}
+                        />
+                    )}
                     <button className={`sub-tab ${activeTab === 'recording' ? 'active' : ''}`} onClick={() => setActiveTab('recording')}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" />
-                        </svg>
+                        <IconMic size={13} />
                         <span>{lang === 'vi' ? 'Ghi âm' : 'Recording'}</span>
                     </button>
                     {/* Minutes tab locks when AI isn't configured — UNLESS this
@@ -1318,9 +1461,7 @@ export function MeetingDetail() {
                             : undefined}
                         aria-disabled={(!aiConfigured && !hasMinutes) ? true : undefined}
                     >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
-                        </svg>
+                        <IconMinutes size={13} />
                         <span>{lang === 'vi' ? 'Biên bản' : 'Minutes'}</span>
                     </button>
                 </nav>
@@ -1372,32 +1513,38 @@ export function MeetingDetail() {
             )}
 
             {/* Recording Pane */}
-            <div className="detail-pane recording-pane" style={{ display: activeTab === 'recording' ? 'flex' : 'none' }}>
+            <div className={`detail-pane recording-pane${activeTab === 'recording' ? ' t-pane-enter' : ''}`} style={{ display: activeTab === 'recording' ? 'flex' : 'none' }}>
                 <div className="pane-header">
                     <div className="pane-title-row">
-                        <h2 className="pane-title">{lang === 'vi' ? 'Phiên dịch trực tiếp' : 'Live Transcription'}</h2>
-                        {wordCount > 0 && (
-                            <span className="word-count-badge">{wordCount} {lang === 'vi' ? 'từ' : 'words'}</span>
-                        )}
+                        <h2 className="pane-title">{lang === 'vi' ? 'Bản ghi' : 'Transcript'}</h2>
                     </div>
                     <div className="pane-actions">
+                        {/* Cabin-translation toggle, co-located with the
+                            transcript it affects (mirrors the bottom-bar
+                            toggle — same store state). */}
+                        <button
+                            className={`action-btn ${translationEnabled ? 'active' : ''}`}
+                            onClick={() => setTranslationEnabled(!translationEnabled)}
+                            title={lang === 'vi' ? 'Hiện bản dịch song ngữ' : 'Show bilingual translation'}
+                            aria-label={lang === 'vi' ? 'Hiện bản dịch song ngữ' : 'Show bilingual translation'}
+                            aria-pressed={translationEnabled}
+                        >
+                            <IconTranslate size={14} />
+                            <span>{translationEnabled ? (lang === 'vi' ? 'Dịch: Bật' : 'Translate: On') : (lang === 'vi' ? 'Dịch: Tắt' : 'Translate: Off')}</span>
+                        </button>
                         {transcriptParts.length > 0 && (
                             <button className={`action-btn icon-only ${searchOpen ? 'active' : ''}`} onClick={toggleTranscriptSearch} title={lang === 'vi' ? 'Tìm trong transcript' : 'Search transcript'} aria-label={lang === 'vi' ? 'Tìm trong transcript' : 'Search transcript'}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+                                <IconSearch size={14} />
                             </button>
                         )}
                         {transcriptParts.length > 0 && (
                             <button className="action-btn icon-only" onClick={copyTranscript} title={lang === 'vi' ? 'Copy transcript' : 'Copy transcript'}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
-                                </svg>
+                                <IconCopy size={14} />
                             </button>
                         )}
                         {transcriptParts.length > 0 && (
                             <button className="action-btn" onClick={exportTranscript}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
-                                </svg>
+                                <IconDownload size={14} />
                                 <span>{lang === 'vi' ? 'Xuất transcript' : 'Export'}</span>
                             </button>
                         )}
@@ -1430,9 +1577,7 @@ export function MeetingDetail() {
 
                 {canSeekPlayback && !autoFollow && activeChunkId && (
                     <button type="button" className="transcript-follow-pill" onClick={resumeFollow}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 5v14" /><path d="m19 12-7 7-7-7" />
-                        </svg>
+                        <IconArrowDown size={13} />
                         <span>{lang === 'vi' ? 'Cuộn theo audio' : 'Follow audio'}</span>
                     </button>
                 )}
@@ -1440,33 +1585,51 @@ export function MeetingDetail() {
                 {transcriptParts.length === 0 && !recording ? (
                     <div className="welcome-state">
                         <div className="welcome-icon">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                                <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" />
-                            </svg>
+                            <IconMic size={28} strokeWidth={1.35} />
                         </div>
                         <div className="welcome-title">{lang === 'vi' ? 'Chào mừng đến Scribble!' : 'Welcome to Scribble!'}</div>
                         <div className="welcome-sub">{lang === 'vi' ? 'Nhấn nút Record để bắt đầu phiên dịch trực tiếp' : 'Press Record to start live transcription'}</div>
                     </div>
-                ) : transcriptParts.length === 0 && recording ? (
+                ) : transcriptParts.length === 0 && recording && !hasInterim ? (
                     <div className="listening-state">
                         <div className="listening-icon">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                            </svg>
+                            <IconMic size={24} style={{ color: '#ef4444' }} />
                         </div>
-                        <div className="listening-title">{paused ? (lang === 'vi' ? 'Tạm dừng ghi âm' : 'Recording paused') : (lang === 'vi' ? 'Đang lắng nghe...' : 'Listening for speech...')}</div>
-                        <div className="listening-sub">{paused ? (lang === 'vi' ? 'Nhấn tiếp tục để ghi âm' : 'Click resume to continue') : (lang === 'vi' ? 'Hãy nói để xem phiên dịch trực tiếp' : 'Speak to see live transcription')}</div>
+                        {/* Two distinct states. "Connecting" covers the
+                            ~0.5-1.5s where the mic is opening and the model
+                            is being wired up — during which the old copy said
+                            "Listening for speech", so a user who pressed
+                            record and saw no text assumed it had broken.
+                            Showing a start-up state makes the wait legible. */}
+                        <div className="listening-title">
+                            {(() => {
+                                const titleText = paused
+                                    ? (lang === 'vi' ? 'Tạm dừng ghi âm' : 'Recording paused')
+                                    : liveStatus === 'connecting'
+                                        ? (lang === 'vi' ? 'Đang kết nối mic...' : 'Connecting microphone...')
+                                        : (lang === 'vi' ? 'Đang lắng nghe...' : 'Listening for speech...');
+                                return !paused ? (
+                                    <span className="t-shimmer" data-text={titleText}>{titleText}</span>
+                                ) : titleText;
+                            })()}
+                        </div>
+                        <div className="listening-sub">
+                            {paused
+                                ? (lang === 'vi' ? 'Nhấn tiếp tục để ghi âm' : 'Click resume to continue')
+                                : liveStatus === 'connecting'
+                                    ? (lang === 'vi' ? 'Chuẩn bị xong sẽ hiện chữ ngay khi bạn nói' : 'Text appears as soon as you speak')
+                                    : (lang === 'vi' ? 'Hãy nói để xem phiên dịch trực tiếp' : 'Speak to see live transcription')}
+                        </div>
                     </div>
                 ) : (
                     <div
                         className={`transcript-list ${translationEnabled ? 'with-translation' : ''}`}
                         ref={transcriptRef}
+                        onScroll={handleTranscriptScroll}
                     >
                         {searchOpen && (
                             <div className="transcript-search">
-                                <svg className="transcript-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+                                <IconSearch size={15} className="transcript-search-icon" />
                                 <input
                                     ref={searchInputRef}
                                     className="transcript-search-input"
@@ -1481,7 +1644,7 @@ export function MeetingDetail() {
                                     </span>
                                 )}
                                 <button className="transcript-search-clear" onClick={toggleTranscriptSearch} aria-label={lang === 'vi' ? 'Đóng tìm kiếm' : 'Close search'}>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                                    <IconClose size={14} />
                                 </button>
                             </div>
                         )}
@@ -1505,11 +1668,7 @@ export function MeetingDetail() {
                                         {inProgress ? (
                                             <span className="retry-chunks-spinner" aria-hidden />
                                         ) : (
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M12 2 2 22h20L12 2Z" />
-                                                <line x1="12" x2="12" y1="9" y2="14" />
-                                                <circle cx="12" cy="17" r="0.5" />
-                                            </svg>
+                                            <IconWarning size={20} />
                                         )}
                                     </div>
                                     <div className="retry-chunks-banner-body">
@@ -1578,7 +1737,7 @@ export function MeetingDetail() {
                             // walk children by this attribute to keep the
                             // user pinned at the same visible part during
                             // window slides.
-                            const itemKey = part.chunkId || `t-${absoluteIdx}`;
+                            const itemKey = itemKeyFor(part, absoluteIdx);
                             return (
                                 <div
                                     className={`transcript-item ${isLive ? 'live' : ''} ${itemKey === activeChunkId ? 'playing' : ''}`}
@@ -1592,10 +1751,7 @@ export function MeetingDetail() {
                                             title={lang === 'vi' ? 'Đổi tên speaker (áp dụng toàn bộ)' : 'Rename speaker (apply all)'}
                                             aria-label={lang === 'vi' ? 'Đổi tên speaker' : 'Rename speaker'}
                                         >
-                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <circle cx="12" cy="8" r="4" />
-                                                <path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" />
-                                            </svg>
+                                            <IconSpeaker size={13} />
                                         </button>
                                         <button
                                             className="transcript-action-btn t-delete-btn"
@@ -1603,11 +1759,7 @@ export function MeetingDetail() {
                                             title={lang === 'vi' ? 'Xóa đoạn này' : 'Delete this item'}
                                             aria-label={lang === 'vi' ? 'Xóa đoạn này' : 'Delete this item'}
                                         >
-                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M3 6h18" />
-                                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                                            </svg>
+                                            <IconTrash size={13} />
                                         </button>
                                     </div>
                                     <div className="transcript-time">
@@ -1638,9 +1790,7 @@ export function MeetingDetail() {
                                                 onClick={() => seekToPart(part)}
                                                 title={lang === 'vi' ? 'Tua audio đến đoạn này' : 'Jump audio to this segment'}
                                             >
-                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                                                    <path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.7-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14z" />
-                                                </svg>
+                                                <IconPlay size={11} />
                                                 <span>{fmtSec(part.startTime)} – {fmtSec(part.endTime)}</span>
                                             </button>
                                         ) : (
@@ -1653,6 +1803,8 @@ export function MeetingDetail() {
                                         translation={part.translation}
                                         translationEnabled={translationEnabled}
                                         isLive={isLive}
+                                        tentativeLen={part._tentativeLen || 0}
+                                        speakerId={part.speakerId}
                                         liveTranslationRef={liveTranslationRef}
                                         onSave={(newText) => {
                                             const next = transcriptParts.map((p, j) =>
@@ -1664,6 +1816,16 @@ export function MeetingDetail() {
                                 </div>
                             );
                         })}
+                        {/* Live interim preview — subscribed narrowly so each
+                            WS message re-renders ONLY this row, never the
+                            whole transcript list. Hidden when empty. */}
+                        <InterimRow />
+                        {showJumpLive && (
+                            <button type="button" className="jump-live-btn" onClick={jumpToLive}>
+                                <IconArrowDown size={13} strokeWidth={1.98} />
+                                <span>{lang === 'vi' ? 'Về đoạn mới nhất' : 'Jump to latest'}</span>
+                            </button>
+                        )}
                         {/* Bottom sentinel — IntersectionObserver triggers
                             loadNewer when it reaches viewport. Same one-shot
                             transition + 600ms cooldown semantics as top. */}
@@ -1694,7 +1856,7 @@ export function MeetingDetail() {
                 save a ~60px row. The "Biên bản cuộc họp" h2 is gone too: the
                 active tab pill already says "Biên bản" so the duplicate
                 heading was redundant. */}
-            <div className="detail-pane summary-pane" style={{ display: activeTab === 'summary' ? 'flex' : 'none' }}>
+            <div className={`detail-pane summary-pane${activeTab === 'summary' ? ' t-pane-enter' : ''}`} style={{ display: activeTab === 'summary' ? 'flex' : 'none' }}>
                 {viewingMeetingId && typeof viewingMeetingId === 'number' && (
                     <MeetingAttachments meetingId={viewingMeetingId} />
                 )}
@@ -1716,7 +1878,14 @@ export function MeetingDetail() {
                 ) : summaryLoading ? (
                     <div className="summary-empty">
                         <div className="summary-loading-spinner" />
-                        <p>{lang === 'vi' ? 'Đang tạo biên bản, vui lòng chờ...' : 'Generating minutes, please wait...'}</p>
+                        <p>
+                            <span
+                                className="t-shimmer"
+                                data-text={lang === 'vi' ? 'Đang tạo biên bản, vui lòng chờ...' : 'Generating minutes, please wait...'}
+                            >
+                                {lang === 'vi' ? 'Đang tạo biên bản, vui lòng chờ...' : 'Generating minutes, please wait...'}
+                            </span>
+                        </p>
                     </div>
                 ) : (
                     <div className="summary-empty">
@@ -1730,23 +1899,14 @@ export function MeetingDetail() {
                     <div className="export-picker" onClick={(e) => e.stopPropagation()}>
                         <div className="export-picker-title">{lang === 'vi' ? 'Xuất biên bản cuộc họp' : 'Export meeting minutes'}</div>
                         <button className="export-option" onClick={() => downloadMinutes('md')} disabled={!!exportingMinutesFormat}>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M12 3v12" />
-                                <path d="m7 10 5 5 5-5" />
-                                <path d="M5 21h14" />
-                            </svg>
+                            <IconDownload size={18} />
                             <div>
                                 <div className="export-option-name">Markdown (.md)</div>
                                 <div className="export-option-desc">{lang === 'vi' ? 'Gọn nhẹ, dễ chỉnh sửa' : 'Portable and easy to edit'}</div>
                             </div>
                         </button>
                         <button className="export-option" onClick={() => downloadMinutes('docx')} disabled={!!exportingMinutesFormat}>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                <path d="M14 2v6h6" />
-                                <path d="M8 13h8" />
-                                <path d="M8 17h8" />
-                            </svg>
+                            <IconPage size={18} />
                             <div>
                                 <div className="export-option-name">Word (.docx)</div>
                                 <div className="export-option-desc">{lang === 'vi' ? 'Định dạng tài liệu để chia sẻ' : 'Document format for sharing'}</div>
@@ -1782,6 +1942,8 @@ const TranscriptSentences = memo(function TranscriptSentences({
     translation,
     translationEnabled,
     isLive,
+    tentativeLen = 0,
+    speakerId = 0,
     liveTranslationRef,
     onSave,
     highlight
@@ -1790,13 +1952,33 @@ const TranscriptSentences = memo(function TranscriptSentences({
     translation?: string;
     translationEnabled?: boolean;
     isLive?: boolean;
-    liveTranslationRef?: React.RefObject<HTMLDivElement | null>;
+    tentativeLen?: number;
+    speakerId?: number;
+    liveTranslationRef?: React.RefObject<HTMLElement | null>;
     onSave?: (newText: string) => void;
     highlight?: string;
 }) {
     const lang = useAppStore((s) => s.lang);
     const [editMode, setEditMode] = useState(false);
     const [editVal, setEditVal] = useState('');
+
+    // Sentence pairing for the bilingual view. While LIVE the text still
+    // streams in, so any regrouping would make sentences jump — render the
+    // raw text until the part settles, then split into stable sentences
+    // with proportionally-mapped translations.
+    const sentences = useMemo(
+        () => (isLive ? [text] : splitTextIntoSentences(text)),
+        [isLive, text],
+    );
+    const sentenceTranslations = useMemo(
+        () => splitTranslationForSentences(sentences, translation || ''),
+        [sentences, translation],
+    );
+    const showSentenceMode = !isLive && sentences.length > 1;
+    // Translation column only earns its half of the row when there is
+    // something to show — otherwise the text takes the full width instead
+    // of staring at an empty gutter.
+    const showTranslationCol = translationEnabled && (Boolean(translation) || isLive);
 
     const handleSave = () => {
         const trimmed = editVal.trim();
@@ -1812,6 +1994,24 @@ const TranscriptSentences = memo(function TranscriptSentences({
     };
 
     const deleteLabel = lang === 'vi' ? 'Xoá đoạn này' : 'Delete part';
+    const editLabel = lang === 'vi' ? 'Sửa đoạn này' : 'Edit part';
+    // Deliberate entry only (double-click or the pencil button) — a single
+    // click must keep working for text selection/copy.
+    const enterEdit = () => {
+        if (!onSave || editMode) return;
+        setEditMode(true);
+        setEditVal(text);
+    };
+    const editBtn = onSave ? (
+        <button
+            className="sentence-edit-btn"
+            onClick={(e) => { e.stopPropagation(); enterEdit(); }}
+            title={editLabel}
+            aria-label={editLabel}
+        >
+            <IconEdit size={12} />
+        </button>
+    ) : null;
     const deleteBtn = onSave ? (
         <button
             className="sentence-delete-btn"
@@ -1819,17 +2019,14 @@ const TranscriptSentences = memo(function TranscriptSentences({
             title={deleteLabel}
             aria-label={deleteLabel}
         >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-            </svg>
+            <IconClose size={12} />
         </button>
     ) : null;
 
     return (
         <div className="transcript-sentences">
             <div className="sentence-group">
-                <div className={translationEnabled ? "transcript-columns" : ""}>
-                    <div className={translationEnabled ? "transcript-col-text" : ""}>
+                <div className={showSentenceMode ? "sentence-pairs-mode" : "transcript-stack"}>
                         {editMode ? (
                             <textarea
                                 className="sentence-edit-input"
@@ -1844,28 +2041,51 @@ const TranscriptSentences = memo(function TranscriptSentences({
                                 rows={Math.max(1, Math.min(10, Math.ceil(editVal.length / 60)))}
                                 style={{ width: '100%', resize: 'vertical', minHeight: '32px' }}
                             />
+                        ) : showSentenceMode ? (
+                            <div className="sentence-pairs">
+                                <div className="sentence-row sentence-actions-row">
+                                    {editBtn}
+                                    {deleteBtn}
+                                </div>
+                                {sentences.map((sentence, si) => (
+                                    <div key={si} className={`sentence-pair${si % 2 === 1 ? ' alt' : ''}`}>
+                                        <div
+                                            className="transcript-text"
+                                            onDoubleClick={enterEdit}
+                                            style={onSave ? { cursor: 'text', flex: 1 } : undefined}
+                                            title={onSave ? (lang === 'vi' ? 'Nhấp đúp để sửa' : 'Double-click to edit') : undefined}
+                                        >
+                                            {highlight ? highlightText(sentence, highlight) : sentence}
+                                        </div>
+                                        {showTranslationCol && (
+                                            <div className="translation-text">
+                                                {sentenceTranslations[si] ?? ''}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
                         ) : (
                             <div className="sentence-row">
-                                <div 
-                                    className="transcript-text" 
-                                    onClick={() => {
-                                        if (!onSave) return;
-                                        setEditMode(true);
-                                        setEditVal(text);
-                                    }} 
+                                <div
+                                    className="transcript-text"
+                                    onDoubleClick={enterEdit}
                                     style={onSave ? { cursor: 'text', flex: 1 } : undefined}
+                                    title={onSave ? (lang === 'vi' ? 'Nhấp đúp để sửa' : 'Double-click to edit') : undefined}
                                 >
-                                    {highlight ? highlightText(text, highlight) : text}
+                                    {isLive
+                                        ? <LiveText text={text} tentativeLen={tentativeLen} speakerId={speakerId} />
+                                        : highlight ? highlightText(text, highlight) : text}
                                 </div>
+                                {editBtn}
                                 {deleteBtn}
                             </div>
                         )}
-                    </div>
-                    {translationEnabled && (
-                        <div className="transcript-col-translation">
-                            {translation && <div className="translation-text">{translation}</div>}
+                    {showTranslationCol && !showSentenceMode && (
+                        <div className="translation-text">
+                            {translation || (isLive ? '' : '')}
                             {isLive && (
-                                <div
+                                <span
                                     ref={(el) => {
                                         if (liveTranslationRef) liveTranslationRef.current = el;
                                         if (el) {
@@ -1873,7 +2093,6 @@ const TranscriptSentences = memo(function TranscriptSentences({
                                             el.textContent = currentLive || '';
                                         }
                                     }}
-                                    className="translation-text"
                                 />
                             )}
                         </div>
@@ -1886,5 +2105,7 @@ const TranscriptSentences = memo(function TranscriptSentences({
     prev.text === next.text &&
     prev.translation === next.translation &&
     prev.translationEnabled === next.translationEnabled &&
-    prev.isLive === next.isLive
+    prev.isLive === next.isLive &&
+    prev.tentativeLen === next.tentativeLen &&
+    prev.speakerId === next.speakerId
 );

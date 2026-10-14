@@ -63,7 +63,7 @@ jobs:
           MAC_SIG="Scribble_${VERSION}_aarch64.app.tar.gz.sig"
           LIN_SIG="Scribble_${VERSION}_amd64.AppImage.sig"
 
-          MAX_WAIT=2700   # 45 minutes — generous for Windows/macOS PyInstaller
+          MAX_WAIT=2700   # 45 minutes — generous for the Windows/macOS Rust builds
           ELAPSED=0
           COUNT=0
           while [ $ELAPSED -lt $MAX_WAIT ]; do
@@ -125,9 +125,9 @@ jobs:
           fi
 
           # Pass values through env vars instead of shell substitution into
-          # the Python source — previous version interpolated GHA outputs
-          # directly, which expanded to `has_win = true` (Python NameError,
-          # since Python uses True). Env vars also dodge quoting hazards
+          # the script source — interpolating GHA outputs directly once broke the
+          # manifest step (`has_win = true` in the old Python version). Env vars
+          # also dodge quoting hazards
           # in NOTES (release body markdown can contain quotes / backticks).
           export MANIFEST_TAG="$TAG"
           export MANIFEST_VERSION="$VERSION"
@@ -135,63 +135,48 @@ jobs:
           export MANIFEST_NOTES="$NOTES"
           export MANIFEST_PUB_DATE="$PUB_DATE"
 
-          python3 - <<'PYEOF'
-          import json, os, subprocess
+          node <<'JSEOF'
+          const { execFileSync } = require("child_process");
+          const fs = require("fs");
 
-          tag       = os.environ["MANIFEST_TAG"]
-          version   = os.environ["MANIFEST_VERSION"]
-          base_url  = os.environ["MANIFEST_BASE_URL"]
-          notes     = os.environ.get("MANIFEST_NOTES", "")
-          pub_date  = os.environ["MANIFEST_PUB_DATE"]
+          const env = process.env;
+          const tag = env.MANIFEST_TAG;
+          const version = env.MANIFEST_VERSION;
+          const baseUrl = env.MANIFEST_BASE_URL;
+          const notes = env.MANIFEST_NOTES || "";
+          const pubDate = env.MANIFEST_PUB_DATE;
 
-          def try_fetch_sig(name):
-              """Download a .sig from the release; return contents, or None
-              if it doesn't exist (allows partial manifests)."""
-              try:
-                  subprocess.run(
-                      ["gh", "release", "download", tag, "-p", name, "-O", name, "--clobber"],
-                      check=True, capture_output=True,
-                  )
-              except subprocess.CalledProcessError:
-                  return None
-              with open(name, "r") as f:
-                  return f.read().strip()
-
-          platforms = {}
-
-          win_sig = try_fetch_sig(f"Scribble_{version}_x64-setup.exe.sig")
-          if win_sig:
-              platforms["windows-x86_64"] = {
-                  "signature": win_sig,
-                  "url": f"{base_url}/Scribble_{version}_x64-setup.exe",
-              }
-          mac_sig = try_fetch_sig(f"Scribble_{version}_aarch64.app.tar.gz.sig")
-          if mac_sig:
-              platforms["darwin-aarch64"] = {
-                  "signature": mac_sig,
-                  "url": f"{base_url}/Scribble_{version}_aarch64.app.tar.gz",
-              }
-          lin_sig = try_fetch_sig(f"Scribble_{version}_amd64.AppImage.sig")
-          if lin_sig:
-              platforms["linux-x86_64"] = {
-                  "signature": lin_sig,
-                  "url": f"{base_url}/Scribble_{version}_amd64.AppImage",
-              }
-
-          if not platforms:
-              raise SystemExit("❌ No .sig file could be downloaded — aborting")
-
-          manifest = {
-              "version": tag,
-              "notes": notes,
-              "pub_date": pub_date,
-              "platforms": platforms,
+          // Download a .sig from the release; null if it doesn't exist
+          // (allows partial manifests).
+          function tryFetchSig(name) {
+            try {
+              execFileSync("gh", ["release", "download", tag, "-p", name, "-O", name, "--clobber"], { stdio: "pipe" });
+            } catch {
+              return null;
+            }
+            return fs.readFileSync(name, "utf8").trim();
           }
 
-          with open("../latest.json", "w") as f:
-              json.dump(manifest, f, indent=2, ensure_ascii=False)
-          print("✅ Manifest written. Platforms:", list(platforms.keys()))
-          PYEOF
+          const platforms = {};
+          const targets = [
+            ["windows-x86_64", `Scribble_${version}_x64-setup.exe`],
+            ["darwin-aarch64", `Scribble_${version}_aarch64.app.tar.gz`],
+            ["linux-x86_64", `Scribble_${version}_amd64.AppImage`],
+          ];
+          for (const [platform, file] of targets) {
+            const sig = tryFetchSig(`${file}.sig`);
+            if (sig) platforms[platform] = { signature: sig, url: `${baseUrl}/${file}` };
+          }
+
+          if (Object.keys(platforms).length === 0) {
+            console.error("❌ No .sig file could be downloaded — aborting");
+            process.exit(1);
+          }
+
+          const manifest = { version: tag, notes, pub_date: pubDate, platforms };
+          fs.writeFileSync("../latest.json", JSON.stringify(manifest, null, 2));
+          console.log("✅ Manifest written. Platforms:", Object.keys(platforms));
+          JSEOF
 
           cd ..
           cat latest.json

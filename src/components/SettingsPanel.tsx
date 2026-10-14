@@ -1,24 +1,49 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useUpdaterStore } from '../stores/updaterStore';
 import { checkForUpdates } from '../lib/updater';
 import { getSettings, saveSettings, diagnose, fetchLLMModels, getLocalModelStatus, downloadLocalModel } from '../lib/api';
 import type { LocalModelStatus } from '../lib/api';
-import { NVIDIA_STT_LANGUAGES } from '../lib/language-options';
+import { STT_LANGUAGES } from '../lib/language-options';
 import { t } from '../i18n';
 import { CustomSelect } from './CustomSelect';
 import { useToast } from './Toast';
+import { IconAlert, IconCheck, IconCheckCircle, IconClose, IconDownload, IconEye, IconEyeOff, IconMic, IconMoon, IconNib, IconSettings, IconSpinner, IconSun, IconSystem } from './icons/scribble-icons';
+
+/** The STT providers this build supports. Anything else stored in the DB
+ *  (notably the removed 'nvidia') is migrated — see `migrateProvider`. */
+type SttProvider = 'soniox' | 'local';
+
+/**
+ * Map a stored `stt_provider` value onto a supported provider.
+ * The removed Nvidia/Riva provider maps to 'soniox' (the closest remaining
+ * cloud option, and what the user was implicitly using credits for). Any
+ * unknown value falls back to the 'local' default.
+ *
+ * Note: we deliberately do NOT touch the stored `nvidia_api_key` — it stays
+ * in the database untouched so the value survives if support ever returns.
+ */
+function migrateProvider(raw: string | undefined): SttProvider {
+    const v = (raw || '').toLowerCase();
+    if (v === 'nvidia') return 'soniox';
+    if (v === 'soniox') return 'soniox';
+    return 'local';
+}
 
 export function SettingsPanel() {
-    const { setSettingsOpen, lang } = useAppStore();
+    const { setSettingsOpen, lang, theme, setTheme } = useAppStore();
     const { showToast } = useToast();
-    const [sttProvider, setSttProvider] = useState<'nvidia' | 'soniox' | 'local'>('nvidia');
+    const [sttProvider, setSttProvider] = useState<SttProvider>('local');
     const [modelStatus, setModelStatus] = useState<LocalModelStatus | null>(null);
     const [downloadingModel, setDownloadingModel] = useState(false);
-    const [nvidiaKey, setNvidiaKey] = useState('');
+    // Local engine: bundled Vietnamese Zipformer, or downloadable multilingual
+    // Nemotron 3.5 (higher quality, punctuated, ~683MB).
+    const [localEngine, setLocalEngine] = useState<'zipformer' | 'nemotron'>('zipformer');
     const [sonioxKey, setSonioxKey] = useState('');
     const [sonioxLangs, setSonioxLangs] = useState<Set<string>>(new Set(['vi']));
-    const [nvidiaLang, setNvidiaLang] = useState('vi');
+    // Primary language for the Local (offline) engine.
+    const [sttLanguage, setSttLanguage] = useState('vi');
     const [llmKey, setLlmKey] = useState('');
     const [llmUrl, setLlmUrl] = useState('');
     const [llmModel, setLlmModel] = useState('');
@@ -26,15 +51,43 @@ export function SettingsPanel() {
     const [llmModelOptions, setLlmModelOptions] = useState<string[]>([]);
     const [fetchingModels, setFetchingModels] = useState(false);
 
-    const [maxSpeakers, setMaxSpeakers] = useState(4);
     const [saving, setSaving] = useState(false);
     const [testRunning, setTestRunning] = useState(false);
     const [sttResult, setSttResult] = useState<{ok: boolean; msg: string} | null>(null);
     const [llmResult, setLlmResult] = useState<{ok: boolean; msg: string} | null>(null);
-    const [showNvidiaKey, setShowNvidiaKey] = useState(false);
     const [showSonioxKey, setShowSonioxKey] = useState(false);
     const [showLlmKey, setShowLlmKey] = useState(false);
     const [appVersion, setAppVersion] = useState('');
+    type SettingsTab = 'stt' | 'ai' | 'general';
+    const [settingsTab, setSettingsTab] = useState<SettingsTab>('stt');
+    const [closing, setClosing] = useState(false);
+    const tabsBarRef = useRef<HTMLDivElement>(null);
+    const [pillStyle, setPillStyle] = useState<{ left: number; width: number } | null>(null);
+
+    const closePanel = () => {
+        if (closing) return;
+        setClosing(true);
+        setTimeout(() => {
+            setSettingsOpen(false);
+        }, 350);
+    };
+
+    useEffect(() => {
+        const bar = tabsBarRef.current;
+        if (!bar) return;
+        const activeBtn = bar.querySelector<HTMLElement>('.settings-tab.active');
+        if (activeBtn) {
+            setPillStyle({ left: activeBtn.offsetLeft, width: activeBtn.offsetWidth });
+        }
+    }, [settingsTab, lang]);
+
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') closePanel();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    });
 
     // Updater controls — read from the dedicated updater store so the Settings
     // panel can both kick a manual check and reflect the result inline.
@@ -94,15 +147,17 @@ export function SettingsPanel() {
     const loadSettings = async () => {
         try {
             const s = await getSettings();
-            setSttProvider((s.stt_provider as 'nvidia' | 'soniox' | 'local') || 'nvidia');
-            if (s.nvidia_api_key) setNvidiaKey('••••••••');
+            // Migrate a stored provider onto a supported one ('nvidia' → 'soniox',
+            // unknown → 'local'). The legacy nvidia_api_key is intentionally left
+            // untouched in the DB — we just stop reading/showing it.
+            setSttProvider(migrateProvider(s.stt_provider));
             if (s.soniox_api_key) setSonioxKey('••••••••');
             if (s.soniox_language_hints) {
                 const hints = (s.soniox_language_hints as string).split(',').map((h: string) => h.trim()).filter(Boolean);
                 if (hints.length > 0) setSonioxLangs(new Set(hints));
             }
-            setNvidiaLang(s.stt_language || 'vi');
-            if (s.max_speakers) setMaxSpeakers(parseInt(s.max_speakers) || 4);
+            setSttLanguage(s.stt_language || 'vi');
+            setLocalEngine(s.local_engine === 'nemotron' ? 'nemotron' : 'zipformer');
             if (s.llm_api_key) setLlmKey('••••••••');
             if (s.llm_base_url) setLlmUrl(s.llm_base_url);
             if (s.llm_model) setLlmModel(s.llm_model);
@@ -120,7 +175,7 @@ export function SettingsPanel() {
         let active = true;
         const tick = async () => {
             try {
-                const s = await getLocalModelStatus();
+                const s = await getLocalModelStatus(localEngine);
                 if (!active) return;
                 setModelStatus(s);
                 if (s.status === 'downloading') { setDownloadingModel(true); setTimeout(tick, 1000); }
@@ -129,16 +184,16 @@ export function SettingsPanel() {
         };
         tick();
         return () => { active = false; };
-    }, [sttProvider]);
+    }, [sttProvider, localEngine]);
 
     const handleDownloadModel = async () => {
         setDownloadingModel(true);
         try {
-            const s = await downloadLocalModel();
+            const s = await downloadLocalModel(localEngine);
             setModelStatus(s);
             const poll = async () => {
                 try {
-                    const st = await getLocalModelStatus();
+                    const st = await getLocalModelStatus(localEngine);
                     setModelStatus(st);
                     if (st.status === 'downloading') setTimeout(poll, 1000);
                     else setDownloadingModel(false);
@@ -160,18 +215,19 @@ export function SettingsPanel() {
             window.dispatchEvent(new CustomEvent('scribble:settings-saved'));
         } catch (e) { console.warn('[settings] Save failed:', e); }
         setSaving(false);
-        setSettingsOpen(false);
+        closePanel();
     };
 
     const buildSettingsBody = () => {
         const body: Record<string, unknown> = {};
         body.stt_provider = sttProvider;
+        // NOTE: nvidia_api_key is deliberately never sent or cleared — the
+        // stored value is preserved in the DB for data-preservation reasons.
         // Send key if changed (not masked placeholder). Empty string = clear key.
-        if (!nvidiaKey.includes('••')) body.nvidia_api_key = nvidiaKey;
         if (!sonioxKey.includes('••')) body.soniox_api_key = sonioxKey;
-        body.stt_language = nvidiaLang;
+        body.stt_language = sttLanguage;
+        body.local_engine = localEngine;
         body.soniox_language_hints = Array.from(sonioxLangs).join(',');
-        body.max_speakers = maxSpeakers;
         if (!llmKey.includes('•')) body.llm_api_key = llmKey;
         if (llmProvider === 'compatible') {
             body.llm_base_url = llmUrl;
@@ -246,8 +302,10 @@ export function SettingsPanel() {
 
     // Canonical list lives in src/lib/language-options.ts so UploadAudioModal
     // and any future selector stay in sync with the same labels + value set.
-    const nvidiaLanguages = NVIDIA_STT_LANGUAGES;
+    const sttLanguages = STT_LANGUAGES;
 
+    /** Soniox supports a far wider language set than the offline engine, so its
+     *  hint picker keeps this extended list. */
     const sonioxLanguages = [
         { value: 'vi', label: 'Vietnamese' },
         { value: 'en', label: 'English' },
@@ -287,18 +345,20 @@ export function SettingsPanel() {
         { value: 'sw', label: 'Swahili' },
     ];
 
-    const langOptions = sttProvider === 'nvidia' ? nvidiaLanguages : sonioxLanguages;
+    // The Soniox hint picker gets the wide set; the Local picker is filtered
+    // down to whatever the bundled model actually supports.
+    const langOptions = sonioxLanguages;
 
     // Local (nemotron MLX) is multilingual — offer the supported languages + Auto.
     const localLangOptions = [
         { value: 'auto', label: lang === 'vi' ? 'Tự động' : 'Auto-detect' },
-        ...nvidiaLanguages.filter(o => modelStatus?.supported_languages?.includes(o.value)),
+        ...sttLanguages.filter(o => modelStatus?.supported_languages?.includes(o.value)),
     ];
 
-    const currentApiKey = sttProvider === 'nvidia' ? nvidiaKey : sonioxKey;
-    const setCurrentApiKey = sttProvider === 'nvidia' ? setNvidiaKey : setSonioxKey;
-    const signupUrl = sttProvider === 'nvidia' ? 'build.nvidia.com' : 'console.soniox.com';
-    const signupHref = sttProvider === 'nvidia' ? 'https://build.nvidia.com' : 'https://console.soniox.com';
+    const currentApiKey = sonioxKey;
+    const setCurrentApiKey = setSonioxKey;
+    const signupUrl = 'console.soniox.com';
+    const signupHref = 'https://console.soniox.com';
 
     const hasApiKey = currentApiKey.length > 0;
     const hasLlmKey = llmKey.length > 0;
@@ -341,9 +401,9 @@ export function SettingsPanel() {
         <div className={`settings-test-result-row ${result.ok ? 'ok' : 'fail'}`}>
             <span className="settings-test-result-icon" aria-hidden>
                 {result.ok ? (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                    <IconCheck size={12} strokeWidth={2.7} />
                 ) : (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                    <IconClose size={12} strokeWidth={2.7} />
                 )}
             </span>
             <span className="settings-test-result-label">{label}</span>
@@ -352,48 +412,71 @@ export function SettingsPanel() {
     );
 
     return (
-        <div className="settings-overlay">
-            <div className="settings-panel">
+        <div className={`settings-overlay${closing ? ' is-closing' : ''}`} onClick={closePanel}>
+            <div className={`settings-panel${closing ? ' is-closing' : ''}`} onClick={(e) => e.stopPropagation()}>
                 <div className="settings-panel-header">
                     <h2 className="settings-panel-title">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                            <circle cx="12" cy="12" r="3" />
-                        </svg>
+                        <IconSettings size={16} />
                         <span>{t('settings', lang)}</span>
                     </h2>
-                    <button className="settings-close-btn" onClick={() => setSettingsOpen(false)}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                        </svg>
+                    <button className="settings-close-btn" onClick={closePanel}>
+                        <IconClose size={16} />
                     </button>
                 </div>
 
-                <div className="settings-panel-body">
+                <div className="settings-panel-body tabbed">
+                    {/* ── Top-level tabs: STT / AI / General (16-tabs-sliding.md) ── */}
+                    <div
+                        ref={tabsBarRef}
+                        className={`settings-tabs${pillStyle ? ' has-pill' : ''}`}
+                        role="tablist"
+                        aria-label={lang === 'vi' ? 'Nhóm cài đặt' : 'Settings groups'}
+                    >
+                        {pillStyle && (
+                            <span
+                                className="settings-tabs-pill"
+                                aria-hidden="true"
+                                style={{
+                                    transform: `translateX(${pillStyle.left}px)`,
+                                    width: `${pillStyle.width}px`,
+                                }}
+                            />
+                        )}
+                        {([
+                            { id: 'stt', label: lang === 'vi' ? 'Giọng nói' : 'Speech', icon: <IconMic size={15} /> },
+                            { id: 'ai', label: lang === 'vi' ? 'Trợ lý AI' : 'AI Assistant', icon: <IconNib size={15} /> },
+                            { id: 'general', label: lang === 'vi' ? 'Chung' : 'General', icon: <IconSettings size={15} /> },
+                        ] as { id: SettingsTab; label: string; icon: ReactNode }[]).map((tab) => (
+                            <button
+                                key={tab.id}
+                                role="tab"
+                                aria-selected={settingsTab === tab.id}
+                                className={`settings-tab${settingsTab === tab.id ? ' active' : ''}`}
+                                onClick={() => setSettingsTab(tab.id)}
+                            >
+                                {tab.icon}
+                                <span className="settings-tab-label">{tab.label}</span>
+                            </button>
+                        ))}
+                    </div>
+
+                    {settingsTab === 'stt' && (<>
                     {/* ── STT Section ── */}
                     <div className="settings-section">
                         <div className="settings-section-header">
                             <div className="settings-section-title">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" />
-                                </svg>
+                                <IconMic size={16} />
                                 <span>{t('voice_recognition', lang)}</span>
                             </div>
                             <div className="settings-section-desc">{t('voice_recognition_desc', lang)}</div>
                         </div>
 
+                        <div className="settings-section-body">
+
                         {/* Provider Selector — span full row, the tab pair is wide. */}
                         <div className="setting-group setting-group--full">
                             <div className="setting-label">{t('stt_provider', lang)}</div>
                             <div className="setting-provider-tabs">
-                                <button
-                                    className={`provider-tab${sttProvider === 'nvidia' ? ' active' : ''}`}
-                                    onClick={() => setSttProvider('nvidia')}
-                                >
-                                    <strong>Nvidia Riva</strong>
-                                    <span className="provider-tab-desc">{t('nvidia_desc', lang)}</span>
-                                </button>
                                 <button
                                     className={`provider-tab${sttProvider === 'soniox' ? ' active' : ''}`}
                                     onClick={() => setSttProvider('soniox')}
@@ -406,14 +489,12 @@ export function SettingsPanel() {
                                     onClick={() => setSttProvider('local')}
                                 >
                                     <strong>Local (offline)</strong>
-                                    <span className="provider-tab-desc">{lang === 'vi' ? 'Chạy trên máy, miễn phí' : 'On-device, free'}</span>
+                                    <span className="provider-tab-desc">{t('local_desc', lang)}</span>
                                 </button>
                             </div>
                             {sttProvider === 'soniox' && (
                                 <div className="setting-warning">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" />
-                                    </svg>
+                                    <IconAlert size={14} />
                                     <span>{lang === 'vi'
                                         ? 'Soniox là dịch vụ trả phí (~$0.12/giờ). Phù hợp cho người dùng cần chất lượng nhận diện và dịch thuật tốt nhất.'
                                         : 'Soniox is a paid service (~$0.12/hr). Recommended for users who need the best recognition and translation quality.'
@@ -422,13 +503,32 @@ export function SettingsPanel() {
                             )}
                             {sttProvider === 'local' && (
                                 <>
+                                <div className="setting-group setting-group--full" style={{ marginTop: 8 }}>
+                                    <div className="setting-label">{lang === 'vi' ? 'Model offline' : 'Offline model'}</div>
+                                    <div className="setting-provider-tabs">
+                                        <button
+                                            type="button"
+                                            className={`provider-tab${localEngine === 'zipformer' ? ' active' : ''}`}
+                                            onClick={() => setLocalEngine('zipformer')}
+                                        >
+                                            <strong>Zipformer 30M</strong>
+                                            <span className="provider-tab-desc">{lang === 'vi' ? 'Có sẵn • Tiếng Việt • Rất nhẹ' : 'Built-in • Vietnamese • Very light'}</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`provider-tab${localEngine === 'nemotron' ? ' active' : ''}`}
+                                            onClick={() => setLocalEngine('nemotron')}
+                                        >
+                                            <strong>Nemotron 0.6B</strong>
+                                            <span className="provider-tab-desc">{lang === 'vi' ? 'Chính xác hơn • Có dấu câu • Đa ngôn ngữ • Tải về khi chọn' : 'More accurate • Punctuated • Multilingual • Downloaded on demand'}</span>
+                                        </button>
+                                    </div>
+                                </div>
                                 <div className="setting-warning">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" />
-                                    </svg>
+                                    <IconAlert size={14} />
                                     <span>{lang === 'vi'
-                                        ? `Chạy hoàn toàn trên máy — miễn phí, không cần mạng, riêng tư. ${modelStatus?.multilingual ? 'Hỗ trợ nhiều ngôn ngữ (chọn bên dưới); ghi âm realtime và Upload file đều được.' : 'Chỉ hỗ trợ tiếng Việt; realtime offline chưa hỗ trợ trên máy này — dùng Upload file.'}`
-                                        : `Runs entirely on your device — free, offline, private. ${modelStatus?.multilingual ? 'Many languages (pick below); works for both realtime recording and file upload.' : 'Vietnamese only; realtime offline not supported here — use file upload.'}`
+                                        ? `Chạy hoàn toàn trên máy — miễn phí, không cần mạng, riêng tư. ${modelStatus?.multilingual ? 'Hỗ trợ nhiều ngôn ngữ (chọn bên dưới); ghi âm realtime và Upload file đều được.' : 'Chỉ hỗ trợ tiếng Việt; ghi âm realtime và Upload file đều được.'}`
+                                        : `Runs entirely on your device — free, offline, private. ${modelStatus?.multilingual ? 'Many languages (pick below); works for both realtime recording and file upload.' : 'Vietnamese only; works for both realtime recording and file upload.'}`
                                     }</span>
                                 </div>
                                 {modelStatus && (
@@ -452,7 +552,7 @@ export function SettingsPanel() {
                                                 type="button"
                                                 onClick={handleDownloadModel}
                                                 disabled={downloadingModel}
-                                                style={{ background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 600, cursor: 'pointer' }}
+                                                className="settings-solid-btn"
                                             >
                                                 {lang === 'vi' ? `Tải model offline (${modelStatus.size_mb}MB)` : `Download offline model (${modelStatus.size_mb}MB)`}
                                             </button>
@@ -474,8 +574,8 @@ export function SettingsPanel() {
                                         <CustomSelect
                                             className="setting-lang-select"
                                             options={localLangOptions}
-                                            value={nvidiaLang}
-                                            onChange={setNvidiaLang}
+                                            value={sttLanguage}
+                                            onChange={setSttLanguage}
                                         />
                                         <div className="setting-hint">{lang === 'vi' ? 'Chọn ngôn ngữ chính của audio (hoặc Tự động).' : "Pick the audio's main language (or Auto)."}</div>
                                     </div>
@@ -493,104 +593,73 @@ export function SettingsPanel() {
                             </div>
                             <div className="setting-input-wrap">
                                 <input
-                                    type={sttProvider === 'nvidia' ? (showNvidiaKey ? 'text' : 'password') : (showSonioxKey ? 'text' : 'password')}
+                                    type={showSonioxKey ? 'text' : 'password'}
                                     className="setting-input"
                                     value={currentApiKey}
                                     onChange={(e) => setCurrentApiKey(e.target.value)}
-                                    placeholder={sttProvider === 'nvidia' ? 'nvapi-xxx' : 'soniox-xxx'}
+                                    placeholder="soniox-xxx"
                                 />
                                 <button
                                     type="button"
                                     className="setting-eye-btn"
-                                    onClick={() => sttProvider === 'nvidia' ? setShowNvidiaKey(v => !v) : setShowSonioxKey(v => !v)}
+                                    onClick={() => setShowSonioxKey(v => !v)}
                                     aria-label={lang === 'vi' ? 'Hiện/ẩn API key' : 'Show/hide key'}
                                 >
-                                    {(sttProvider === 'nvidia' ? showNvidiaKey : showSonioxKey) ? (
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" x2="23" y1="1" y2="23"/></svg>
-                                    ) : (
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                    )}
+                                    <span className="t-icon-swap" data-state={showSonioxKey ? 'b' : 'a'}>
+                                        <span className="t-icon" data-icon="a"><IconEye size={14} /></span>
+                                        <span className="t-icon" data-icon="b"><IconEyeOff size={14} /></span>
+                                    </span>
                                 </button>
                             </div>
                             <div className="setting-hint">{t('signup_free_at', lang)} <a href={signupHref} target="_blank" rel="noreferrer">{signupUrl}</a></div>
                         </div>
                         )}
 
-                        {/* Language Selection — dropdown (hidden for local: Vietnamese-only) */}
-                        {sttProvider !== 'local' && (
+                        {/* Language Selection — Soniox-only hint list (Local has
+                            its own language selector above, next to the model). */}
+                        {sttProvider === 'soniox' && (
                         <div className="setting-group">
                             <div className="setting-label">
-                                {t(sttProvider === 'soniox' ? 'soniox_languages' : 'primary_language', lang)}
+                                {t('soniox_languages', lang)}
                             </div>
-                            {sttProvider === 'nvidia' ? (
-                                <CustomSelect
-                                    className="setting-lang-select"
-                                    options={langOptions}
-                                    value={nvidiaLang}
-                                    onChange={setNvidiaLang}
-                                />
-                            ) : (
-                                <CustomSelect
-                                    className="setting-lang-select"
-                                    options={langOptions}
-                                    value=""
-                                    onChange={() => {}}
-                                    multiple
-                                    selectedValues={sonioxLangs}
-                                    onToggle={(code) => {
-                                        setSonioxLangs(prev => {
-                                            const next = new Set(prev);
-                                            if (next.has(code)) next.delete(code);
-                                            else next.add(code);
-                                            return next;
-                                        });
-                                    }}
-                                />
-                            )}
+                            <CustomSelect
+                                className="setting-lang-select"
+                                options={langOptions}
+                                value=""
+                                onChange={() => {}}
+                                multiple
+                                selectedValues={sonioxLangs}
+                                onToggle={(code) => {
+                                    setSonioxLangs(prev => {
+                                        const next = new Set(prev);
+                                        if (next.has(code)) next.delete(code);
+                                        else next.add(code);
+                                        return next;
+                                    });
+                                }}
+                            />
                             <div className="setting-hint">
-                                {sttProvider === 'nvidia'
-                                    ? t('language_hint', lang)
-                                    : t('soniox_languages_hint', lang)}
+                                {t('soniox_languages_hint', lang)}
                             </div>
                         </div>
                         )}
-
-                        {/* Max Speakers — only for Nvidia (Soniox has built-in diarization) */}
-                        {sttProvider === 'nvidia' && <div className="setting-group setting-group--full">
-                            <div className="setting-label">
-                                {lang === 'vi' ? 'Số người nói tối đa' : 'Max Speakers'}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <input
-                                    type="range"
-                                    min={2}
-                                    max={12}
-                                    value={maxSpeakers}
-                                    onChange={(e) => setMaxSpeakers(parseInt(e.target.value))}
-                                    style={{ flex: 1 }}
-                                />
-                                <span style={{ minWidth: '24px', textAlign: 'center', fontWeight: 600 }}>{maxSpeakers}</span>
-                            </div>
-                            <div className="setting-hint">
-                                {lang === 'vi'
-                                    ? 'Giới hạn số người nói nhận diện được trong 1 cuộc họp'
-                                    : 'Maximum number of speakers to detect per meeting'}
-                            </div>
-                        </div>}
+                        </div>
                     </div>
+                    </>)}
 
+                    {settingsTab === 'ai' && (<>
                     {/* ── LLM Section ── */}
                     <div className="settings-section">
                         <div className="settings-section-header">
                             <div className="settings-section-title">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.287 1.288L3 12l5.8 1.9a2 2 0 0 1 1.288 1.287L12 21l1.9-5.8a2 2 0 0 1 1.287-1.288L21 12l-5.8-1.9a2 2 0 0 1-1.288-1.287Z" />
-                                </svg>
+                                <IconNib size={16} />
                                 <span>{t('ai_section', lang)}</span>
                                 <span className="settings-section-optional-pill">{t('optional_label', lang)}</span>
                             </div>
                             <div className="settings-section-desc">{t('ai_hint', lang)}</div>
                         </div>
+
+                        <div className="settings-section-body">
 
                         {/* Provider Dropdown */}
                         <div className="setting-group">
@@ -619,11 +688,10 @@ export function SettingsPanel() {
                             <div className="setting-input-wrap">
                                 <input type={showLlmKey ? 'text' : 'password'} className="setting-input" value={llmKey} onChange={(e) => { setLlmKey(e.target.value); setLlmModelOptions([]); }} placeholder="sk-xxx" />
                                 <button type="button" className="setting-eye-btn" onClick={() => setShowLlmKey(v => !v)} aria-label="toggle key">
-                                    {showLlmKey ? (
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" x2="23" y1="1" y2="23"/></svg>
-                                    ) : (
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                                    )}
+                                    <span className="t-icon-swap" data-state={showLlmKey ? 'b' : 'a'}>
+                                        <span className="t-icon" data-icon="a"><IconEye size={14} /></span>
+                                        <span className="t-icon" data-icon="b"><IconEyeOff size={14} /></span>
+                                    </span>
                                 </button>
                             </div>
                         </div>
@@ -671,8 +739,38 @@ export function SettingsPanel() {
                                         : t('ai_model_hint', lang)}
                             </div>
                         </div>
+                        </div>
                     </div>
+                    </>)}
 
+                    {settingsTab === 'general' && (<>
+                    {/* ── Appearance ── */}
+                    <div className="settings-section">
+                        <div className="settings-section-header">
+                            <div className="settings-section-title">
+                                <span>{lang === 'vi' ? 'Giao diện' : 'Appearance'}</span>
+                            </div>
+                            <div className="settings-section-desc">
+                                {lang === 'vi' ? 'Sáng, tối, hoặc theo hệ thống.' : 'Light, dark, or follow the system.'}
+                            </div>
+                        </div>
+                        <div className="setting-provider-tabs">
+                            {([
+                                { id: 'light', label: lang === 'vi' ? 'Sáng' : 'Light', icon: <IconSun size={16} /> },
+                                { id: 'dark', label: lang === 'vi' ? 'Tối' : 'Dark', icon: <IconMoon size={16} /> },
+                                { id: 'system', label: lang === 'vi' ? 'Hệ thống' : 'System', icon: <IconSystem size={16} /> },
+                            ] as const).map((opt) => (
+                                <button
+                                    key={opt.id}
+                                    className={`provider-tab${theme === opt.id ? ' active' : ''}`}
+                                    onClick={() => setTheme(opt.id)}
+                                >
+                                    {opt.icon}
+                                    <strong>{opt.label}</strong>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
 
                     {/* ── Unified Test Connection (spans both grid cols) ── */}
                     <div className="settings-section settings-test-section span-full">
@@ -684,13 +782,9 @@ export function SettingsPanel() {
                             </span>
                             <button className="settings-test-btn" onClick={testAll} disabled={testRunning}>
                                 {testRunning ? (
-                                    <svg className="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                                    </svg>
+                                    <IconSpinner size={16} className="spin" strokeWidth={2.25} />
                                 ) : (
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
-                                    </svg>
+                                    <IconCheckCircle size={16} />
                                 )}
                                 <span>{testRunning ? t('testing', lang) : t('test_all_connections', lang)}</span>
                             </button>
@@ -710,11 +804,7 @@ export function SettingsPanel() {
                     <div className="settings-section span-full">
                         <div className="settings-section-header">
                             <div className="settings-section-title">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                    <polyline points="7 10 12 15 17 10" />
-                                    <line x1="12" x2="12" y1="15" y2="3" />
-                                </svg>
+                                <IconDownload size={16} />
                                 <span>{lang === 'vi' ? 'Cập nhật ứng dụng' : 'App Updates'}</span>
                             </div>
                         </div>
@@ -808,14 +898,13 @@ export function SettingsPanel() {
                         )}
                         </div>
                     </div>
+                    </>) /* end general tab */}
                 </div>
 
                 <div className="settings-panel-footer">
                     <div className="settings-footer-actions">
                         <button className="action-btn primary" onClick={handleSave} disabled={saving}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M20 6 9 17l-5-5" />
-                            </svg>
+                            <IconCheck size={14} />
                             <span>{saving ? '...' : t('save_settings', lang)}</span>
                         </button>
                     </div>

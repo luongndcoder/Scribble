@@ -232,7 +232,7 @@ def transcribe_nvidia(file_path: str, api_key: str, language: str = "vi-VN") -> 
 
     if language.startswith("vi"):
         text = normalize_vietnamese_text(text)
-    text = filter_hallucinations(text)
+    text = filter_hallucinations_min_chars(text)
     return text
 
 
@@ -342,7 +342,7 @@ def transcribe_nvidia_streaming(file_path: str, api_key: str, language: str = "v
     text = " ".join(pieces).strip()
     if language.startswith("vi"):
         text = normalize_vietnamese_text(text)
-    text = filter_hallucinations(text)
+    text = filter_hallucinations_min_chars(text)
     return text
 
 
@@ -670,7 +670,7 @@ def _parse_soniox_segments(result) -> list[dict]:
     def _flush():
         if cur_pieces and cur_start is not None and cur_end is not None:
             text = "".join(cur_pieces).strip()
-            text = filter_hallucinations(text)
+            text = filter_hallucinations_min_chars(text)
             if text:
                 segments.append({
                     "start_ms": int(cur_start),
@@ -861,7 +861,7 @@ class NvidiaStreamingSTT:
                         if self._language.startswith("vi"):
                             transcript = normalize_vietnamese_text(transcript)
                         if is_final:
-                            transcript = filter_hallucinations(transcript)
+                            transcript = filter_hallucinations_min_chars(transcript)
                             if not transcript:
                                 continue
                         yield {"text": transcript, "is_final": is_final}
@@ -1396,13 +1396,26 @@ class SonioxStreamingSTT:
 
 
 def filter_hallucinations(text: str) -> str:
-    """Filter out hallucinated text from STT output."""
+    """Filter out hallucinated text from STT output.
+
+    The <=3 char rule exists because cloud STT (Riva/Soniox) sometimes emits
+    stray 1-3 char noise on silence. It must NOT apply to the streaming path,
+    where each short utterance is its own segment — legit Vietnamese replies
+    ("OK", "Vâng", "Dạ", "Ừ", "Đúng") are 2-4 chars and were being silently
+    dropped. Callers that need the noise guard pass min_chars explicitly.
+    """
     if not text:
         return ""
     for pattern in HALLUCINATION_PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
             return ""
-    if len(text) <= 3:
+    return text
+
+
+def filter_hallucinations_min_chars(text: str, min_chars: int = 4) -> str:
+    """Cloud-path variant: also drops sub-`min_chars` noise blips."""
+    text = filter_hallucinations(text)
+    if text and len(text) < min_chars:
         return ""
     return text
 

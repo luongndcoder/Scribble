@@ -13,9 +13,11 @@ Tier A (MLX) / Tier B (CUDA-ONNX) engines arrive in Phase 2/3; until then every
 platform uses this bundled Tier C model.
 """
 
+import re
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -44,14 +46,30 @@ def _rms_int16(frame: bytes) -> float:
 
 
 def _maybe_lowercase_allcaps(text: str) -> str:
-    """The sherpa Vietnamese model emits ALL-CAPS, no punctuation. Lowercase it
-    first so the downstream Vietnamese normalizer can capitalize sentence starts
-    instead of mistaking every short word for an acronym (RỒI/CŨNG/HỖ → kept).
+    """Lowercase sherpa output so the VI normalizer can re-capitalize properly.
 
-    Mixed-case input (e.g. cloud providers) is left untouched.
+    Both bundled sherpa Vietnamese models (offline Zipformer + streaming
+    Zipformer) emit unpunctuated ALL-CAPS text. Mixed-case input from cloud
+    providers is left untouched.
+
+    The old rule required >70% of letters to be uppercase, which missed
+    real streaming segments that mix cases — e.g. "POPPY vào trong" (capital
+    letters are only 5/16). A segment counts as model output when it has NO
+    lowercase-only word that is already properly capitalized... in practice
+    the reliable signal is: any run of 2+ consecutive uppercase letters means
+    the model shouted this segment and it should be normalized.
     """
     alpha = [c for c in text if c.isalpha()]
-    if alpha and sum(c.isupper() for c in alpha) / len(alpha) > 0.7:
+    if not alpha:
+        return text
+    upper_ratio = sum(c.isupper() for c in alpha) / len(alpha)
+    if upper_ratio > 0.7:
+        return text.lower()
+    # Partial-shout case: the model emitted an uppercase token inside a
+    # lowercase sentence ("POPPY vào trong"). Two or more consecutive
+    # uppercase letters is not normal Vietnamese prose, so normalize the whole
+    # segment (the normalizer restores sentence-case afterwards).
+    if re.search(r"[A-ZĐÂĂÊÔƠƯÁÀẢÃẠẤẦẨẪẬẮẰẲẴẶÉÈẺẼẸẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌỐỒỔỖỘỚỜỞỠỢÚÙỦŨỤỨỪỬỮỰÝỲỶỸỴ]{2,}", text):
         return text.lower()
     return text
 
@@ -95,6 +113,164 @@ class SherpaOnnxEngine(LocalSTTEngine):
         if language.startswith("vi"):
             text = normalize_vietnamese_text(text)
         return filter_hallucinations(text)
+
+
+class StreamingZipformerEngine(LocalSTTEngine):
+    """sherpa-onnx ONLINE (streaming) transducer — Vietnamese Zipformer-30M RNNT.
+
+    Unlike SherpaOnnxEngine (offline, one-shot per segment), this keeps
+    decode state across feed() calls, so recognition starts while the speaker
+    is still talking. ~33x realtime on CPU (measured on a 6.7min VI meeting).
+    """
+
+    SAMPLE_RATE = 16000
+
+    def __init__(self, model_dir: Path):
+        import sherpa_onnx
+
+        model_dir = Path(model_dir)
+        self._recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
+            tokens=str(model_dir / "tokens.txt"),
+            encoder=str(model_dir / "encoder.fp16.onnx"),
+            decoder=str(model_dir / "decoder.fp16.onnx"),
+            joiner=str(model_dir / "joiner.fp16.onnx"),
+            num_threads=2,
+            sample_rate=self.SAMPLE_RATE,
+            feature_dim=80,
+            # Endpoint rules: close an utterance after 2.4s trailing silence,
+            # or 1.2s when the decoder already produced something decodable,
+            # or force-cut a 300-frame monologue. Tuned for meeting speech.
+            enable_endpoint_detection=True,
+            rule1_min_trailing_silence=2.4,
+            rule2_min_trailing_silence=1.2,
+            rule3_min_utterance_length=300,
+            decoding_method="greedy_search",
+        )
+        self._stream = self._recognizer.create_stream()
+        log.info("LOADED: streaming Zipformer (online) from %s", model_dir.name)
+
+    def accept(self, pcm_float32: np.ndarray) -> None:
+        self._stream.accept_waveform(self.SAMPLE_RATE, pcm_float32)
+        while self._recognizer.is_ready(self._stream):
+            self._recognizer.decode_stream(self._stream)
+
+    def is_endpoint(self) -> bool:
+        return self._recognizer.is_endpoint(self._stream)
+
+    def partial_text(self, language: str = "vi") -> str:
+        """Interim text for the live preview — post-processed like a final.
+
+        Regression 2026-10-09: this returned the RAW recognizer output, so the
+        interim row on screen was unpunctuated ALL-CAPS ("À MẤY CÁI ÔNG GIÁO
+        SƯ…") while committed finals looked normal. The interim preview must go
+        through the same cleanup (lowercase → VI normalize → repeat collapse).
+        """
+        raw = (self._recognizer.get_result(self._stream) or "").strip()
+        return _postprocess_local(raw, language)
+
+    def finalize(self, language: str = "vi") -> str:
+        """Return the finished utterance text and reset for the next one."""
+        text = self.partial_text(language)
+        self._recognizer.reset(self._stream)
+        return text
+
+    def transcribe_pcm(self, pcm_float32: np.ndarray, language: str = "vi") -> str:
+        """Whole-buffer convenience path (one utterance, then reset)."""
+        self.accept(pcm_float32)
+        return self.finalize(language)
+
+
+def _collapse_repeats(text: str) -> str:
+    """Collapse runaway repetition from the streaming transducer.
+
+    RNNT models occasionally enter a repeat loop on long/unclear audio. Two
+    shapes were observed in the wild:
+      - single-token stall:  "nó nó nó nó nó …"
+      - phrase stall:        "Poppy vào trong cái capid đó Poppy vào trong …"
+    We collapse immediate repeats of the same token to at most 2 (keeping
+    natural Vietnamese reduplication like "rất rất", "từ từ") and cut a
+    repeated multi-word cycle down to a single occurrence. Consecutive
+    identical sentences are dropped too.
+    """
+    if not text:
+        return text
+
+    tokens = text.split()
+
+    # 1) Collapse an immediate repeating CYCLE of length 2..12 (phrase stall).
+    #    A cycle of length 1 is deliberately NOT collapsed here: a single word
+    #    said twice is normal Vietnamese reduplication ("rất rất", "từ từ",
+    #    "nó nó"), while 3+ identical words is a stall — handled in step 2.
+    if len(tokens) >= 4:
+        collapsed: list[str] = []
+        i = 0
+        while i < len(tokens):
+            found = False
+            # Longest cycle first so a 6-word phrase wins over a shorter match
+            # inside it.
+            for size in range(min(12, len(collapsed), len(tokens) - i), 1, -1):
+                prev = [t.lower() for t in collapsed[-size:]]
+                nxt = [t.lower() for t in tokens[i : i + size]]
+                if len(nxt) == size and prev == nxt:
+                    i += size          # skip the duplicated cycle
+                    found = True
+                    break
+            if not found:
+                collapsed.append(tokens[i])
+                i += 1
+        tokens = collapsed
+
+    # 2) Cap a single token repeated 3+ times in a row at 2 occurrences
+    #    (keeps "rất rất", kills "nó nó nó nó").
+    if len(tokens) >= 3:
+        capped: list[str] = []
+        for tok in tokens:
+            if (
+                len(capped) >= 2
+                and capped[-1].lower() == tok.lower()
+                and capped[-2].lower() == tok.lower()
+            ):
+                continue
+            capped.append(tok)
+        tokens = capped
+
+    text = " ".join(tokens)
+
+    # 2) Sentence-level: drop consecutive identical sentences.
+    parts = re.split(r"(?<=[.!?…])\s+", text)
+    if len(parts) > 1:
+        deduped: list[str] = []
+        for s in parts:
+            if deduped and s.strip().lower() == deduped[-1].strip().lower():
+                continue
+            deduped.append(s)
+        text = " ".join(deduped)
+
+    return text
+
+
+def _postprocess_local(text: str, language: str = "vi") -> str:
+    """Shared text cleanup for local engines (case + VI normalization)."""
+    if not text:
+        return ""
+    text = _collapse_repeats(text)
+    text = _maybe_lowercase_allcaps(text)
+    if language.startswith("vi"):
+        text = normalize_vietnamese_text(text)
+    return filter_hallucinations(text)
+
+
+# Streaming engine cache (one recognizer per model dir — load is expensive).
+_STREAM_ENGINE_CACHE: dict[str, StreamingZipformerEngine] = {}
+
+
+def get_stream_engine(model_dir: Path) -> StreamingZipformerEngine:
+    key = str(model_dir)
+    engine = _STREAM_ENGINE_CACHE.get(key)
+    if engine is None:
+        engine = StreamingZipformerEngine(model_dir)
+        _STREAM_ENGINE_CACHE[key] = engine
+    return engine
 
 
 # Engine cache — building a recognizer is expensive (loads ONNX sessions); reuse
@@ -188,11 +364,9 @@ class LocalStreamingSTT:
     SAMPLE_RATE = 16000
     _FRAME_SAMPLES = 320            # 20ms @ 16kHz
     _FRAME_BYTES = _FRAME_SAMPLES * 2
-    _FRAME_MS = 20.0
     _SILENCE_RMS = 380.0           # below → treat frame as silence
-    _SILENCE_HANG_MS = 700.0       # trailing silence that closes a segment
-    _MIN_SEG_MS = 800.0            # ignore shorter blips
-    _MAX_SEG_MS = 18000.0          # force-cut long monologue
+    # Partial results are pushed at most this often (interim UI preview).
+    _PARTIAL_INTERVAL_S = 0.8
 
     def __init__(self, language: str = "vi"):
         import queue
@@ -202,78 +376,100 @@ class LocalStreamingSTT:
         self._out: "queue.Queue" = queue.Queue()
         self._stopped = False
         self._worker: threading.Thread | None = None
-        self._seg = bytearray()      # current speech segment (PCM bytes)
         self._tail = bytearray()     # leftover partial frame
-        self._silence_ms = 0.0
-        self._has_speech = False
+        self._engine: StreamingZipformerEngine | None = None
+        self._model_dir: Path | None = None
+        self._last_partial = ""
+        self._last_partial_at = 0.0
 
     # — lifecycle —
     def start(self) -> None:
+        """Load the model FIRST, then start consuming audio.
+
+        Regression 2026-10-09: the worker used to load the model asynchronously
+        (~2s) while `feed_audio` already queued PCM. Every queued chunk that
+        arrived before the load finished hit `if self._engine is None: continue`
+        and was DROPPED — the first seconds of every recording vanished (and a
+        short recording could lose all of it, producing an empty transcript).
+        Loading synchronously here means once start() returns, no audio is lost.
+        """
         self._stopped = False
+        self._model_dir = self._resolve_model_dir()
+        if self._model_dir is not None:
+            try:
+                self._engine = get_stream_engine(self._model_dir)
+            except Exception as exc:
+                log.warning("FAILED: streaming Zipformer init: %s", exc)
+                self._engine = None
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
-        log.info("STARTED: local realtime STT (nemotron MLX, lang=%s)", self._language)
+        log.info("STARTED: local realtime STT (streaming Zipformer, lang=%s)", self._language)
+
+    def _resolve_model_dir(self) -> Path | None:
+        """Streaming Zipformer dir, bundled first (see model_registry)."""
+        from local.model_registry import streaming_model_dir
+
+        hit = streaming_model_dir()
+        if hit is None:
+            log.warning("FAILED: streaming Zipformer model not found (bundled or cache)")
+        return hit
 
     def _run(self) -> None:
         while True:
-            seg = self._in.get()
-            if seg is None:
+            item = self._in.get()
+            if item is None:
                 break
-            samples = _pcm_int16_to_float32(seg)
+            pcm_bytes, is_final_flush = item
+            if self._engine is None:
+                # start() loads synchronously, so this only happens if the model
+                # was genuinely unavailable — nothing we can transcribe with.
+                continue
             try:
-                fut = _MLX_EXECUTOR.submit(
-                    lambda s=samples: get_mlx_engine().transcribe_pcm(s, self._language)
-                )
-                text = fut.result()
+                self._engine.accept(_pcm_int16_to_float32(pcm_bytes))
+                endpoint = self._engine.is_endpoint()
+                if endpoint:
+                    text = self._engine.finalize(self._language)
+                    if text:
+                        self._out.put({"text": text, "is_final": True})
+                    self._last_partial = ""
+                else:
+                    partial = self._engine.partial_text(self._language)
+                    now = time.time()
+                    if (
+                        partial
+                        and partial != self._last_partial
+                        and now - self._last_partial_at >= self._PARTIAL_INTERVAL_S
+                    ):
+                        self._last_partial = partial
+                        self._last_partial_at = now
+                        self._out.put({"text": partial, "is_final": False})
+                if is_final_flush:
+                    # Stream closing — emit whatever is decoded so nothing is lost.
+                    text = self._engine.finalize(self._language)
+                    if text:
+                        self._out.put({"text": text, "is_final": True})
             except Exception as exc:
                 log.warning("FAILED: local realtime transcribe: %s", exc)
-                text = ""
-            if text:
-                self._out.put({"text": text, "is_final": True})
         self._out.put(None)
 
-    # — feed/segment —
+    # — feed —
     def feed_audio(self, pcm_bytes: bytes) -> None:
+        """Queue PCM at frame granularity; the worker streams it to the model."""
         if self._stopped or not pcm_bytes:
             return
         self._tail.extend(pcm_bytes)
         n = len(self._tail) - (len(self._tail) % self._FRAME_BYTES)
         if n <= 0:
             return
-        frames = self._tail[:n]
+        frames = bytes(self._tail[:n])
         self._tail = self._tail[n:]
-        for i in range(0, len(frames), self._FRAME_BYTES):
-            frame = bytes(frames[i : i + self._FRAME_BYTES])
-            self._seg.extend(frame)
-            if _rms_int16(frame) < self._SILENCE_RMS:
-                self._silence_ms += self._FRAME_MS
-            else:
-                self._silence_ms = 0.0
-                self._has_speech = True
-            seg_ms = (len(self._seg) / 2) / self.SAMPLE_RATE * 1000.0
-            if self._has_speech and (
-                (self._silence_ms >= self._SILENCE_HANG_MS and seg_ms >= self._MIN_SEG_MS)
-                or seg_ms >= self._MAX_SEG_MS
-            ):
-                self._flush_segment()
-            elif not self._has_speech and seg_ms >= 2000.0:
-                # Pure-silence buffer — discard to bound memory, keep a short tail.
-                self._seg.clear()
-                self._silence_ms = 0.0
-
-    def _flush_segment(self) -> None:
-        seg = bytes(self._seg)
-        self._seg.clear()
-        self._silence_ms = 0.0
-        had_speech = self._has_speech
-        self._has_speech = False
-        if had_speech and (len(seg) / 2) / self.SAMPLE_RATE * 1000.0 >= self._MIN_SEG_MS:
-            self._in.put(seg)
+        self._in.put((frames, False))
 
     def stop(self) -> None:
         self._stopped = True
-        if self._seg:
-            self._flush_segment()
+        if self._tail:
+            self._in.put((bytes(self._tail), True))
+            self._tail.clear()
         self._in.put(None)
 
     def results(self):

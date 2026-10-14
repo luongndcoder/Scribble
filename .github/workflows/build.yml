@@ -24,62 +24,17 @@ jobs:
         with:
           version: 9
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      # ffmpeg is bundled via imageio-ffmpeg's Python wheel (v1.2.11+), so the
-      # build runner doesn't need choco install ffmpeg anymore. The wheel ships
-      # a static ffmpeg.exe that PyInstaller picks up via
-      # collect_all('imageio_ffmpeg'). See src-python/services/audio.py.
-
-      - name: Install Python dependencies
-        working-directory: src-python
-        run: uv pip install --system -r requirements.txt
-
-      - name: Download ONNX model
-        working-directory: src-python/models
+      # The backend is a Rust axum server inside the Tauri process — no Python
+      # sidecar. This stages the streaming STT model (HuggingFace, sha256
+      # pinned) and the static ffmpeg sidecar (binaries/scribble-ffmpeg-*.exe).
+      - name: Fetch models + ffmpeg
         shell: bash
-        run: |
-          if [ ! -f voxceleb_CAM++.onnx ]; then
-            curl -L -o voxceleb_CAM++.onnx "https://wespeaker-1256283475.cos.ap-shanghai.myqcloud.com/models/voxceleb/voxceleb_CAM++.onnx"
-          fi
-
-      - name: Build sidecar
-        working-directory: src-python
-        run: python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-      - name: Copy sidecar + compress
-        shell: bash
-        run: |
-          mkdir -p src-tauri/binaries
-          # Strip unnecessary files
-          rm -rf src-python/dist/scribble-sidecar/_internal/grpc_tools 2>/dev/null || true
-          find src-python/dist/scribble-sidecar/_internal -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true
-          find src-python/dist/scribble-sidecar/_internal -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-          find src-python/dist/scribble-sidecar/_internal -name "*.dist-info" -type d -exec rm -rf {} + 2>/dev/null || true
-          # Compress
-          tar --zstd -cf src-tauri/binaries/sidecar-dist.tar.zst -C src-python/dist scribble-sidecar
-          # Create launcher shim
-          cat > src-tauri/binaries/scribble-sidecar-x86_64-pc-windows-msvc.exe << 'WINEOF'
-          @echo off
-          "%~dp0sidecar-dist\scribble-sidecar.exe" %*
-          WINEOF
-
-      # "Bundle ffmpeg for Windows" step removed in v1.2.11. The file was
-      # copied into src-tauri/binaries/ffmpeg.exe but never actually shipped
-      # to end users — it wasn't listed in tauri.conf.json's externalBin or
-      # resources. ffmpeg now ships inside the sidecar tarball via
-      # imageio-ffmpeg, see src-python/services/audio.py find_ffmpeg().
+        run: bash scripts/fetch-build-deps.sh x86_64-pc-windows-msvc
 
       - name: Install frontend dependencies
         run: pnpm install

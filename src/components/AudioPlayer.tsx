@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { CSSProperties, ChangeEvent } from 'react';
+import { IconPause, IconPlay } from './icons/scribble-icons';
 
 /** Imperative handle so a parent (e.g. MeetingDetail) can drive playback —
  *  used by transcript "click-to-seek": jump the audio to a segment's start. */
@@ -100,14 +101,9 @@ const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function Aud
                 aria-label={playing ? 'Tạm dừng' : 'Phát'}
             >
                 {playing ? (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                        <rect x="6" y="5" width="4" height="14" rx="1" />
-                        <rect x="14" y="5" width="4" height="14" rx="1" />
-                    </svg>
+                    <IconPause size={18} />
                 ) : (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M8 5.14v13.72a1 1 0 0 0 1.54.84l10.7-6.86a1 1 0 0 0 0-1.68L9.54 4.3A1 1 0 0 0 8 5.14z" />
-                    </svg>
+                    <IconPlay size={18} />
                 )}
             </button>
             <span className="audio-time">{formatTime(current)}</span>

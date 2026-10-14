@@ -14,6 +14,7 @@ import { showConfirm } from './ConfirmDialog';
 import { useToast } from './Toast';
 import { UploadAudioModal } from './UploadAudioModal';
 import { t } from '../i18n';
+import { IconClose, IconDots, IconMic, IconPlus, IconSearch, IconUpload } from './icons/scribble-icons';
 
 export function MeetingList() {
     const { meetings, setMeetings, setCurrentView, setCurrentMeetingId, setDraftId, setActiveTab, lang, recording, backendOnline } = useAppStore();
@@ -23,6 +24,31 @@ export function MeetingList() {
     const [busyMap, setBusyMap] = useState<Record<string, boolean>>({});
     const [searchQuery, setSearchQuery] = useState('');
     const [uploadModalOpen, setUploadModalOpen] = useState(false);
+    const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+    const [closingMenuId, setClosingMenuId] = useState<number | null>(null);
+
+    const closeMenu = () => {
+        if (openMenuId === null) return;
+        const id = openMenuId;
+        setClosingMenuId(id);
+        setTimeout(() => {
+            setOpenMenuId((cur) => (cur === id ? null : cur));
+            setClosingMenuId((cur) => (cur === id ? null : cur));
+        }, 150);
+    };
+
+    // Close the overflow menu on outside click / Escape.
+    useEffect(() => {
+        if (openMenuId === null) return;
+        const onDocClick = () => closeMenu();
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu(); };
+        document.addEventListener('click', onDocClick);
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('click', onDocClick);
+            document.removeEventListener('keydown', onKey);
+        };
+    });
 
     const openUploadModal = () => {
         if (recording) {
@@ -102,9 +128,14 @@ export function MeetingList() {
     };
 
     const newMeeting = async () => {
-        try {
-            await resetDiarize();
-        } catch (e) { console.warn('[meetings] Diarize reset failed:', e); }
+        // Reset the diarizer WITHOUT blocking navigation.
+        //
+        // This used to be `await resetDiarize()` before switching screens, so a
+        // slow or not-yet-ready backend made the button look dead: nothing
+        // happened until the request settled. Opening a new meeting is local
+        // state only — the reset is a best-effort backend hint, so it now runs
+        // in the background and the UI switches immediately.
+        resetDiarize().catch((e) => console.warn('[meetings] Diarize reset failed:', e));
         const store = useAppStore.getState();
         // Reset all state for a fresh meeting
         store.clearTranscript();
@@ -168,6 +199,22 @@ export function MeetingList() {
 
     const hasMinutes = (meeting: Meeting) => String(meeting?.summary || '').trim().length > 0;
     const hasTranscript = (meeting: Meeting) => String(meeting?.transcript || '').trim().length > 0;
+
+    /** Distinct speaker count for the list subtitle (0 when unknown). */
+    const speakerCount = (meeting: Meeting): number => {
+        try {
+            const parsed = JSON.parse(String(meeting?.transcript || ''));
+            if (Array.isArray(parsed)) {
+                const ids = new Set<number>();
+                for (const p of parsed) {
+                    const id = Number((p as Record<string, unknown>)?.speakerId);
+                    if (Number.isFinite(id)) ids.add(id);
+                }
+                return ids.size;
+            }
+        } catch { /* legacy plain-text transcript */ }
+        return 0;
+    };
 
     // Plain-text transcript — kept identical to MeetingDetail.exportTranscript
     // so list & detail downloads produce the same .txt format:
@@ -270,7 +317,7 @@ export function MeetingList() {
     };
 
     return (
-        <section className="view active">
+        <section className="view active t-page-enter-left">
             <div className="pane-header">
                 <h2 className="pane-title">{lang === 'vi' ? 'Lịch sử cuộc họp' : 'Meeting History'}</h2>
                 <div className="pane-actions">
@@ -287,25 +334,21 @@ export function MeetingList() {
                                         : (lang === 'vi' ? 'Upload file ghi âm có sẵn' : 'Upload an audio file')
                             }
                         >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                                strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <polyline points="17 8 12 3 7 8" />
-                                <line x1="12" x2="12" y1="3" y2="15" />
-                            </svg>
+                            <IconUpload size={14} strokeWidth={2.25} />
                             <span>{lang === 'vi' ? 'Tải file lên' : 'Upload file'}</span>
                         </button>
                     )}
+                    {/* NOT gated on `backendOnline`: creating a meeting only
+                        touches local state, so it works the instant the app
+                        opens. Gating it made the button look dead for the
+                        first ~1s of every launch, which read as a crash. */}
                     <button
                         className="action-btn primary"
                         onClick={newMeeting}
-                        disabled={recording || !backendOnline}
-                        title={!backendOnline ? (lang === 'vi' ? 'Đang khởi động — vui lòng chờ' : 'Starting up — please wait') : undefined}
+                        disabled={recording}
+                        title={recording ? (lang === 'vi' ? 'Đang ghi âm' : 'Recording') : undefined}
                     >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                            strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 5v14" /><path d="M5 12h14" />
-                        </svg>
+                        <IconPlus size={14} strokeWidth={2.25} />
                         <span>{lang === 'vi' ? 'Cuộc họp mới' : 'New Meeting'}</span>
                     </button>
                 </div>
@@ -315,9 +358,7 @@ export function MeetingList() {
             {meetings.length > 0 && (
                 <div className="meetings-toolbar">
                     <div className="meetings-search-wrap">
-                        <svg className="meetings-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-                        </svg>
+                        <IconSearch size={14} className="meetings-search-icon" />
                         <input
                             className="meetings-search-input"
                             type="search"
@@ -327,9 +368,7 @@ export function MeetingList() {
                         />
                         {searchQuery && (
                             <button className="meetings-search-clear" onClick={() => setSearchQuery('')} aria-label="Clear search">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                                </svg>
+                                <IconClose size={12} strokeWidth={2.25} />
                             </button>
                         )}
                     </div>
@@ -345,10 +384,7 @@ export function MeetingList() {
             <div className="meetings-grid">
                 {filteredMeetings.length === 0 && meetings.length === 0 ? (
                     <div className="list-empty">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3, marginBottom: 12 }}>
-                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" />
-                        </svg>
+                        <IconMic size={40} style={{ opacity: 0.3, marginBottom: 12 }} strokeWidth={1.17} />
                         <div>{lang === 'vi' ? 'Chưa có cuộc họp nào' : 'No meetings yet'}</div>
                         <div style={{ fontSize: '0.82rem', marginTop: 4, opacity: 0.6 }}>
                             {lang === 'vi' ? 'Nhấn "Cuộc họp mới" để bắt đầu' : 'Click "New Meeting" to get started'}
@@ -356,16 +392,14 @@ export function MeetingList() {
                     </div>
                 ) : filteredMeetings.length === 0 ? (
                     <div className="list-empty">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3, marginBottom: 10 }}>
-                            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-                        </svg>
+                        <IconSearch size={32} style={{ opacity: 0.3, marginBottom: 10 }} />
                         <div>{lang === 'vi' ? 'Không tìm thấy cuộc họp nào' : 'No meetings found'}</div>
                         <div style={{ fontSize: '0.82rem', marginTop: 4, opacity: 0.6 }}>
                             {lang === 'vi' ? `Không khớp với "${searchQuery}"` : `No match for "${searchQuery}"`}
                         </div>
                     </div>
                 ) : filteredMeetings.map((m) => (
-                    <div className="meeting-card" key={m.id}>
+                    <div className={`meeting-card${openMenuId === m.id ? ' menu-open' : ''}`} key={m.id}>
                         <div className="meeting-card-info" onClick={() => openMeeting(m)}>
                             <div className={`meeting-card-title ${editingMeetingId === m.id ? 'editing' : ''}`}>
                                 {m.status === 'draft' && <span className="draft-badge">Draft</span>}
@@ -396,29 +430,53 @@ export function MeetingList() {
                             <div className="meeting-card-date">
                                 {formatDate(m.created_at)}
                                 {m.audio_duration > 0 && ` · ${formatDuration(m.audio_duration)}`}
+                                {speakerCount(m) > 0 && ` · ${speakerCount(m)} ${lang === 'vi' ? 'người nói' : 'speakers'}`}
+                                {m.status === 'draft' && ` · ${lang === 'vi' ? 'bản nháp' : 'draft'}`}
                             </div>
                         </div>
                         <div className="meeting-card-actions">
-                            <button className="card-action-btn" data-tooltip={lang === 'vi' ? 'Đổi tên' : 'Rename'} aria-label={lang === 'vi' ? 'Đổi tên' : 'Rename'} disabled={isBusy('rename', m.id)}
-                                onClick={(e) => { e.stopPropagation(); startRename(e, m); }}>
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                            <button
+                                className="card-action-btn card-menu-btn"
+                                data-tooltip={lang === 'vi' ? 'Thao tác khác' : 'More actions'}
+                                aria-label={lang === 'vi' ? 'Thao tác khác' : 'More actions'}
+                                aria-expanded={openMenuId === m.id && closingMenuId !== m.id}
+                                aria-haspopup="menu"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (openMenuId === m.id && closingMenuId !== m.id) {
+                                        closeMenu();
+                                    } else {
+                                        setClosingMenuId(null);
+                                        setOpenMenuId(m.id);
+                                    }
+                                }}
+                            >
+                                <IconDots size={15} />
                             </button>
-                            <button className="card-action-btn" data-tooltip={lang === 'vi' ? 'Tải ghi âm' : 'Download audio'} aria-label={lang === 'vi' ? 'Tải ghi âm' : 'Download audio'} disabled={isBusy('audio', m.id)}
-                                onClick={(e) => { e.stopPropagation(); void exportAudio(e, m); }}>
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" x2="12" y1="15" y2="3" /></svg>
-                            </button>
-                            <button className="card-action-btn" data-tooltip={lang === 'vi' ? 'Tải biên bản' : 'Export minutes'} aria-label={lang === 'vi' ? 'Tải biên bản' : 'Export minutes'} disabled={isBusy('minutes', m.id) || !hasMinutes(m)}
-                                onClick={(e) => { e.stopPropagation(); void exportMinutes(e, m); }}>
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h8" /></svg>
-                            </button>
-                            <button className="card-action-btn" data-tooltip={lang === 'vi' ? 'Tải transcript' : 'Export transcript'} aria-label={lang === 'vi' ? 'Tải transcript' : 'Export transcript'} disabled={isBusy('transcript', m.id) || !hasTranscript(m)}
-                                onClick={(e) => { e.stopPropagation(); void exportTranscript(e, m); }}>
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h10" /></svg>
-                            </button>
-                            <button className="card-action-btn card-delete-btn" data-tooltip={lang === 'vi' ? 'Xoá' : 'Delete'} aria-label={lang === 'vi' ? 'Xoá' : 'Delete'} disabled={isBusy('delete', m.id)}
-                                onClick={(e) => { e.stopPropagation(); handleDelete(e, m.id); }}>
-                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" /><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" /></svg>
-                            </button>
+                            {openMenuId === m.id && (
+                                <div className={`card-menu${closingMenuId === m.id ? ' is-closing' : ''}`} role="menu" onClick={(e) => e.stopPropagation()}>
+                                    <button role="menuitem" className="card-menu-item" disabled={isBusy('rename', m.id)}
+                                        onClick={(e) => { closeMenu(); startRename(e, m); }}>
+                                        {lang === 'vi' ? 'Đổi tên' : 'Rename'}
+                                    </button>
+                                    <button role="menuitem" className="card-menu-item" disabled={isBusy('audio', m.id)}
+                                        onClick={(e) => { closeMenu(); void exportAudio(e, m); }}>
+                                        {lang === 'vi' ? 'Tải ghi âm' : 'Download audio'}
+                                    </button>
+                                    <button role="menuitem" className="card-menu-item" disabled={isBusy('minutes', m.id) || !hasMinutes(m)}
+                                        onClick={(e) => { closeMenu(); void exportMinutes(e, m); }}>
+                                        {lang === 'vi' ? 'Tải biên bản' : 'Export minutes'}
+                                    </button>
+                                    <button role="menuitem" className="card-menu-item" disabled={isBusy('transcript', m.id) || !hasTranscript(m)}
+                                        onClick={(e) => { closeMenu(); void exportTranscript(e, m); }}>
+                                        {lang === 'vi' ? 'Tải transcript' : 'Export transcript'}
+                                    </button>
+                                    <button role="menuitem" className="card-menu-item danger" disabled={isBusy('delete', m.id)}
+                                        onClick={(e) => { closeMenu(); void handleDelete(e, m.id); }}>
+                                        {lang === 'vi' ? 'Xoá' : 'Delete'}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 ))}
