@@ -80,3 +80,4 @@ src-tauri/resources/models/local/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09/
 src-tauri/models/speaker_eres2net_base.onnx
 src-python/models/
 .claude/
+pnpm-workspace.yaml
