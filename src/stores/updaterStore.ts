@@ -16,8 +16,9 @@ export type UpdaterStatus =
     | 'idle'         // no check in flight
     | 'checking'     // calling check()
     | 'available'    // update found, awaiting user
-    | 'downloading'  // downloadAndInstall in flight
-    | 'ready'        // download done, awaiting relaunch
+    | 'downloading'  // download in flight
+    | 'installing'   // download finished, extracting and installing bundle
+    | 'ready'        // install finished, awaiting/triggering relaunch
     | 'error'        // last operation failed
     | 'up-to-date';  // checked, nothing new
 

@@ -26,7 +26,7 @@ export function UpdateModal() {
     useEffect(() => {
         if (!modalOpen) return;
         const handler = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && status !== 'downloading' && status !== 'ready') {
+            if (e.key === 'Escape' && status !== 'downloading' && status !== 'installing' && status !== 'ready') {
                 setModalOpen(false);
             }
         };
@@ -38,7 +38,7 @@ export function UpdateModal() {
 
     const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
     const eta = estimateETA(downloaded, total, startedAt);
-    const installing = status === 'downloading' || status === 'ready';
+    const installing = status === 'downloading' || status === 'installing' || status === 'ready';
 
     const handleSkip = () => {
         setSkippedVersion(available.version);
@@ -101,11 +101,13 @@ export function UpdateModal() {
                             <span>
                                 {status === 'ready'
                                     ? (lang === 'vi' ? 'Đang khởi động lại…' : 'Relaunching…')
-                                    : total > 0
-                                        ? `${formatMB(downloaded)} / ${formatMB(total)} MB`
-                                        : (lang === 'vi' ? 'Đang kết nối…' : 'Connecting…')}
+                                    : status === 'installing'
+                                        ? (lang === 'vi' ? 'Đang cài đặt…' : 'Installing update…')
+                                        : total > 0
+                                            ? `${formatMB(downloaded)} / ${formatMB(total)} MB`
+                                            : (lang === 'vi' ? 'Đang kết nối…' : 'Connecting…')}
                             </span>
-                            <span>{pct}%{eta && status === 'downloading' ? ' · ' + formatETA(eta, lang) : ''}</span>
+                            <span>{status === 'installing' ? '100%' : `${pct}%`}{eta && status === 'downloading' ? ' · ' + formatETA(eta, lang) : ''}</span>
                         </div>
                     </div>
                 )}

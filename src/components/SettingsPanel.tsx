@@ -127,6 +127,15 @@ export function SettingsPanel() {
         if (updaterStatus === 'checking') {
             return { msg: lang === 'vi' ? 'Đang kiểm tra…' : 'Checking…', kind: '' };
         }
+        if (updaterStatus === 'downloading') {
+            return { msg: lang === 'vi' ? 'Đang tải bản cập nhật…' : 'Downloading update…', kind: '' };
+        }
+        if (updaterStatus === 'installing') {
+            return { msg: lang === 'vi' ? 'Đang cài đặt…' : 'Installing…', kind: '' };
+        }
+        if (updaterStatus === 'ready') {
+            return { msg: lang === 'vi' ? 'Đang khởi động lại…' : 'Relaunching…', kind: '' };
+        }
         if (updaterStatus === 'up-to-date') {
             return { msg: lang === 'vi' ? '✓ Bạn đang dùng bản mới nhất' : "✓ You're on the latest version", kind: 'success' };
         }
@@ -823,13 +832,19 @@ export function SettingsPanel() {
                                 <button
                                     className="settings-update-check-btn"
                                     onClick={handleCheckUpdate}
-                                    disabled={updaterStatus === 'checking' || updaterStatus === 'downloading'}
+                                    disabled={updaterStatus === 'checking' || updaterStatus === 'downloading' || updaterStatus === 'installing' || updaterStatus === 'ready'}
                                 >
                                     {updaterStatus === 'checking'
                                         ? (lang === 'vi' ? 'Đang kiểm tra…' : 'Checking…')
-                                        : updaterStatus === 'available' && updaterAvailable
-                                            ? (lang === 'vi' ? 'Xem chi tiết' : 'View details')
-                                            : (lang === 'vi' ? 'Kiểm tra cập nhật' : 'Check for updates')}
+                                        : updaterStatus === 'downloading'
+                                            ? (lang === 'vi' ? 'Đang tải…' : 'Downloading…')
+                                            : updaterStatus === 'installing'
+                                                ? (lang === 'vi' ? 'Đang cài đặt…' : 'Installing…')
+                                                : updaterStatus === 'ready'
+                                                    ? (lang === 'vi' ? 'Đang khởi động lại…' : 'Relaunching…')
+                                                    : updaterStatus === 'available' && updaterAvailable
+                                                        ? (lang === 'vi' ? 'Xem chi tiết' : 'View details')
+                                                        : (lang === 'vi' ? 'Kiểm tra cập nhật' : 'Check for updates')}
                                 </button>
                                 {/* If we already have an update available, the
                                     button does double-duty: clicking opens the

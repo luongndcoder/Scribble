@@ -9,6 +9,7 @@
     "core:default",
     "opener:default",
     "updater:default",
+    "process:default",
     "process:allow-restart",
     "shell:allow-spawn",
     "shell:allow-execute",

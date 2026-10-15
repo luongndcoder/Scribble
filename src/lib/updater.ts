@@ -21,9 +21,9 @@ export async function checkForUpdates(opts: { manual?: boolean } = {}): Promise<
     if (!inTauri()) return;
     const store = useUpdaterStore.getState();
 
-    // Don't re-check while a download is in flight — that would leave the
+    // Don't re-check while a download or install is in flight — that would leave the
     // user with two parallel install attempts.
-    if (store.status === 'downloading' || store.status === 'ready') return;
+    if (store.status === 'downloading' || store.status === 'installing' || store.status === 'ready') return;
 
     store.setStatus('checking');
     store.setError(null);
@@ -70,7 +70,13 @@ export async function downloadAndInstall(): Promise<void> {
 
     store.startDownload();
     try {
-        const { check } = await import('@tauri-apps/plugin-updater');
+        // Pre-import both updater and process plugins before downloadAndInstall begins,
+        // so that all JS chunks are loaded in memory before the bundle files on disk are replaced.
+        const [{ check }, { relaunch }] = await Promise.all([
+            import('@tauri-apps/plugin-updater'),
+            import('@tauri-apps/plugin-process'),
+        ]);
+
         const result = await check();
         if (!result?.available) {
             store.setError('Update no longer available');
@@ -89,12 +95,14 @@ export async function downloadAndInstall(): Promise<void> {
                 s.setProgress(downloaded, total);
             } else if (event.event === 'Finished') {
                 s.setProgress(total, total);
-                s.setStatus('ready');
+                // Download is complete; Tauri is now decompressing and replacing the app bundle
+                s.setStatus('installing');
             }
         });
 
-        // Relaunch — on success this never returns (process is replaced).
-        const { relaunch } = await import('@tauri-apps/plugin-process');
+        // Extraction and bundle replacement complete.
+        // Set status to 'ready' ("Đang khởi động lại…") and trigger relaunch.
+        useUpdaterStore.getState().setStatus('ready');
         await relaunch();
     } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

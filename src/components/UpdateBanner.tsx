@@ -21,7 +21,7 @@ export function UpdateBanner() {
     // the modal is already open (banner would be redundant chrome).
     if (!available) return null;
     if (available.version === skippedVersion) return null;
-    if (bannerDismissed && status !== 'downloading' && status !== 'ready') return null;
+    if (bannerDismissed && status !== 'downloading' && status !== 'installing' && status !== 'ready') return null;
     if (status === 'idle' || status === 'checking' || status === 'up-to-date') return null;
 
     const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
@@ -60,6 +60,16 @@ export function UpdateBanner() {
                             </span>
                         </>
                     )}
+                    {status === 'installing' && (
+                        <>
+                            <strong>
+                                {lang === 'vi' ? 'Đang cài đặt…' : 'Installing update…'}
+                            </strong>
+                            <span className="update-notes-hint">
+                                {lang === 'vi' ? 'Đang giải nén và cập nhật' : 'Extracting and installing…'}
+                            </span>
+                        </>
+                    )}
                     {status === 'ready' && (
                         <>
                             <strong>
@@ -82,10 +92,10 @@ export function UpdateBanner() {
                             </button>
                         </>
                     )}
-                    {status === 'downloading' && (
+                    {(status === 'downloading' || status === 'installing') && (
                         <div className="update-progress">
-                            <div className="update-progress-bar" style={{ width: `${pct}%` }} />
-                            <span>{pct}%</span>
+                            <div className="update-progress-bar" style={{ width: `${status === 'installing' ? 100 : pct}%` }} />
+                            <span>{status === 'installing' ? '100%' : `${pct}%`}</span>
                         </div>
                     )}
                 </div>

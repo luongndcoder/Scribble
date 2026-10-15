@@ -10,9 +10,10 @@ pub mod api;
 pub mod pipeline;
 pub mod audio_archive;
 
-/// Kill any process listening on the sidecar port (8765).
-/// This works regardless of the process name (handles PyInstaller's `Python` name).
-fn kill_sidecar_port() {
+/// Kill any foreign process listening on the sidecar port (8765).
+/// Never kills our own process.
+pub(crate) fn kill_sidecar_port() {
+    let my_pid = std::process::id();
     #[cfg(unix)]
     {
         // lsof -ti :8765 returns PIDs of processes using port 8765
@@ -23,6 +24,9 @@ fn kill_sidecar_port() {
             let pids = String::from_utf8_lossy(&output.stdout);
             for pid_str in pids.split_whitespace() {
                 if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                    if pid == my_pid {
+                        continue;
+                    }
                     println!("[cleanup] Killing PID {} on port 8765", pid);
                     let _ = std::process::Command::new("kill")
                         .args(["-9", &pid.to_string()])
@@ -44,6 +48,9 @@ fn kill_sidecar_port() {
             for line in text.lines() {
                 if let Some(pid_str) = line.split_whitespace().last() {
                     if let Ok(pid) = pid_str.parse::<u32>() {
+                        if pid == my_pid {
+                            continue;
+                        }
                         println!("[cleanup] Killing PID {} on port 8765", pid);
                         let _ = std::process::Command::new("taskkill")
                             .args(["/F", "/PID", &pid.to_string()])
@@ -950,37 +957,23 @@ pub fn run() {
                 app.manage(SystemAudioState(system_audio_windows::CaptureState::new()));
             }
 
-            // Check if sidecar is already running (skip expensive restart)
-            let sidecar_alive = std::net::TcpStream::connect_timeout(
-                &"127.0.0.1:8765".parse().unwrap(),
-                std::time::Duration::from_millis(500),
-            ).is_ok();
-
-            if sidecar_alive {
-                println!("[setup] Backend already running on port 8765 — reusing");
-            } else {
-                println!("[setup] Backend not running — starting in-process Rust server");
-                kill_sidecar_port();
-                std::thread::sleep(std::time::Duration::from_millis(100));
-
-                // The backend is now a Rust axum server INSIDE this process.
-                // No Python sidecar, no tarball extraction, no child process.
-                // Same port and same HTTP/WS contract, so the frontend needs no
-                // changes. STT routes merge in here because they hold heavier
-                // state (loaded recognisers) than the REST router does.
-                tauri::async_runtime::spawn(async move {
-                    match crate::api::build_router_with_default_db() {
-                        Ok(router) => {
-                            let router = router.merge(crate::stt::router());
-                            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8765));
-                            if let Err(e) = crate::api::serve(router, addr).await {
-                                eprintln!("[setup] Backend server exited: {e}");
-                            }
+            // The backend is now a Rust axum server INSIDE this process.
+            // No Python sidecar, no tarball extraction, no child process.
+            // On restart, the previous instance might still be closing port 8765,
+            // so serve() will retry binding up to 3 seconds.
+            println!("[setup] Starting in-process Rust server on port 8765");
+            tauri::async_runtime::spawn(async move {
+                match crate::api::build_router_with_default_db() {
+                    Ok(router) => {
+                        let router = router.merge(crate::stt::router());
+                        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8765));
+                        if let Err(e) = crate::api::serve(router, addr).await {
+                            eprintln!("[setup] Backend server exited: {e}");
                         }
-                        Err(e) => eprintln!("[setup] Failed to build backend router: {e}"),
                     }
-                });
-            }
+                    Err(e) => eprintln!("[setup] Failed to build backend router: {e}"),
+                }
+            });
 
             // Linux: auto-grant microphone permission (WebKitGTK denies getUserMedia by default)
             #[cfg(target_os = "linux")]

@@ -535,10 +535,29 @@ pub fn build_router_at(db_path: PathBuf) -> Result<Router, String> {
 }
 
 /// Serve on the given address until the process is stopped.
+/// Retries binding up to 30 times (3 seconds total) in case a previous
+/// instance is still shutting down and releasing the port during relaunch.
 pub async fn serve(router: Router, addr: std::net::SocketAddr) -> Result<(), String> {
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("bind {addr}: {e}"))?;
+    let mut listener = None;
+    for attempt in 1..=30 {
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => {
+                listener = Some(l);
+                break;
+            }
+            Err(e) => {
+                if attempt == 5 {
+                    // After 500ms, force kill any zombie foreign process holding the port
+                    crate::kill_sidecar_port();
+                }
+                if attempt == 30 {
+                    return Err(format!("bind {addr} after {attempt} attempts: {e}"));
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+        }
+    }
+    let listener = listener.unwrap();
     log::info!("Rust backend listening on http://{addr}");
     axum::serve(listener, router)
         .await
