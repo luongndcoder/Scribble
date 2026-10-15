@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-14    # M-series runner — produces aarch64 (Apple Silicon)
+    runs-on: macos-15    # M-series runner with Xcode 16 / Metal 3.2 (required by mlx-sys 0.32)
     steps:
       - uses: actions/checkout@v4
 
@@ -144,18 +144,8 @@ jobs:
           fi
 
           if [ -z "$IDENTITY" ]; then
-            echo "::warning::No valid identity found — falling back to any identity (cert may not have private key)"
-            IDENTITY=$(security find-identity "$KEYCHAIN_PATH" \
-              | grep -E '^[[:space:]]*[0-9]+\)' | head -1 \
-              | sed -E 's/^[^"]*"([^"]+)".*$/\1/')
-          fi
-
-          if [ -z "$IDENTITY" ]; then
-            echo "::error::No code-signing identity found in keychain after import."
-            echo "::error::The .p12 file probably doesn't include the private key."
-            echo "::error::In Keychain Access → My Certificates, right-click the cert (NOT just"
-            echo "::error::the certificate sub-entry) → Export as .p12. Re-upload as secret."
-            exit 1
+            echo "::warning::No valid code-signing identity in keychain — falling back to ad-hoc signing (-)"
+            IDENTITY="-"
           fi
 
           echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"

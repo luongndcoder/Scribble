@@ -35,7 +35,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
 log = "0.4"
 hound = "3.5"
-tokio = { version = "1", features = ["rt", "time", "macros", "fs", "io-util", "sync", "rt-multi-thread", "net"] }
+tokio = { version = "1", features = ["rt", "time", "macros", "fs", "io-util", "sync", "rt-multi-thread", "net", "process"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
