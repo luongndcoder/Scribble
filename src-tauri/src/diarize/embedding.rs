@@ -763,4 +763,15 @@ mod tests {
         assert_eq!(embed_dim_for(Path::new("speaker_embedding_resnet34.onnx")), 256);
         assert_eq!(embed_dim_for(Path::new("speaker_eres2net_base.onnx")), 512);
     }
+
+    #[test]
+    fn ort_links_against_sherpa_onnxruntime() {
+        // Regression for Linux/Windows CI linker failures: `ort-sys` has
+        // `disable-linking` enabled so `ort` resolves `OrtGetApiBase` from the
+        // `libonnxruntime` already statically linked by `sherpa-onnx-sys`.
+        // Calling `ort::info()` exercises `OrtGetApiBase()` -> `GetApi()` ->
+        // `GetBuildInfoString()` without needing a model file on disk.
+        let info = ort::info();
+        assert!(!info.is_empty(), "ORT build info should not be empty");
+    }
 }

@@ -54,7 +54,14 @@ sherpa-onnx = { version = "1.13.8", default-features = false }
 # thresholds calibrated against that model stay valid.
 # kaldi-native-fbank is a Rust port of Kaldi's fbank and provides OnlineFeature,
 # which owns frame striding — the hynt model was exported for exactly this front end.
-ort = "2.0.0-rc.10"
+# NOTE: `sherpa-onnx-sys` already links `libonnxruntime` statically. Leaving
+# `ort`'s default `download-binaries` enabled links a second `onnxruntime`
+# static library into the binary, which fails with duplicate symbols on Linux
+# (`rust-lld`) and both duplicate symbols + `/MT` vs `/MD` CRT mismatch on
+# Windows (`LNK2038` / `LNK2005`). Enabling `ort-sys/disable-linking` makes
+# `ort` resolve `OrtGetApiBase` from `sherpa-onnx`'s bundled ONNX Runtime.
+ort = { version = "2.0.0-rc.10", default-features = false, features = ["std", "ndarray", "api-27"] }
+ort-sys = { version = "2.0.0-rc.10", default-features = false, features = ["disable-linking"] }
 kaldi-native-fbank = "0.1"
 # multipart: /drafts/{id}/audio, /meetings/{id}/attachments and
 # /transcribe-diarize all take a `multipart/form-data` body (Python read them
