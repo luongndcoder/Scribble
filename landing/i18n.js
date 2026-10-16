@@ -13,8 +13,11 @@ const translations = {
     "hero.sub": "Trợ lý cuộc họp AI ghi âm, phiên âm thời gian thực, nhận diện người nói, và tạo biên bản tự động — tất cả chạy trên máy của bạn.",
     "hero.btn.download": "Tải miễn phí",
     "hero.btn.github": "Xem trên GitHub",
+    "hero.metric.val.size": "~100MB",
     "hero.metric.size": "Nhẹ",
+    "hero.metric.val.private": "100%",
     "hero.metric.private": "Riêng tư",
+    "hero.metric.val.lang": "60+",
     "hero.metric.lang": "Ngôn ngữ",
 
     // Demo
@@ -30,7 +33,7 @@ const translations = {
     "features.f2.title": "Nhận diện người nói",
     "features.f2.desc": "Nhận diện ai đang nói dựa trên pitch và đặc trưng giọng nói. Mỗi giọng nói được tự động gán nhãn.",
     "features.f3.title": "Dịch trực tiếp",
-    "features.f3.desc": "Dịch trực tiếp sang 12+ ngôn ngữ. Bản dịch hiển thị ngay dưới mỗi dòng phiên âm.",
+    "features.f3.desc": "Dịch trực tiếp sang 30+ ngôn ngữ. Bản dịch hiển thị ngay dưới mỗi dòng phiên âm.",
     "features.f4.title": "Biên bản cuộc họp AI",
     "features.f4.desc": "Tóm tắt một cú click: tiêu đề, ý chính, hành động, quyết định, rủi ro. Xuất Markdown hoặc Word.",
     "features.f5.title": "Tự động lưu & Khôi phục",
@@ -155,8 +158,11 @@ const translations = {
     "hero.sub": "AI-powered meeting assistant that records, transcribes in real-time, identifies speakers, and generates comprehensive minutes — all running locally on your machine.",
     "hero.btn.download": "Download Free",
     "hero.btn.github": "View on GitHub",
+    "hero.metric.val.size": "~100MB",
     "hero.metric.size": "Lightweight",
+    "hero.metric.val.private": "100%",
     "hero.metric.private": "Private",
+    "hero.metric.val.lang": "60+",
     "hero.metric.lang": "Languages",
     "demo.title": "Scribble — Live Demo",
     "features.tag": "Features",
@@ -168,7 +174,7 @@ const translations = {
     "features.f2.title": "Speaker Identification",
     "features.f2.desc": "Pitch-based and voice feature diarization identifies who's speaking. Each voice auto-labeled in real-time.",
     "features.f3.title": "Live Translation",
-    "features.f3.desc": "Real-time cabin translation into 12+ languages. Translations stream below each transcript line.",
+    "features.f3.desc": "Real-time cabin translation into 30+ languages. Translations stream below each transcript line.",
     "features.f4.title": "AI Meeting Minutes",
     "features.f4.desc": "One-click summaries: title, key points, action items, decisions, risks. Export as Markdown or Word.",
     "features.f5.title": "Auto-save & Recovery",
@@ -290,17 +296,22 @@ function applyLanguage(lang) {
   document.querySelectorAll('.lang-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.lang === lang);
   });
-
-  localStorage.setItem('scribble-lang', lang);
 }
 
 function initI18n() {
-  const saved = localStorage.getItem('scribble-lang');
-  const lang = saved || 'vi'; // default Vietnamese
+  // English is always prioritized by default unless user explicitly chose otherwise
+  const userPref = localStorage.getItem('scribble-user-lang');
+  const lang = userPref === 'vi' ? 'vi' : 'en';
   applyLanguage(lang);
 
   document.querySelectorAll('.lang-btn').forEach(btn => {
-    btn.addEventListener('click', () => applyLanguage(btn.dataset.lang));
+    btn.addEventListener('click', () => {
+      const chosen = btn.dataset.lang;
+      applyLanguage(chosen);
+      try {
+        localStorage.setItem('scribble-user-lang', chosen);
+      } catch (e) {}
+    });
   });
 }
 
