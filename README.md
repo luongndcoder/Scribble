@@ -13,7 +13,7 @@
 ---
 
 <p align="center">
-  <img src="public/demo.gif" alt="Scribble Demo" width="800">
+  <img src="public/screenshots/transcript-diarization.png" alt="Scribble Desktop Application" width="850">
 </p>
 
 ---
@@ -89,6 +89,25 @@ Accurate real-time speaker separation ("Speaker 1", "Speaker 2", etc.) with intu
 - Synchronized audio player: Click any timestamp in the transcript to jump playback to that exact utterance.
 - Export meeting minutes to Microsoft Word (`.docx`) or Markdown (`.md`).
 - Incremental auto-save prevents data loss during sudden shutdowns or crashes.
+
+---
+
+## Screenshots
+
+| Meeting Dashboard | Live Transcription & Diarization |
+|:---:|:---:|
+| [![Meeting Dashboard](public/screenshots/dashboard-history.png)](public/screenshots/dashboard-history.png) | [![Live Transcription & Diarization](public/screenshots/transcript-diarization.png)](public/screenshots/transcript-diarization.png) |
+| *Meeting history list, search, duration tags, and quick actions* | *Real-time transcript stream, speaker badges, and audio sync* |
+
+| Audio File Upload Pipeline | Speech-to-Text Engines |
+|:---:|:---:|
+| [![Audio File Upload](public/screenshots/audio-upload.png)](public/screenshots/audio-upload.png) | [![Speech Settings](public/screenshots/settings-speech.png)](public/screenshots/settings-speech.png) |
+| *Batch file ingestion with model & language selection* | *On-device offline models (Nemotron/Zipformer) & cloud STT backends* |
+
+| AI Assistant & LLM Configuration | Application Preferences & Updates |
+|:---:|:---:|
+| [![AI Assistant Settings](public/screenshots/settings-ai.png)](public/screenshots/settings-ai.png) | [![General Settings](public/screenshots/settings-general.png)](public/screenshots/settings-general.png) |
+| *DeepSeek, OpenAI, Claude, and local LLM endpoints* | *Dark/Light themes and in-app v1.3.5 updater* |
 
 ---
 
@@ -268,6 +287,25 @@ Phân loại chính xác các lượt phát biểu ("Người nói 1", "Người
 - Trình phát âm thanh đồng bộ: Bấm vào bất kỳ mốc thời gian nào trong transcript để phát lại chính xác đoạn âm thanh tương ứng.
 - Xuất biên bản ra định dạng Microsoft Word (`.docx`) hoặc Markdown (`.md`).
 - Tự động lưu nháp liên tục, hạn chế tối đa rủi ro mất dữ liệu khi mất điện hoặc tắt app đột ngột.
+
+---
+
+## Hình ảnh giao diện
+
+| Quản lý & Lịch sử cuộc họp | Phiên âm thời gian thực & Nhận diện người nói |
+|:---:|:---:|
+| [![Quản lý cuộc họp](public/screenshots/dashboard-history.png)](public/screenshots/dashboard-history.png) | [![Phiên âm trực tiếp](public/screenshots/transcript-diarization.png)](public/screenshots/transcript-diarization.png) |
+| *Danh sách cuộc họp, tìm kiếm nhanh và thời lượng ghi âm* | *Dòng hội thoại thời gian thực, nhãn người nói và phát lại đồng bộ* |
+
+| Tải lên file ghi âm có sẵn | Cấu hình nhận diện giọng nói (STT) |
+|:---:|:---:|
+| [![Tải file âm thanh](public/screenshots/audio-upload.png)](public/screenshots/audio-upload.png) | [![Cài đặt STT](public/screenshots/settings-speech.png)](public/screenshots/settings-speech.png) |
+| *Xử lý file audio/video đa định dạng kèm chọn mô hình AI* | *Chạy offline riêng tư (Zipformer/Nemotron) hoặc Cloud (Soniox/Riva)* |
+
+| Cấu hình Trợ lý AI tạo biên bản | Giao diện & Tự động cập nhật |
+|:---:|:---:|
+| [![Cài đặt AI Assistant](public/screenshots/settings-ai.png)](public/screenshots/settings-ai.png) | [![Cài đặt chung](public/screenshots/settings-general.png)](public/screenshots/settings-general.png) |
+| *Hỗ trợ DeepSeek, OpenAI, Claude và các mô hình LLM cục bộ* | *Chế độ Sáng/Tối và kiểm tra phiên bản mới v1.3.5 trong ứng dụng* |
 
 ---
 
