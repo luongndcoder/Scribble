@@ -13,6 +13,8 @@ name: Release Manifest
 on:
   push:
     tags: ['v*']
+  release:
+    types: [released, published]
   workflow_dispatch:
     inputs:
       tag:
@@ -33,6 +35,8 @@ jobs:
         run: |
           if [ -n "${{ inputs.tag }}" ]; then
             TAG="${{ inputs.tag }}"
+          elif [ -n "${{ github.event.release.tag_name }}" ]; then
+            TAG="${{ github.event.release.tag_name }}"
           elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             TAG="$GITHUB_REF_NAME"
           else
