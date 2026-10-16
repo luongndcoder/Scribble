@@ -8,13 +8,188 @@
 [![Version](https://img.shields.io/badge/Release-v1.3.5-green.svg)](https://github.com/luongndcoder/Scribble/releases/tag/v1.3.5)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[Tiếng Việt](#tiếng-việt) | [English](#english)
+[English](#english) | [Tiếng Việt](#tiếng-việt)
 
 ---
 
 <p align="center">
   <img src="public/demo.gif" alt="Scribble Demo" width="800">
 </p>
+
+---
+
+# English
+
+Scribble is an open-source, on-device AI meeting assistant. It captures microphone and system audio loopback, performs real-time speech-to-text, identifies speakers with diarization, provides live cabin translation, and generates structured meeting minutes using large language models.
+
+From version 1.3 onward, the backend has been completely rewritten into **native Rust (in-process Axum server)**. The desktop application runs as a self-contained binary bundle with zero Python or external runtime dependencies.
+
+---
+
+## Downloads (v1.3.5)
+
+| Platform | Architecture | Package Format | Download |
+|---|---|---|---|
+| macOS | Apple Silicon (M1/M2/M3/M4) | DMG | [Scribble_1.3.5_aarch64.dmg](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_aarch64.dmg) |
+| Windows | 64-bit (x64) | Setup EXE | [Scribble_1.3.5_x64-setup.exe](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_x64-setup.exe) |
+| Linux | 64-bit (x64) | AppImage | [Scribble_1.3.5_amd64.AppImage](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_amd64.AppImage) |
+| Linux | 64-bit (x64) | Debian Package | [scribble_1.3.5_amd64.deb](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.3.5_amd64.deb) |
+
+### macOS Security Gatekeeper Note
+
+If macOS displays "Scribble cannot be opened because the developer cannot be verified" on first launch:
+1. Go to **System Settings** -> **Privacy & Security**, scroll down to the Security section, and click **Open Anyway**.
+2. Alternatively, remove the quarantine attribute via Terminal:
+   ```bash
+   xattr -cr /Applications/Scribble.app
+   ```
+
+---
+
+## Technical Architecture
+
+- **User Interface**: React 19, TypeScript, Tailwind CSS v4, Zustand state management, Lucide icons.
+- **Application Shell & Engine**: Tauri v2 embedding an in-process Axum HTTP and WebSocket server.
+- **Local Database**: Embedded SQLite via `rusqlite`, keeping all meetings, transcripts, and preferences strictly on your disk.
+- **Native Audio Capture**:
+  - macOS: CoreAudio process tap via `cidre`.
+  - Windows: Direct WASAPI loopback capture.
+- **Speech Recognition Engines**:
+  - Cloud: Nvidia Riva streaming gRPC and Soniox streaming WebSocket.
+  - Offline / Local: Bundled Vietnamese Zipformer 30M via `sherpa-onnx`, and multilingual Nemotron 3.5 ASR running on Apple Silicon GPU via `mlx-rs`.
+- **Speaker Diarization**: ResNet34 / CAM++ ONNX model running locally via `ort` and `kaldi-native-fbank`.
+- **Integrated Auto-Updater**: Built-in update checker and in-place installer backed by `tauri-plugin-updater` and cryptographic signatures.
+
+---
+
+## Key Capabilities
+
+### 1. System Audio & Microphone Recording
+Capture audio simultaneously from external microphones and conferencing tools (Zoom, Google Meet, Microsoft Teams) without requiring virtual audio cables or soundflower drivers. Voice Activity Detection (VAD) automatically segments speech on silence intervals.
+
+### 2. Real-Time Streaming STT & Live Cabin Translation
+- Low-latency real-time transcription (< 1s) as participants speak.
+- Live cabin translation (Nvidia NMT): Real-time translated captions (English, Japanese, Korean, Chinese, French, German, Spanish, etc.) stream directly beneath each transcript line.
+- Offline mode: Zero outbound network traffic when using the local engine.
+
+### 3. Automatic Speaker Diarization
+Accurate real-time speaker separation ("Speaker 1", "Speaker 2", etc.) with intuitive inline renaming and editing.
+
+### 4. Audio File Upload Pipeline
+- Supported audio and video formats: `.mp3`, `.m4a`, `.wav`, `.mp4`, `.mkv`, `.webm` (up to 2GB).
+- Automated pipeline: 16kHz mono normalization -> FFmpeg VAD chunking -> multi-threaded STT -> neural diarization.
+- Resumable jobs: Incremental chunk saves to SQLite allow interrupted uploads to resume seamlessly without restarting from scratch.
+
+### 5. AI Meeting Minutes & Grounding Context
+- Structured extraction: Executive Title & Summary, Core Discussion Points, Action Items (assignee + deadline), Agreed Decisions, and Risks / Next Steps.
+- Pre-built templates: Deep Analysis, Standard MoM, Executive Summary, Bullet Points, or Custom Prompts.
+- **Reference Materials**: Attach `.md` or `.txt` documents (agendas, briefs, glossaries) for grounding context. The LLM cross-references items against the agenda, corrects misheard domain terms, and highlights skipped topics.
+
+### 6. Interactive Playback & Multi-Format Export
+- Synchronized audio player: Click any timestamp in the transcript to jump playback to that exact utterance.
+- Export meeting minutes to Microsoft Word (`.docx`) or Markdown (`.md`).
+- Incremental auto-save prevents data loss during sudden shutdowns or crashes.
+
+---
+
+## AI Service Configuration
+
+All credentials and preferences are stored exclusively in your local SQLite database.
+
+### Speech-to-Text (STT)
+
+| Backend | Type | Highlights | Requirement |
+|---|---|---|---|
+| Nvidia Riva | Cloud | Low latency, high accuracy, Vietnamese Parakeet CTC 0.6B | API Key from [build.nvidia.com](https://build.nvidia.com) |
+| Soniox | Cloud | Premium quality, multilingual code-switching | API Key from [soniox.com](https://soniox.com) |
+| Local (Offline) | On-device | Complete privacy, zero cloud reliance | Bundled (sherpa-onnx) or Apple Silicon MLX |
+
+### LLM Providers for Meeting Minutes
+
+Scribble supports any OpenAI-compatible endpoint:
+- OpenAI (`gpt-4o`, `gpt-4o-mini`)
+- DeepSeek (`deepseek-chat`)
+- Anthropic Claude (via OpenRouter)
+- Groq / Mistral / Google Gemini
+- Local LLMs: Ollama, vLLM, or LM Studio via custom Base URL (`http://localhost:11434/v1`)
+
+---
+
+## Development Setup
+
+### Prerequisites
+- Node.js 20+ and `pnpm`
+- Rust 1.75+ (`rustup`)
+- CMake and C++ build toolchain
+- macOS: Xcode Command Line Tools
+- Linux: `libwebkit2gtk-4.1-dev`, `libasound2-dev`, `libssl-dev`
+
+### Running in Development
+
+```bash
+# Clone the repository
+git clone https://github.com/luongndcoder/Scribble.git
+cd Scribble
+
+# Install frontend dependencies
+pnpm install
+
+# Run desktop application (Rust backend + Vite frontend)
+pnpm tauri dev
+```
+
+### Building Release Binaries
+
+```bash
+# macOS (DMG for Apple Silicon)
+pnpm tauri build -b dmg
+
+# Windows (NSIS Installer x64)
+pnpm tauri build -b nsis
+
+# Linux (AppImage & deb)
+pnpm tauri build
+```
+
+---
+
+## Project Structure
+
+```
+Scribble/
+├── src/                       # Frontend application (React 19 + TypeScript + Vite)
+│   ├── components/            # UI components (Meeting detail, Upload modal, Settings, etc.)
+│   ├── stores/                # Zustand client state stores
+│   └── lib/                   # API clients, audio utilities, updater helpers
+├── src-tauri/                 # Native desktop application (Tauri v2 + Rust)
+│   ├── src/
+│   │   ├── api/               # In-process Axum REST & WebSocket endpoints
+│   │   ├── diarize/           # ONNX speaker embedding & clustering
+│   │   ├── pipeline/          # Upload audio processing & VAD chunking pipeline
+│   │   ├── stt/               # Speech-to-text drivers (Riva, Soniox, Sherpa, MLX)
+│   │   ├── db.rs              # Embedded SQLite database schema & migrations
+│   │   ├── llm.rs             # LLM minutes summarization engine
+│   │   └── lib.rs             # Tauri application setup and lifecycle hooks
+│   ├── Cargo.toml             # Rust dependencies and platform configuration
+│   └── tauri.conf.json        # Tauri window, updater, and bundle configuration
+├── landing/                   # Product landing website
+└── package.json               # Frontend dependencies and build scripts
+```
+
+---
+
+## Acknowledgments & Attributions
+
+- **[Meetily](https://github.com/Zackriya-Solutions/meetily)**: UX patterns, audio capture architectures, and summarization prompt engineering inspiration.
+- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: On-device speech recognition runtime (Apache-2.0).
+- **[hynt/Zipformer-30M-RNNT-6000h](https://huggingface.co/hynt/Zipformer-30M-RNNT-6000h)**: Offline Vietnamese speech recognition model (licensed under CC BY-NC-ND 4.0).
+- **CAM++ / VoxCeleb**: Neural speaker embedding models for diarization.
+
+---
+
+## License
+
+This project is open-source under the [MIT License](LICENSE).
 
 ---
 
@@ -37,7 +212,7 @@ Từ phiên bản 1.3, toàn bộ backend đã được chuyển đổi hoàn to
 
 ### Lưu ý khi cài đặt trên macOS
 
-Do ứng dụng chưa đăng ký chứng chỉ trả phí từ Apple Developer, lần đầu mở ứng dụng macOS có thể hiển thị cảnh báo "Scribble cannot be opened because the developer cannot be verified". 
+Do ứng dụng chưa đăng ký chứng chỉ trả phí từ Apple Developer, lần đầu mở ứng dụng macOS có thể hiển thị cảnh báo "Scribble cannot be opened because the developer cannot be verified".
 
 Để mở app:
 1. Mở **System Settings** -> **Privacy & Security** -> cuộn xuống mục Security và chọn **Open Anyway**.
@@ -154,132 +329,3 @@ pnpm tauri build -b nsis
 # Linux (AppImage & deb)
 pnpm tauri build
 ```
-
----
-
-# English
-
-Scribble is an open-source, on-device AI meeting assistant. It captures microphone and system audio loopback, performs real-time speech-to-text, identifies speakers with diarization, provides live cabin translation, and generates structured meeting minutes using large language models.
-
-From version 1.3 onward, the backend has been completely rewritten into **native Rust (in-process Axum server)**. The desktop application runs as a self-contained binary bundle with zero Python or external runtime dependencies.
-
----
-
-## Downloads (v1.3.5)
-
-| Platform | Architecture | Package Format | Download |
-|---|---|---|---|
-| macOS | Apple Silicon (M1/M2/M3/M4) | DMG | [Scribble_1.3.5_aarch64.dmg](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_aarch64.dmg) |
-| Windows | 64-bit (x64) | Setup EXE | [Scribble_1.3.5_x64-setup.exe](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_x64-setup.exe) |
-| Linux | 64-bit (x64) | AppImage | [Scribble_1.3.5_amd64.AppImage](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_amd64.AppImage) |
-| Linux | 64-bit (x64) | Debian Package | [scribble_1.3.5_amd64.deb](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.3.5_amd64.deb) |
-
-### macOS Security Gatekeeper Note
-
-If macOS displays "Scribble cannot be opened because the developer cannot be verified" on first launch:
-1. Go to **System Settings** -> **Privacy & Security**, scroll down to the Security section, and click **Open Anyway**.
-2. Alternatively, remove the quarantine attribute via Terminal:
-   ```bash
-   xattr -cr /Applications/Scribble.app
-   ```
-
----
-
-## Technical Architecture
-
-- **User Interface**: React 19, TypeScript, Tailwind CSS v4, Zustand store, Lucide icons.
-- **Application Shell & Engine**: Tauri v2 embedding an in-process Axum HTTP and WebSocket server.
-- **Local Database**: Embedded SQLite via `rusqlite`, keeping all meetings, transcripts, and preferences strictly on your disk.
-- **Native Audio Capture**:
-  - macOS: CoreAudio process tap via `cidre`.
-  - Windows: Direct WASAPI loopback capture.
-- **Speech Recognition Engines**:
-  - Cloud: Nvidia Riva streaming gRPC and Soniox streaming WebSocket.
-  - Offline / Local: Bundled Vietnamese Zipformer 30M via `sherpa-onnx`, and multilingual Nemotron 3.5 ASR running on Apple Silicon GPU via `mlx-rs`.
-- **Speaker Diarization**: ResNet34 / CAM++ ONNX model running locally via `ort` and `kaldi-native-fbank`.
-- **Integrated Auto-Updater**: Built-in update checker and in-place installer backed by `tauri-plugin-updater` and cryptographic signatures.
-
----
-
-## Key Capabilities
-
-- **System Audio & Microphone Recording**: Capture sound from conferencing tools (Zoom, Google Meet, Teams) and microphones simultaneously.
-- **Real-Time Streaming STT**: Low-latency transcription as you speak, with support for offline processing.
-- **Live Cabin Translation**: Simultaneous multi-language translation (English, Japanese, Korean, Chinese, French, German, Spanish, etc.) displayed alongside the transcript.
-- **Speaker Diarization**: Automatic speaker segmentation and labeling, with full inline editing.
-- **Audio File Upload Pipeline**: Transcribe pre-recorded files (`.mp3`, `.m4a`, `.wav`, `.mp4`, `.mkv`, `.webm`) using silence-aware VAD chunking and parallel transcription with incremental resume support.
-- **AI Minutes & Reference Materials**: Generate executive summaries, key decisions, action items, and risks. Attach reference files (`.md` or `.txt`) such as agendas and briefs to provide grounding context for LLM generation.
-- **Interactive Audio Playback**: Click any transcript timestamp to jump to the exact moment in the recorded audio.
-- **Document Export**: Export meeting minutes directly to Microsoft Word (`.docx`) or Markdown (`.md`).
-
----
-
-## Project Structure
-
-```
-Scribble/
-├── src/                       # Frontend application (React 19 + TypeScript + Vite)
-│   ├── components/            # UI components (Meeting detail, Upload modal, Settings, etc.)
-│   ├── stores/                # Zustand client state stores
-│   └── lib/                   # API clients, audio utilities, updater helpers
-├── src-tauri/                 # Native desktop application (Tauri v2 + Rust)
-│   ├── src/
-│   │   ├── api/               # In-process Axum REST & WebSocket endpoints
-│   │   ├── diarize/           # ONNX speaker embedding & clustering
-│   │   ├── pipeline/          # Upload audio processing & VAD chunking pipeline
-│   │   ├── stt/               # Speech-to-text drivers (Riva, Soniox, Sherpa, MLX)
-│   │   ├── db.rs              # Embedded SQLite database schema & migrations
-│   │   ├── llm.rs             # LLM minutes summarization engine
-│   │   └── lib.rs             # Tauri application setup and lifecycle hooks
-│   ├── Cargo.toml             # Rust dependencies and platform configuration
-│   └── tauri.conf.json        # Tauri window, updater, and bundle configuration
-├── landing/                   # Product landing website
-└── package.json               # Frontend dependencies and build scripts
-```
-
----
-
-## Development Setup
-
-### Prerequisites
-- Node.js 20+ and `pnpm`
-- Rust 1.75+ (`rustup`)
-- CMake and C++ build toolchain
-
-### Running in Development
-
-```bash
-# Install frontend dependencies
-pnpm install
-
-# Run application in development mode
-pnpm tauri dev
-```
-
-### Building Release Binaries
-
-```bash
-# macOS
-pnpm tauri build -b dmg
-
-# Windows
-pnpm tauri build -b nsis
-
-# Linux
-pnpm tauri build
-```
-
----
-
-## Acknowledgments & Attributions
-
-- **[Meetily](https://github.com/Zackriya-Solutions/meetily)**: UX patterns, audio capture architectures, and summarization prompt engineering inspiration.
-- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: On-device speech recognition runtime (Apache-2.0).
-- **[hynt/Zipformer-30M-RNNT-6000h](https://huggingface.co/hynt/Zipformer-30M-RNNT-6000h)**: Offline Vietnamese speech recognition model (licensed under CC BY-NC-ND 4.0).
-- **CAM++ / VoxCeleb**: Speaker recognition models for neural speaker diarization.
-
----
-
-## License
-
-This project is open-source under the [MIT License](LICENSE).
