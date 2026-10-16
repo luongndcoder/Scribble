@@ -55,8 +55,8 @@ If macOS displays "Scribble cannot be opened because the developer cannot be ver
   - macOS: CoreAudio process tap via `cidre`.
   - Windows: Direct WASAPI loopback capture.
 - **Speech Recognition Engines**:
-  - Cloud: Nvidia Riva streaming gRPC and Soniox streaming WebSocket.
-  - Offline / Local: Bundled Vietnamese Zipformer 30M via `sherpa-onnx`, and multilingual Nemotron 3.5 ASR running on Apple Silicon GPU via `mlx-rs`.
+  - Cloud: Soniox streaming WebSocket (high accuracy, multilingual, live translation).
+  - Offline / Local (On-Device): Bundled Vietnamese Zipformer 30M via `sherpa-onnx`, and multilingual Nemotron 3.5 ASR running on Apple Silicon GPU via `mlx-rs`. Zero data sent to the cloud.
 - **Speaker Diarization**: ResNet34 / CAM++ ONNX model running locally via `ort` and `kaldi-native-fbank`.
 - **Integrated Auto-Updater**: Built-in update checker and in-place installer backed by `tauri-plugin-updater` and cryptographic signatures.
 
@@ -69,8 +69,8 @@ Capture audio simultaneously from external microphones and conferencing tools (Z
 
 ### 2. Real-Time Streaming STT & Live Cabin Translation
 - Low-latency real-time transcription (< 1s) as participants speak.
-- Live cabin translation (Nvidia NMT): Real-time translated captions (English, Japanese, Korean, Chinese, French, German, Spanish, etc.) stream directly beneath each transcript line.
-- Offline mode: Zero outbound network traffic when using the local engine.
+- Live cabin translation: Real-time translated captions (English, Japanese, Korean, Chinese, French, German, Spanish, etc.) stream directly beneath each transcript line.
+- Offline mode: 100% private, zero outbound network traffic when using on-device engines.
 
 ### 3. Automatic Speaker Diarization
 Accurate real-time speaker separation ("Speaker 1", "Speaker 2", etc.) with intuitive inline renaming and editing.
@@ -119,9 +119,9 @@ All credentials and preferences are stored exclusively in your local SQLite data
 
 | Backend | Type | Highlights | Requirement |
 |---|---|---|---|
-| Nvidia Riva | Cloud | Low latency, high accuracy, Vietnamese Parakeet CTC 0.6B | API Key from [build.nvidia.com](https://build.nvidia.com) |
-| Soniox | Cloud | Premium quality, multilingual code-switching | API Key from [soniox.com](https://soniox.com) |
-| Local (Offline) | On-device | Complete privacy, zero cloud reliance | Bundled (sherpa-onnx) or Apple Silicon MLX |
+| Soniox | Cloud | Premium quality, multilingual code-switching, live cabin translation | API Key from [soniox.com](https://soniox.com) |
+| Local (Zipformer 30M) | On-device | Bundled, lightweight (< 50MB), instant setup for Vietnamese | Built-in (sherpa-onnx), no API key needed |
+| Local (Nemotron 0.6B) | On-device | High accuracy, punctuation, multilingual, hardware-accelerated | Downloaded on demand, Apple Silicon GPU (MLX) |
 
 ### LLM Providers for Meeting Minutes
 
@@ -185,7 +185,7 @@ Scribble/
 │   │   ├── api/               # In-process Axum REST & WebSocket endpoints
 │   │   ├── diarize/           # ONNX speaker embedding & clustering
 │   │   ├── pipeline/          # Upload audio processing & VAD chunking pipeline
-│   │   ├── stt/               # Speech-to-text drivers (Riva, Soniox, Sherpa, MLX)
+│   │   ├── stt/               # Speech-to-text drivers (Soniox, Sherpa, MLX)
 │   │   ├── db.rs              # Embedded SQLite database schema & migrations
 │   │   ├── llm.rs             # LLM minutes summarization engine
 │   │   └── lib.rs             # Tauri application setup and lifecycle hooks
@@ -253,8 +253,8 @@ Scribble được thiết kế theo mô hình desktop app hiệu năng cao và b
   - macOS: CoreAudio process tap qua thư viện `cidre`.
   - Windows: WASAPI loopback capture trực tiếp từ card âm thanh.
 - **Công cụ Speech-to-Text (STT)**:
-  - Cloud: Nvidia Riva streaming gRPC (hỗ trợ mô hình tiếng Việt Parakeet CTC 0.6B) và Soniox WebSocket.
-  - Offline / Local: Mô hình Zipformer 30M tiếng Việt chạy qua `sherpa-onnx`, và mô hình Nemotron 3.5 ASR tăng tốc phần cứng Apple Silicon GPU qua `mlx-rs`.
+  - Cloud: Soniox streaming WebSocket (độ chính xác cao, đa ngôn ngữ, hỗ trợ dịch cabin).
+  - Offline / Local: Chạy trực tiếp trên máy người dùng, gồm Zipformer 30M tiếng Việt tích hợp sẵn (`sherpa-onnx`) và Nemotron 3.5 ASR đa ngôn ngữ tăng tốc phần cứng qua `mlx-rs` trên Apple Silicon GPU. Hoàn toàn riêng tư, không gửi dữ liệu ra bên ngoài.
 - **Nhận diện người nói (Speaker Diarization)**: Chạy mô hình ResNet34 / CAM++ ONNX cục bộ qua `ort` và `kaldi-native-fbank`, phân tách giọng nói theo cửa sổ thời gian thực.
 - **Tự động cập nhật**: Tích hợp `tauri-plugin-updater` hỗ trợ kiểm tra phiên bản mới, xác thực chữ ký số và cập nhật in-place.
 
@@ -267,8 +267,8 @@ Thu âm song song từ micro ngoài và âm thanh cuộc họp (Zoom, Google Mee
 
 ### 2. Phiên âm thời gian thực & Dịch cabin
 - Hiển thị văn bản tức thời khi người nói cất lời với độ trễ thấp (< 1s).
-- Hỗ trợ dịch cabin trực tiếp (Nvidia NMT): Bản dịch tiếng Anh, Nhật, Hàn, Trung, Pháp, Đức, v.v. xuất hiện ngay dưới từng dòng hội thoại.
-- Chế độ Offline hoàn toàn: Không gửi dữ liệu qua mạng khi chọn backend Local.
+- Hỗ trợ dịch cabin trực tiếp: Bản dịch đa ngôn ngữ xuất hiện ngay dưới từng dòng hội thoại khi bật tính năng dịch cabin.
+- Chế độ Offline hoàn toàn: 100% riêng tư, không gửi dữ liệu qua mạng khi chọn backend Local.
 
 ### 3. Nhận diện người nói tự động (Diarization)
 Phân loại chính xác các lượt phát biểu ("Người nói 1", "Người nói 2", v.v.) và cho phép đổi tên người nói trực tiếp trên giao diện.
@@ -300,7 +300,7 @@ Phân loại chính xác các lượt phát biểu ("Người nói 1", "Người
 | Tải lên file ghi âm có sẵn | Cấu hình nhận diện giọng nói (STT) |
 |:---:|:---:|
 | [![Tải file âm thanh](public/screenshots/audio-upload.png)](public/screenshots/audio-upload.png) | [![Cài đặt STT](public/screenshots/settings-speech.png)](public/screenshots/settings-speech.png) |
-| *Xử lý file audio/video đa định dạng kèm chọn mô hình AI* | *Chạy offline riêng tư (Zipformer/Nemotron) hoặc Cloud (Soniox/Riva)* |
+| *Xử lý file audio/video đa định dạng kèm chọn mô hình AI* | *Chạy offline riêng tư (Zipformer/Nemotron) hoặc Cloud (Soniox)* |
 
 | Cấu hình Trợ lý AI tạo biên bản | Giao diện & Tự động cập nhật |
 |:---:|:---:|
@@ -317,9 +317,9 @@ Mọi thông tin cấu hình và API key đều được lưu trữ hoàn toàn 
 
 | Backend | Loại | Đặc điểm | Yêu cầu |
 |---|---|---|---|
-| Nvidia Riva | Cloud | Tốc độ cao, độ trễ thấp, hỗ trợ tiếng Việt chất lượng cao (Parakeet 0.6B) | API Key từ [build.nvidia.com](https://build.nvidia.com) |
-| Soniox | Cloud | Độ chính xác cao, tự động nhận diện ngôn ngữ trộn lẫn | API Key từ [soniox.com](https://soniox.com) |
-| Local (Offline) | Trên máy | Hoàn toàn riêng tư, không cần mạng hay API key | Tích hợp sẵn (sherpa-onnx) hoặc tải thêm model MLX trên macOS |
+| Soniox | Cloud | Độ chính xác cao, nhận diện ngôn ngữ trộn lẫn, hỗ trợ dịch cabin | API Key từ [soniox.com](https://soniox.com) |
+| Local (Zipformer 30M) | Trên máy | Tích hợp sẵn, siêu nhẹ (< 50MB), phiên âm tiếng Việt tức thì | Có sẵn (sherpa-onnx), không cần API key |
+| Local (Nemotron 0.6B) | Trên máy | Độ chính xác cao, đa ngôn ngữ, tự động thêm dấu câu, tăng tốc GPU | Tải khi cần, chạy trên Apple Silicon GPU (MLX) |
 
 ### Cấu hình LLM tạo biên bản
 

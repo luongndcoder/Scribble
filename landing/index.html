@@ -8,7 +8,7 @@
     <meta name="description"
         content="Record, transcribe, identify speakers, and generate meeting minutes automatically. Open-source AI-powered meeting assistant for macOS and Windows.">
     <meta name="keywords"
-        content="meeting minutes, transcription, speaker diarization, AI meeting assistant, real-time transcription, Soniox, Nvidia Riva">
+        content="meeting minutes, transcription, speaker diarization, AI meeting assistant, real-time transcription, Soniox, on-device AI, sherpa-onnx, MLX">
     <meta property="og:title" content="Scribble — AI Meeting Minutes">
     <meta property="og:description"
         content="AI-powered meeting assistant. Record, transcribe, identify speakers, generate minutes. Free & open-source.">
@@ -148,7 +148,7 @@
                         </svg>
                     </div>
                     <h3 data-i18n="features.f1.title">Phiên âm thời gian thực</h3>
-                    <p data-i18n="features.f1.desc">Nvidia Riva hoặc Soniox streaming với độ trễ dưới một giây. Chữ hiện ngay khi được nói.</p>
+                    <p data-i18n="features.f1.desc">Soniox streaming hoặc mô hình on-device cục bộ với độ trễ dưới một giây. Chữ hiện ngay khi được nói.</p>
                 </div>
                 <div class="f-card">
                     <div class="f-icon">
@@ -258,8 +258,8 @@
                 <div class="step-line" aria-hidden="true"></div>
                 <div class="step-card">
                     <div class="step-num">02</div>
-                    <h3 data-i18n="how.s2.title">Thêm API Key</h3>
-                    <p data-i18n="how.s2.desc">Nhập Nvidia Riva hoặc Soniox key trong Cài đặt. Gói miễn phí có tại build.nvidia.com hoặc soniox.com.</p>
+                    <h3 data-i18n="how.s2.title">Chọn STT & Thêm Key</h3>
+                    <p data-i18n="how.s2.desc">Chọn mô hình Local tích hợp sẵn (miễn phí, offline) hoặc nhập Soniox key trong Cài đặt.</p>
                 </div>
                 <div class="step-line" aria-hidden="true"></div>
                 <div class="step-card">
@@ -866,30 +866,30 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                 </div>
 
                 <div class="guide-steps">
-                    <!-- C1: Riva Settings -->
+                    <!-- C1: STT Settings -->
                     <div class="guide-step">
                         <div class="guide-step-info">
                             <div class="guide-step-num">1</div>
                             <div class="guide-step-text">
-                                <h4 data-i18n="c1.title">Mở Settings → Riva (Phiên âm)</h4>
-                                <p data-i18n="c1.desc">Mở Scribble, nhấn biểu tượng <strong>⚙️ Settings</strong> ở góc trên bên phải. Trong phần <strong>Riva</strong>, bạn sẽ thấy các trường cấu hình kết nối.</p>
+                                <h4 data-i18n="c1.title">Mở Settings → Speech-to-Text (Phiên âm)</h4>
+                                <p data-i18n="c1.desc">Mở Scribble, nhấn biểu tượng <strong>⚙️ Settings</strong> ở góc trên bên phải. Trong phần <strong>Speech-to-Text</strong>, bạn có thể chọn mô hình Local offline hoặc Soniox.</p>
                             </div>
                         </div>
                         <div class="guide-step-img">
                             <picture>
                                 <source srcset="images/guide/processed/config_riva_settings.webp" type="image/webp">
-                                <img src="images/guide/processed/config_riva_settings.png" alt="Scribble Settings — Riva speech-to-text configuration section" loading="lazy">
+                                <img src="images/guide/processed/config_riva_settings.png" alt="Scribble Settings — Speech-to-text configuration section" loading="lazy">
                             </picture>
                         </div>
                     </div>
 
-                    <!-- C2: Riva fields -->
+                    <!-- C2: STT fields -->
                     <div class="guide-step">
                         <div class="guide-step-info">
                             <div class="guide-step-num">2</div>
                             <div class="guide-step-text">
-                                <h4 data-i18n="c2.title">Nhập Riva API Key & Server URL</h4>
-                                <p data-i18n="c2.desc">Dán NVIDIA API key vào trường <strong>API Key</strong>. Sau đó nhập server URL và nhấn <strong>"Test Connection"</strong> để kiểm tra.</p>
+                                <h4 data-i18n="c2.title">Chọn chế độ phiên âm</h4>
+                                <p data-i18n="c2.desc">Chọn <strong>Local</strong> để nhận diện giọng nói 100% trên máy không cần internet, hoặc chọn <strong>Soniox</strong> và dán Soniox API key.</p>
                                 <div class="guide-config-block">
                                     <div class="guide-config-row">
                                         <span class="guide-config-label">API Key</span>
@@ -1033,11 +1033,11 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                 </details>
                 <details class="faq-item">
                     <summary data-i18n="faq.q2">Tại sao phần mềm diệt virus báo Scribble?</summary>
-                    <p data-i18n="faq.a2">Scribble dùng backend Python (đóng gói bằng PyInstaller) mà một số phần mềm diệt virus nhầm báo là mã độc. Đây là lỗi dương tính giả phổ biến ảnh hưởng nhiều ứng dụng Python.</p>
+                    <p data-i18n="faq.a2">Scribble là ứng dụng Rust + Tauri mã nguồn mở. Cảnh báo bảo mật xuất hiện do ứng dụng chưa được mua chứng chỉ ký số thương mại (code signing certificate), hoàn toàn không chứa mã độc.</p>
                 </details>
                 <details class="faq-item">
                     <summary data-i18n="faq.q3">Có cần trả phí cho API không?</summary>
-                    <p data-i18n="faq.a3">Không. Cả NVIDIA và Soniox đều cung cấp gói miễn phí. NVIDIA tại <a href="https://build.nvidia.com" target="_blank" rel="noopener">build.nvidia.com</a>, Soniox tại <a href="https://soniox.com" target="_blank" rel="noopener">soniox.com</a>. Đăng ký và tạo API key miễn phí.</p>
+                    <p data-i18n="faq.a3">Không bắt buộc. Bạn có thể dùng hoàn toàn Offline miễn phí bằng mô hình Local (Zipformer/Nemotron). Nếu dùng Cloud STT, Soniox có gói miễn phí tại <a href="https://soniox.com" target="_blank" rel="noopener">soniox.com</a>. Với AI tóm tắt biên bản, bạn có thể dùng API miễn phí từ NVIDIA NIM hoặc mô hình cục bộ như Ollama.</p>
                 </details>
             </div>
         </div>
