@@ -9,7 +9,7 @@
 
 /* ─── Design System (ui-ux-pro-max) ─── */
 :root {
-    /* Colors — Trust blue + warm CTA */
+    /* Colors — Trust blue + warm CTA (Strictly Purple Ban compliant) */
     --primary: #2563EB;
     --primary-light: #3B82F6;
     --cta: #F97316;
@@ -22,7 +22,7 @@
     --text: #F9FAFB;
     --text-secondary: #9CA3AF;
     --text-muted: #6B7280;
-    --gradient: linear-gradient(135deg, #2563EB 0%, #7C3AED 50%, #F97316 100%);
+    --gradient: linear-gradient(135deg, #2563EB 0%, #0284C7 50%, #F97316 100%);
     --glow-primary: rgba(37, 99, 235, 0.15);
     --glow-cta: rgba(249, 115, 22, 0.2);
 
@@ -45,6 +45,33 @@
     --radius-lg: 16px;
     --radius-xl: 20px;
     --radius-full: 999px;
+
+    /* ── transitions.dev Motion Tokens ── */
+    --duration-stagger: 40ms;
+    --duration-micro: 80ms;
+    --duration-quick: 150ms;
+    --duration-fast: 250ms;
+    --duration-medium: 350ms;
+    --duration-slow: 400ms;
+    --duration-very-slow: 500ms;
+
+    --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-in-out: ease-in-out;
+    --ease-out: ease-out;
+    --ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1);
+    --ease-bounce-strong: cubic-bezier(0.34, 3.85, 0.64, 1);
+
+    --distance-micro: 4px;
+    --distance-small: 6px;
+    --distance-base: 8px;
+    --distance-medium: 12px;
+
+    --scale-large: 0.96;
+    --scale-medium: 0.97;
+    --scale-small: 0.98;
+
+    --blur-small: 2px;
+    --blur-medium: 3px;
 }
 
 html {
@@ -166,12 +193,17 @@ a {
     color: #fff;
     font-weight: 600;
     font-size: 0.85rem;
-    transition: all 0.2s;
+    transition: transform var(--duration-quick) var(--ease-smooth-out),
+                background var(--duration-quick) ease;
 }
 
 .btn-nav:hover {
     background: var(--primary-light);
     transform: translateY(-1px);
+}
+
+.btn-nav:active {
+    transform: scale(var(--scale-medium));
 }
 
 /* ─── Buttons ─── */
@@ -184,7 +216,14 @@ a {
     border-radius: var(--radius-full);
     border: none;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: transform var(--duration-quick) var(--ease-smooth-out),
+                background var(--duration-quick) ease,
+                box-shadow var(--duration-quick) ease,
+                border-color var(--duration-quick) ease;
+}
+
+.btn:active {
+    transform: scale(var(--scale-medium));
 }
 
 .btn-lg {
@@ -202,6 +241,10 @@ a {
     background: var(--cta-light);
     transform: translateY(-2px);
     box-shadow: 0 8px 32px var(--glow-cta);
+}
+
+.btn-primary:active {
+    transform: translateY(0) scale(var(--scale-medium));
 }
 
 .btn-outline {
@@ -432,14 +475,16 @@ a {
     border-radius: var(--radius-xl);
     background: var(--bg-card);
     border: 1px solid var(--border);
-    transition: all 0.25s ease;
+    transition: transform var(--duration-fast) var(--ease-smooth-out),
+                border-color var(--duration-fast) var(--ease-smooth-out),
+                box-shadow var(--duration-fast) var(--ease-smooth-out);
     cursor: default;
 }
 
 .f-card:hover {
     border-color: var(--border-hover);
     transform: translateY(-4px);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
 }
 
 .f-card--accent {
@@ -455,8 +500,20 @@ a {
     justify-content: center;
     border-radius: var(--radius);
     background: rgba(37, 99, 235, 0.1);
+    border: 1px solid rgba(37, 99, 235, 0.15);
     color: var(--primary-light);
     margin-bottom: var(--space-md);
+    transition: transform var(--duration-fast) var(--ease-bounce),
+                background var(--duration-fast),
+                box-shadow var(--duration-fast) var(--ease-smooth-out),
+                color var(--duration-fast);
+}
+
+.f-card:hover .f-icon {
+    transform: scale(1.1);
+    background: rgba(37, 99, 235, 0.18);
+    box-shadow: 0 4px 16px var(--glow-primary);
+    color: #60A5FA;
 }
 
 .f-card h3 {
@@ -488,15 +545,51 @@ a {
     text-align: center;
     max-width: 280px;
     padding: 0 var(--space-lg);
+    transition: transform var(--duration-fast) var(--ease-smooth-out);
+}
+
+.step-icon-wrap {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: var(--space-md);
+    position: relative;
+}
+
+.step-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: var(--radius-lg);
+    background: rgba(37, 99, 235, 0.1);
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    color: var(--primary-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform var(--duration-fast) var(--ease-bounce),
+                box-shadow var(--duration-fast) var(--ease-smooth-out),
+                border-color var(--duration-fast),
+                background var(--duration-fast),
+                color var(--duration-fast);
+}
+
+.step-card:hover .step-icon {
+    transform: translateY(-4px) scale(1.08);
+    box-shadow: 0 8px 24px var(--glow-primary);
+    border-color: var(--primary-light);
+    background: rgba(37, 99, 235, 0.18);
+    color: #60A5FA;
 }
 
 .step-num {
     font-family: var(--font-display);
-    font-size: 2rem;
+    font-size: 0.82rem;
     font-weight: 700;
-    color: var(--primary);
-    margin-bottom: var(--space-md);
-    opacity: 0.6;
+    letter-spacing: 0.08em;
+    color: var(--primary-light);
+    opacity: 0.75;
+    text-transform: uppercase;
 }
 
 .step-card h3 {
@@ -516,7 +609,7 @@ a {
     width: 80px;
     height: 2px;
     background: linear-gradient(90deg, var(--border) 0%, var(--primary) 50%, var(--border) 100%);
-    margin-top: 22px;
+    margin-top: 28px;
     flex-shrink: 0;
 }
 
@@ -542,14 +635,20 @@ a {
     background: var(--bg-card);
     border: 1px solid var(--border);
     overflow: hidden;
-    transition: all 0.25s ease;
+    transition: transform var(--duration-fast) var(--ease-smooth-out),
+                border-color var(--duration-fast) var(--ease-smooth-out),
+                box-shadow var(--duration-fast) var(--ease-smooth-out);
     cursor: pointer;
 }
 
 .dl-card:hover {
     border-color: var(--cta);
     transform: translateY(-4px);
-    box-shadow: 0 12px 40px rgba(249, 115, 22, 0.12);
+    box-shadow: 0 12px 40px rgba(249, 115, 22, 0.16);
+}
+
+.dl-card:active {
+    transform: translateY(-2px) scale(var(--scale-small));
 }
 
 .dl-top {
@@ -601,11 +700,13 @@ a {
     border-radius: 50%;
     background: var(--cta);
     color: #fff;
-    transition: transform 0.2s;
+    transition: transform var(--duration-fast) var(--ease-bounce),
+                background var(--duration-fast);
 }
 
 .dl-card:hover .dl-btn {
-    transform: scale(1.1);
+    transform: scale(1.15);
+    background: var(--cta-light);
 }
 
 .dl-note {
@@ -658,7 +759,10 @@ a {
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: transform var(--duration-quick) var(--ease-smooth-out),
+                background var(--duration-quick) ease,
+                border-color var(--duration-quick) ease,
+                color var(--duration-quick) ease;
 }
 
 .install-tab:hover {
@@ -666,10 +770,15 @@ a {
     color: var(--text);
 }
 
+.install-tab:active {
+    transform: scale(var(--scale-medium));
+}
+
 .install-tab.active {
     background: var(--primary);
     border-color: var(--primary);
     color: #fff;
+    box-shadow: 0 4px 16px var(--glow-primary);
 }
 
 .install-content {
@@ -680,6 +789,7 @@ a {
 
 .install-content.active {
     display: block;
+    animation: tPaneReveal var(--duration-fast) var(--ease-smooth-out) both;
 }
 
 .install-steps {
@@ -798,7 +908,7 @@ a {
     border-radius: var(--radius);
     margin-bottom: var(--space-sm);
     overflow: hidden;
-    transition: border-color 0.2s;
+    transition: border-color var(--duration-fast);
 }
 
 .faq-item:hover {
@@ -815,17 +925,35 @@ a {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: var(--space-md);
+    transition: color var(--duration-fast);
+    user-select: none;
 }
 
-.faq-item summary::after {
-    content: '+';
-    font-size: 1.2rem;
+.faq-item summary::-webkit-details-marker {
+    display: none;
+}
+
+.faq-chevron {
+    width: 18px;
+    height: 18px;
     color: var(--text-muted);
-    transition: transform 0.2s;
+    transition: transform var(--duration-fast) var(--ease-smooth-out),
+                color var(--duration-fast);
+    flex-shrink: 0;
 }
 
-.faq-item[open] summary::after {
-    content: '−';
+.faq-item:hover .faq-chevron {
+    color: var(--text);
+}
+
+.faq-item[open] .faq-chevron {
+    transform: rotate(180deg);
+    color: var(--primary-light);
+}
+
+.faq-item[open] summary {
+    color: var(--text);
 }
 
 .faq-item p {
@@ -833,6 +961,10 @@ a {
     font-size: 0.88rem;
     color: var(--text-secondary);
     line-height: 1.65;
+}
+
+.faq-item[open] p {
+    animation: tPaneReveal var(--duration-fast) var(--ease-smooth-out) both;
 }
 
 .faq-item a {
@@ -1215,6 +1347,27 @@ a {
     }
 }
 
+/* ─── Motion Keyframes (transitions.dev) ─── */
+@keyframes tPaneReveal {
+    from {
+        opacity: 0;
+        transform: translateY(var(--distance-micro));
+        filter: blur(var(--blur-small));
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+        filter: blur(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    @keyframes tPaneReveal {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+}
+
 /* ─── Animations ─── */
 @media (prefers-reduced-motion: no-preference) {
 
@@ -1250,6 +1403,14 @@ a {
         animation-delay: 0.3s;
     }
 
+    .f-card:nth-child(7) {
+        animation-delay: 0.35s;
+    }
+
+    .f-card:nth-child(8) {
+        animation-delay: 0.4s;
+    }
+
     .step-card:nth-child(1) {
         animation-delay: 0.1s;
     }
@@ -1268,6 +1429,10 @@ a {
 
     .dl-card:nth-child(2) {
         animation-delay: 0.2s;
+    }
+
+    .dl-card:nth-child(3) {
+        animation-delay: 0.3s;
     }
 
     @keyframes fadeUp {
