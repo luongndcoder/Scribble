@@ -1,17 +1,16 @@
-# 🎤 Scribble — AI Meeting Minutes
+# Scribble
 
-> Ứng dụng ghi chú cuộc họp thông minh — ghi âm, phiên dịch realtime, dịch cabin đa ngôn ngữ và tạo biên bản tự động bằng AI.
->
-> Smart meeting notes app — record, real-time transcription, multi-language cabin translation, and AI-powered meeting minutes generation.
+> AI-powered meeting assistant for real-time transcription, speaker diarization, live cabin translation, and automated meeting minutes.
 
-![Tauri](https://img.shields.io/badge/Tauri-2.0-FFC131?logo=tauri&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-blue)
+[![Tauri 2.0](https://img.shields.io/badge/Tauri-2.0-blue.svg)](https://tauri.app/)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+[![React 19](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
+[![Version](https://img.shields.io/badge/Release-v1.3.5-green.svg)](https://github.com/luongndcoder/Scribble/releases/tag/v1.3.5)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**🇻🇳 [Tiếng Việt](#-tiếng-việt)** · **🇬🇧 [English](#-english)**
+[Tiếng Việt](#tiếng-việt) | [English](#english)
 
-### 🎬 Demo
+---
 
 <p align="center">
   <img src="public/demo.gif" alt="Scribble Demo" width="800">
@@ -19,478 +18,268 @@
 
 ---
 
-# 🇻🇳 Tiếng Việt
+# Tiếng Việt
 
-## 📥 Tải ứng dụng
+Scribble là ứng dụng trợ lý cuộc họp mã nguồn mở, hoạt động trực tiếp trên máy người dùng (on-device). Ứng dụng hỗ trợ ghi âm micro và âm thanh hệ thống (system audio loopback), phiên âm thời gian thực, nhận diện từng người nói (speaker diarization), dịch cabin đa ngôn ngữ và tạo biên bản cuộc họp chi tiết thông qua các mô hình ngôn ngữ lớn (LLM).
 
-| Hệ điều hành | Chip / Kiến trúc | File cài đặt | Link |
-|---------------|-------------------|---------------|------|
-| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.3.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_aarch64.dmg) |
-| 🪟 **Windows** | 64-bit | `Scribble_1.3.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_x64-setup.exe) |
-| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.3.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_amd64.AppImage) |
-| 🐧 **Linux** | 64-bit (deb) | `scribble_1.3.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.3.0_amd64.deb) |
-
-> **⚠️ Lưu ý macOS:** Lần đầu mở app nếu gặp cảnh báo **"Scribble Not Opened"**, mở Terminal và chạy:
-> ```bash
-> xattr -cr /Applications/Scribble.app
-> ```
-> Hoặc vào **System Settings → Privacy & Security → scroll xuống → Allow Anyway**.
-
-## ✨ Tính năng chính
-
-| Tính năng | Mô tả |
-|-----------|-------|
-| 🎙️ **Ghi âm realtime** | Voice Activity Detection — tự cắt chunk theo silence |
-| 📤 **Upload file ghi âm** | Tải lên m4a/mp3/wav/mp4 có sẵn → phiên âm; tạo biên bản là tùy chọn (mặc định tắt, không phải chờ). Resume khi pipeline bị gián đoạn, lưu transcript theo từng chunk (timestamps mỗi 22s) |
-| 📝 **Phiên dịch tự động** | Nvidia Riva STT (streaming gRPC, 13+ ngôn ngữ), Soniox (chất lượng cao, ~$0.12/giờ), hoặc **Local (offline)** — chạy trên máy, không cần API key/mạng |
-| 👥 **Nhận diện người nói** | Speaker diarization (ONNX Runtime + CAM++ zh-cn) cho cả realtime lẫn upload — tối ưu tiếng Việt & ngôn ngữ châu Á |
-| ▶️ **Nghe lại đồng bộ** | Phát lại audio, transcript tự cuộn theo; bấm mốc thời gian để tua đúng đoạn |
-| 🌐 **Dịch cabin realtime** | Nvidia NMT — dịch 10+ ngôn ngữ, realtime |
-| 📋 **Biên bản AI** | Tóm tắt: tiêu đề, key points, action items, decisions, risks, next steps. Template mặc định "Phân tích chi tiết"; hỗ trợ MoM / Deep / Summary / Bullets / Custom |
-| 📎 **Tài liệu tham khảo** | Attach file .md / .txt vào meeting làm context cho AI — agenda, brief, glossary, prior decisions. Tối đa 1MB/file, 2MB tổng |
-| 📦 **Export đa định dạng** | Markdown (.md) và Word (.docx) |
-| 💾 **Lưu nháp tự động** | Auto-save transcript vào DB, khôi phục khi crash |
-| ✏️ **Sửa/Xóa transcript** | Inline edit từng dòng, auto-sync |
-| 🔊 **Lưu file ghi âm** | Download audio từ meeting history |
-| 🛡️ **Lọc hallucination** | Loại bỏ hallucination tự động |
-| ⚡ **Zero manual setup** | Cài là chạy ngay — chỉ cần nhập API key + tên model trong Settings, không có script SQL/flag ẩn |
-
-## 🚀 Khởi chạy (Development)
-
-### Yêu cầu
-
-- **Node.js** 20+ & **pnpm**
-- **Python** 3.10+
-- **Rust** (cài từ [rustup.rs](https://rustup.rs))
-
-### Cài đặt & Chạy
-
-```bash
-git clone https://github.com/luongndcoder/Scribble.git
-cd Scribble
-pnpm install
-
-# Chạy Python sidecar
-cd src-python
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python main.py  # → http://127.0.0.1:8765
-
-# Chạy Tauri dev (tab khác)
-cd ..
-pnpm tauri dev
-```
-
-### 🐳 Docker Compose (Web)
-
-```bash
-git clone https://github.com/luongndcoder/Scribble.git
-cd Scribble
-docker-compose up --build
-# → http://localhost:3000
-```
-
-> Dữ liệu SQLite lưu trong `./data/`. API key nhập từ giao diện Settings.
-
-
-### 🔨 Build từ source
-
-#### macOS (Apple Silicon)
-
-```bash
-# 1. Build sidecar
-cd src-python
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-# 2. Copy sidecar vào Tauri
-cp dist/scribble-sidecar ../src-tauri/binaries/scribble-sidecar-aarch64-apple-darwin
-
-# 3. Build DMG
-cd ..
-pnpm install
-npx tauri build -b dmg
-# → src-tauri/target/release/bundle/dmg/Scribble_*.dmg
-```
-
-#### Windows (64-bit)
-
-```bash
-# 1. Build sidecar
-cd src-python
-python -m venv .venv && .venv\Scripts\activate
-pip install -r requirements.txt
-python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-# 2. Copy sidecar vào Tauri
-copy dist\scribble-sidecar.exe ..\src-tauri\binaries\scribble-sidecar-x86_64-pc-windows-msvc.exe
-
-# 3. Build NSIS installer
-cd ..
-pnpm install
-npx tauri build -b nsis --target x86_64-pc-windows-msvc
-# → src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-```
-
-#### Linux (Ubuntu/Debian)
-
-```bash
-# 1. Build sidecar
-cd src-python
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-# 2. Copy sidecar vào Tauri
-cp dist/scribble-sidecar ../src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu
-
-# 3. Build AppImage + deb
-cd ..
-pnpm install
-npx tauri build
-# → src-tauri/target/release/bundle/appimage/*.AppImage
-# → src-tauri/target/release/bundle/deb/*.deb
-```
-
-> **💡 CI/CD:** Windows và Linux build tự động qua GitHub Actions, trigger bằng `workflow_dispatch`.
-
-## 🔧 STT Backends
-
-| Backend | Đặc điểm | Yêu cầu | Chi phí |
-|---------|----------|---------|---------|
-| ☁️ **Nvidia Riva** | Streaming gRPC, 13+ ngôn ngữ, speaker diarization, Parakeet CTC 0.6B cho tiếng Việt | API key từ [build.nvidia.com](https://build.nvidia.com) | Free tier hào phóng |
-| 🎯 **Soniox** | Chất lượng tốt nhất, đa ngôn ngữ trong cùng 1 audio, diarization tích hợp | API key từ [soniox.com](https://soniox.com) | ~$0.12/giờ |
-| 💻 **Local (offline)** | Chạy hoàn toàn trên máy — không cần API key/mạng, riêng tư. nemotron MLX đa ngôn ngữ (macOS Apple Silicon, tải 1 lần ~720MB) hoặc sherpa-onnx tiếng Việt (bundled sẵn) | Không cần key | Miễn phí |
-
-> 🔒 **Bảo mật:** API key của bạn được lưu trữ **hoàn toàn trên máy tính của bạn**. Chúng tôi không thu thập, gửi đi hay sử dụng API key của bạn cho bất kỳ mục đích nào.
-
-## 🤖 LLM Configuration
-
-Cấu hình qua Settings — UI 2 cột (STT bên trái, AI bên phải) — không phải scroll:
-
-| Field | Ví dụ | Mô tả |
-|-------|-------|-------|
-| Provider | OpenAI / DeepSeek / Mistral / Groq / Gemini / OpenRouter / Compatible | Chọn nhà cung cấp |
-| API Key | `sk-xxx` | API key LLM |
-| Base URL | `https://api.openai.com/v1` | Chỉ cần cho "Tương thích OpenAI" |
-| Model | `gpt-4o-mini` / `deepseek-chat` / ... | Tên model — click dropdown để tải danh sách model khả dụng |
-
-Hỗ trợ mọi provider OpenAI-compatible: OpenAI, DeepSeek, Mistral, Groq, Gemini, OpenRouter, Together, Ollama local, ...
-
-## 🌐 Dịch Cabin
-
-1. Tab **Recording** → bật **"Dịch cabin"** → chọn ngôn ngữ
-2. Ghi âm → bản dịch stream realtime dưới mỗi dòng transcript
-
-**Ngôn ngữ:** 🇬🇧 English · 🇯🇵 Nhật · 🇰🇷 Hàn · 🇨🇳 Trung · 🇫🇷 Pháp · 🇩🇪 Đức · 🇪🇸 TBN · 🇹🇭 Thái · 🇮🇩 Indo · 🇷🇺 Nga · 🇸🇦 Ả Rập · 🇮🇳 Hindi
-
-## 📤 Upload file ghi âm
-
-Có sẵn file audio/video → không cần ghi âm lại. Pipeline tự xử lý:
-
-1. Trang **Cuộc họp** → bấm **"Upload file"** (góc phải)
-2. Chọn file (m4a / mp3 / wav / mp4 / mkv / webm — tối đa 2GB), tiêu đề, ngôn ngữ
-3. Pipeline chạy tự động:
-   - **Normalize** → 16kHz mono WAV
-   - **Split** → cắt chunk theo silence (ffmpeg silencedetect, target 22s)
-   - **Transcribe** → STT song song 3 chunks/lần (Nvidia Riva streaming / Local)
-   - **Diarize** → CAM++ ONNX, phân tách theo cửa sổ 2s (fine-grained)
-   - **Summarize** → LLM sinh biên bản (tùy chọn — bật khi upload, mặc định tắt)
-4. Tiến độ stream qua SSE — đóng app vẫn tiếp tục, mở lại meeting để **Resume** từ chunk dở dang
-
-**Đặc điểm**:
-- Mỗi chunk lưu transcript ngay khi xong → crash recovery hoàn hảo
-- Timestamps mỗi 22s trong transcript (vd `1:24 – 1:46`)
-- Idempotent: upload file trùng (cùng SHA-256) → tự redirect về meeting cũ
-- Cross-platform: m4a/mp4 đều OK trên Windows / Linux / macOS
-
-## 📎 Tài liệu tham khảo (Reference Materials)
-
-Cho AI thêm context khi tạo biên bản — agenda, project brief, glossary, prior decisions:
-
-1. Mở meeting → tab **Biên bản** → mục **"Tài liệu tham khảo"**
-2. Bấm **"+ Thêm tài liệu"** → chọn file `.md` / `.txt` (tối đa **1 MB/file**, **2 MB tổng/meeting**, 10 file)
-3. Bấm **"Tạo biên bản"** (regenerate) — AI dùng tài liệu này làm context
-
-**AI sẽ**:
-- Dùng tên/thuật ngữ trong tài liệu làm source of truth (sửa lỗi STT mistranscribe tên riêng)
-- Cross-reference cuộc họp với agenda — mục nào đã thảo luận, mục nào skip
-- Call out khi decision khác với đề xuất trong brief
-- Liệt kê tài liệu đã dùng ở cuối biên bản
-
-> ⚠️ **Cảnh báo token**: khi total > 400KB, UI hiện warning vì model 128k context (vd gpt-4o-mini) có thể bị cắt — cân nhắc dùng Claude/Gemini context lớn hơn.
+Từ phiên bản 1.3, toàn bộ backend đã được chuyển đổi hoàn toàn sang **Rust native (in-process Axum server)**. Ứng dụng chạy dưới dạng một gói binary duy nhất, không yêu cầu cài đặt môi trường Python hay runtime bên ngoài.
 
 ---
 
-# 🇬🇧 English
+## Tải ứng dụng (v1.3.5)
 
-## 📥 Download
+| Hệ điều hành | Kiến trúc | Định dạng | Tải về |
+|---|---|---|---|
+| macOS | Apple Silicon (M1/M2/M3/M4) | DMG | [Scribble_1.3.5_aarch64.dmg](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_aarch64.dmg) |
+| Windows | 64-bit (x64) | Setup EXE | [Scribble_1.3.5_x64-setup.exe](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_x64-setup.exe) |
+| Linux | 64-bit (x64) | AppImage | [Scribble_1.3.5_amd64.AppImage](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_amd64.AppImage) |
+| Linux | 64-bit (x64) | Debian Package | [scribble_1.3.5_amd64.deb](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.3.5_amd64.deb) |
 
-| OS | Architecture | Installer | Link |
-|----|-------------|-----------|------|
-| 🍎 **macOS** | Apple Silicon (M1/M2/M3/M4) | `Scribble_1.3.0_aarch64.dmg` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_aarch64.dmg) |
-| 🪟 **Windows** | 64-bit | `Scribble_1.3.0_x64-setup.exe` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_x64-setup.exe) |
-| 🐧 **Linux** | 64-bit (AppImage) | `Scribble_1.3.0_amd64.AppImage` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.0_amd64.AppImage) |
-| 🐧 **Linux** | 64-bit (deb) | `scribble_1.3.0_amd64.deb` | [⬇ Download](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.3.0_amd64.deb) |
+### Lưu ý khi cài đặt trên macOS
 
-> **⚠️ macOS note:** If you see **"Scribble Not Opened"** on first launch, open Terminal and run:
-> ```bash
-> xattr -cr /Applications/Scribble.app
-> ```
-> Or go to **System Settings → Privacy & Security → scroll down → Allow Anyway**.
+Do ứng dụng chưa đăng ký chứng chỉ trả phí từ Apple Developer, lần đầu mở ứng dụng macOS có thể hiển thị cảnh báo "Scribble cannot be opened because the developer cannot be verified". 
 
-## ✨ Key Features
-
-| Feature | Description |
-|---------|-------------|
-| 🎙️ **Real-time Recording** | Voice Activity Detection — auto-splits chunks on silence |
-| 📤 **Upload Audio Files** | Upload existing m4a/mp3/wav/mp4 → transcription; minutes generation optional (off by default, no waiting). Resumable pipeline (survives app restart), per-chunk timestamps (every ~22s) |
-| 📝 **Auto Transcription** | Nvidia Riva STT (streaming gRPC, 13+ languages), Soniox (premium quality, ~$0.12/hr), or **Local (offline)** — on-device, no API key/network |
-| 👥 **Speaker Diarization** | Speaker identification (ONNX Runtime + CAM++ zh-cn) for both realtime and upload — tuned for Vietnamese & Asian languages |
-| ▶️ **Synced Playback** | Play back audio with the transcript auto-scrolling to follow; click a timestamp to seek to that part |
-| 🌐 **Cabin Translation** | Nvidia NMT — 10+ languages, real-time streaming |
-| 📋 **AI Minutes** | Auto-summarize: title, key points, action items, decisions, risks, next steps. Default template "Deep Analysis"; supports MoM / Deep / Summary / Bullets / Custom |
-| 📎 **Reference Materials** | Attach .md / .txt docs to a meeting as AI context — agendas, briefs, glossaries, prior decisions. Max 1MB/file, 2MB/meeting total |
-| 📦 **Multi-format Export** | Markdown (.md) and Word (.docx) |
-| 💾 **Auto-save Drafts** | Transcript saved to DB incrementally, resilient to crashes |
-| ✏️ **Edit/Delete Transcript** | Inline edit per line, auto-sync |
-| 🔊 **Audio Recording** | Download audio from meeting history |
-| 🛡️ **Hallucination Filter** | Auto-removes STT hallucinations |
-| ⚡ **Zero Manual Setup** | Install and go — only API keys + model names in Settings. No SQL scripts, no hidden flags |
-
-## 🚀 Quick Start (Development)
-
-### Prerequisites
-
-- **Node.js** 20+ & **pnpm**
-- **Python** 3.10+
-- **Rust** (install from [rustup.rs](https://rustup.rs))
-
-### Install & Run
-
-```bash
-git clone https://github.com/luongndcoder/Scribble.git
-cd Scribble
-pnpm install
-
-# Run Python sidecar
-cd src-python
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python main.py  # → http://127.0.0.1:8765
-
-# Run Tauri dev (another tab)
-cd ..
-pnpm tauri dev
-```
-
-### 🐳 Docker Compose (Web)
-
-```bash
-git clone https://github.com/luongndcoder/Scribble.git
-cd Scribble
-docker-compose up --build
-# → http://localhost:3000
-```
-
-> SQLite data stored in `./data/`. API keys configured via Settings UI.
-
-
-### 🔨 Build from Source
-
-#### macOS (Apple Silicon)
-
-```bash
-# 1. Build sidecar
-cd src-python
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-# 2. Copy sidecar to Tauri
-cp dist/scribble-sidecar ../src-tauri/binaries/scribble-sidecar-aarch64-apple-darwin
-
-# 3. Build DMG
-cd ..
-pnpm install
-npx tauri build -b dmg
-# → src-tauri/target/release/bundle/dmg/Scribble_*.dmg
-```
-
-#### Windows (64-bit)
-
-```bash
-# 1. Build sidecar
-cd src-python
-python -m venv .venv && .venv\Scripts\activate
-pip install -r requirements.txt
-python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-# 2. Copy sidecar to Tauri
-copy dist\scribble-sidecar.exe ..\src-tauri\binaries\scribble-sidecar-x86_64-pc-windows-msvc.exe
-
-# 3. Build NSIS installer
-cd ..
-pnpm install
-npx tauri build -b nsis --target x86_64-pc-windows-msvc
-# → src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-```
-
-#### Linux (Ubuntu/Debian)
-
-```bash
-# 1. Build sidecar
-cd src-python
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m PyInstaller scribble-sidecar.spec --noconfirm --clean
-
-# 2. Copy sidecar to Tauri
-cp dist/scribble-sidecar ../src-tauri/binaries/scribble-sidecar-x86_64-unknown-linux-gnu
-
-# 3. Build AppImage + deb
-cd ..
-pnpm install
-npx tauri build
-# → src-tauri/target/release/bundle/appimage/*.AppImage
-# → src-tauri/target/release/bundle/deb/*.deb
-```
-
-> **💡 CI/CD:** Windows and Linux builds run automatically via GitHub Actions, triggered by `workflow_dispatch`.
-
-## 🔧 STT Backends
-
-| Backend | Highlights | Requirements | Cost |
-|---------|------------|--------------|------|
-| ☁️ **Nvidia Riva** | Streaming gRPC, 13+ languages, speaker diarization, Parakeet CTC 0.6B for Vietnamese | API key from [build.nvidia.com](https://build.nvidia.com) | Generous free tier |
-| 🎯 **Soniox** | Best-in-class accuracy, multi-lang mixed audio, built-in diarization | API key from [soniox.com](https://soniox.com) | ~$0.12/hr |
-| 💻 **Local (offline)** | Runs fully on-device — no API key/network, private. Multilingual nemotron MLX (macOS Apple Silicon, one-time ~720MB download) or bundled Vietnamese sherpa-onnx | No key needed | Free |
-
-> 🔒 **Privacy:** Your API keys are stored **entirely on your local machine**. We never collect, transmit, or use your API keys for any purpose.
-
-## 🤖 LLM Configuration
-
-Configure via Settings — 2-column layout (STT left, AI right) — no scrolling:
-
-| Field | Example | Description |
-|-------|---------|-------------|
-| Provider | OpenAI / DeepSeek / Mistral / Groq / Gemini / OpenRouter / Compatible | Pick a provider |
-| API Key | `sk-xxx` | LLM provider API key |
-| Base URL | `https://api.openai.com/v1` | Only for "OpenAI Compatible" |
-| Model | `gpt-4o-mini` / `deepseek-chat` / ... | Click the dropdown to fetch available models |
-
-Supports any OpenAI-compatible provider: OpenAI, DeepSeek, Mistral, Groq, Gemini, OpenRouter, Together, local Ollama, etc.
-
-## 🌐 Cabin Translation
-
-1. Go to **Recording** tab → enable **"Cabin Translation"** toggle → select target language
-2. Start recording → translations stream in real-time below each transcript line
-
-**Languages:** 🇬🇧 English · 🇯🇵 Japanese · 🇰🇷 Korean · 🇨🇳 Chinese · 🇫🇷 French · 🇩🇪 German · 🇪🇸 Spanish · 🇹🇭 Thai · 🇮🇩 Indonesian · 🇷🇺 Russian · 🇸🇦 Arabic · 🇮🇳 Hindi
-
-## 📤 Upload Audio File
-
-Have an existing audio/video file? Skip live recording — the pipeline handles it:
-
-1. **Meetings** page → click **"Upload file"** (top right)
-2. Pick file (m4a / mp3 / wav / mp4 / mkv / webm — up to 2GB), title, language
-3. Pipeline runs automatically:
-   - **Normalize** → 16kHz mono WAV
-   - **Split** → silence-aligned chunks (ffmpeg silencedetect, ~22s target)
-   - **Transcribe** → 3 concurrent STT calls (Nvidia Riva streaming / Local)
-   - **Diarize** → CAM++ ONNX, fine-grained 2s windows
-   - **Summarize** → LLM generates minutes (optional — opt-in at upload, off by default)
-4. Progress streams via SSE — closing the app is fine, reopen the meeting and **Resume** picks up where it left off
-
-**Highlights**:
-- Per-chunk transcript save → perfect crash recovery
-- Per-chunk timestamps in transcript (e.g. `1:24 – 1:46`)
-- Idempotent: re-uploading the same file (matching SHA-256) redirects to the existing meeting
-- Cross-platform: m4a/mp4 work on Windows / Linux / macOS
-
-## 📎 Reference Materials
-
-Give the AI extra context when generating minutes — agendas, project briefs, glossaries, prior decisions:
-
-1. Open a meeting → **Minutes** tab → **"Reference materials"** section
-2. Click **"+ Add file"** → pick a `.md` / `.txt` (max **1 MB/file**, **2 MB total/meeting**, 10 files)
-3. Click **"Create Minutes"** (regenerate) — AI now uses these as context
-
-**The AI will**:
-- Treat names/terminology from your docs as source of truth (correcting STT mistranscriptions of proper nouns)
-- Cross-reference the meeting against the agenda — note what was covered vs. skipped
-- Call out when a decision diverges from what the brief proposed
-- List which reference files it used at the bottom of the minutes
-
-> ⚠️ **Token warning**: past 400KB total, the UI surfaces a warning — 128k-context models (e.g. gpt-4o-mini) may truncate. Consider larger-context models (Claude, Gemini).
+Để mở app:
+1. Mở **System Settings** -> **Privacy & Security** -> cuộn xuống mục Security và chọn **Open Anyway**.
+2. Hoặc mở Terminal và chạy lệnh gỡ thuộc tính cách ly:
+   ```bash
+   xattr -cr /Applications/Scribble.app
+   ```
 
 ---
 
-## 📁 Project Structure
+## Kiến trúc hệ thống
+
+Scribble được thiết kế theo mô hình desktop app hiệu năng cao và bảo mật dữ liệu tuyệt đối:
+
+- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Zustand quản lý trạng thái, Lucide icons.
+- **Desktop Shell & Backend**: Tauri v2 kết hợp máy chủ HTTP & WebSocket Axum nhúng trực tiếp trong tiến trình Rust.
+- **Cơ sở dữ liệu cục bộ**: SQLite nhúng thông qua `rusqlite`, lưu trữ toàn bộ lịch sử cuộc họp, transcript và cài đặt trên máy người dùng.
+- **Ghi âm âm thanh hệ thống**:
+  - macOS: CoreAudio process tap qua thư viện `cidre`.
+  - Windows: WASAPI loopback capture trực tiếp từ card âm thanh.
+- **Công cụ Speech-to-Text (STT)**:
+  - Cloud: Nvidia Riva streaming gRPC (hỗ trợ mô hình tiếng Việt Parakeet CTC 0.6B) và Soniox WebSocket.
+  - Offline / Local: Mô hình Zipformer 30M tiếng Việt chạy qua `sherpa-onnx`, và mô hình Nemotron 3.5 ASR tăng tốc phần cứng Apple Silicon GPU qua `mlx-rs`.
+- **Nhận diện người nói (Speaker Diarization)**: Chạy mô hình ResNet34 / CAM++ ONNX cục bộ qua `ort` và `kaldi-native-fbank`, phân tách giọng nói theo cửa sổ thời gian thực.
+- **Tự động cập nhật**: Tích hợp `tauri-plugin-updater` hỗ trợ kiểm tra phiên bản mới, xác thực chữ ký số và cập nhật in-place.
+
+---
+
+## Tính năng chính
+
+### 1. Ghi âm & Thu âm thanh hệ thống
+Thu âm song song từ micro ngoài và âm thanh cuộc họp (Zoom, Google Meet, Microsoft Teams) mà không cần cài thêm driver âm thanh ảo. Voice Activity Detection (VAD) tự động phân tách câu theo khoảng lặng.
+
+### 2. Phiên âm thời gian thực & Dịch cabin
+- Hiển thị văn bản tức thời khi người nói cất lời với độ trễ thấp (< 1s).
+- Hỗ trợ dịch cabin trực tiếp (Nvidia NMT): Bản dịch tiếng Anh, Nhật, Hàn, Trung, Pháp, Đức, v.v. xuất hiện ngay dưới từng dòng hội thoại.
+- Chế độ Offline hoàn toàn: Không gửi dữ liệu qua mạng khi chọn backend Local.
+
+### 3. Nhận diện người nói tự động (Diarization)
+Phân loại chính xác các lượt phát biểu ("Người nói 1", "Người nói 2", v.v.) và cho phép đổi tên người nói trực tiếp trên giao diện.
+
+### 4. Xử lý file ghi âm có sẵn (Audio Upload Pipeline)
+- Hỗ trợ các định dạng: `.mp3`, `.m4a`, `.wav`, `.mp4`, `.mkv`, `.webm` (dung lượng tối đa 2GB).
+- Pipeline tự động: Chuẩn hoá audio 16kHz mono -> Cắt lát VAD bằng FFmpeg -> Phiên âm song song đa luồng -> Gán nhãn người nói.
+- Cơ chế khôi phục (Resume): Lưu dữ liệu theo từng chunk vào SQLite; nếu tắt ứng dụng giữa chừng, tiến trình có thể tiếp tục ngay từ điểm dừng mà không cần xử lý lại từ đầu.
+
+### 5. Tạo biên bản cuộc họp thông minh bằng AI
+- Tự động trích xuất: Tiêu đề, Tóm tắt điều hành, Các điểm thảo luận cốt lõi, Nhiệm vụ cần thực hiện (Action Items kèm người phụ trách/hạn chót), Quyết định đã thông qua, và Rủi ro/Kế hoạch tiếp theo.
+- Cung cấp sẵn các mẫu biên bản: Phân tích chi tiết, MoM tiêu chuẩn, Tóm tắt ngắn, Gạch đầu dòng, hoặc Tuỳ chỉnh prompt theo ý muốn.
+- **Tài liệu tham khảo (Reference Materials)**: Đính kèm tài liệu `.md` / `.txt` (agenda cuộc họp, brief dự án, bảng thuật ngữ) để AI đối chiếu, sửa lỗi nhận diện tên riêng và đánh dấu các nội dung bị bỏ sót so với lịch trình.
+
+### 6. Xuất dữ liệu & Nghe lại đồng bộ
+- Trình phát âm thanh đồng bộ: Bấm vào bất kỳ mốc thời gian nào trong transcript để phát lại chính xác đoạn âm thanh tương ứng.
+- Xuất biên bản ra định dạng Microsoft Word (`.docx`) hoặc Markdown (`.md`).
+- Tự động lưu nháp liên tục, hạn chế tối đa rủi ro mất dữ liệu khi mất điện hoặc tắt app đột ngột.
+
+---
+
+## Cấu hình dịch vụ AI
+
+Mọi thông tin cấu hình và API key đều được lưu trữ hoàn toàn trong cơ sở dữ liệu SQLite cục bộ trên máy của bạn.
+
+### Cấu hình Speech-to-Text (STT)
+
+| Backend | Loại | Đặc điểm | Yêu cầu |
+|---|---|---|---|
+| Nvidia Riva | Cloud | Tốc độ cao, độ trễ thấp, hỗ trợ tiếng Việt chất lượng cao (Parakeet 0.6B) | API Key từ [build.nvidia.com](https://build.nvidia.com) |
+| Soniox | Cloud | Độ chính xác cao, tự động nhận diện ngôn ngữ trộn lẫn | API Key từ [soniox.com](https://soniox.com) |
+| Local (Offline) | Trên máy | Hoàn toàn riêng tư, không cần mạng hay API key | Tích hợp sẵn (sherpa-onnx) hoặc tải thêm model MLX trên macOS |
+
+### Cấu hình LLM tạo biên bản
+
+Scribble hỗ trợ giao thức chuẩn OpenAI API, cho phép kết nối tới hầu hết các nhà cung cấp:
+- OpenAI (`gpt-4o`, `gpt-4o-mini`)
+- DeepSeek (`deepseek-chat`)
+- Anthropic Claude (qua OpenRouter)
+- Groq / Mistral / Google Gemini API
+- Local LLM: Ollama, vLLM hoặc LM Studio qua cổng Base URL cục bộ (`http://localhost:11434/v1`)
+
+---
+
+## Hướng dẫn phát triển (Development)
+
+### Yêu cầu môi trường
+- Node.js 20+ và `pnpm`
+- Rust 1.75+ (cài đặt qua [rustup.rs](https://rustup.rs))
+- CMake và C++ Build Tools (cho việc biên dịch các thư viện ONNX/Sherpa)
+- macOS: Xcode Command Line Tools
+- Linux: `libwebkit2gtk-4.1-dev`, `libasound2-dev`, `libssl-dev`
+
+### Chạy ứng dụng ở chế độ phát triển
+
+```bash
+# 1. Clone repository
+git clone https://github.com/luongndcoder/Scribble.git
+cd Scribble
+
+# 2. Cài đặt dependencies frontend
+pnpm install
+
+# 3. Khởi chạy ứng dụng Tauri (Rust backend + Vite frontend)
+pnpm tauri dev
+```
+
+### Đóng gói ứng dụng từ mã nguồn
+
+```bash
+# macOS (DMG Apple Silicon)
+pnpm tauri build -b dmg
+
+# Windows (NSIS Installer x64)
+pnpm tauri build -b nsis
+
+# Linux (AppImage & deb)
+pnpm tauri build
+```
+
+---
+
+# English
+
+Scribble is an open-source, on-device AI meeting assistant. It captures microphone and system audio loopback, performs real-time speech-to-text, identifies speakers with diarization, provides live cabin translation, and generates structured meeting minutes using large language models.
+
+From version 1.3 onward, the backend has been completely rewritten into **native Rust (in-process Axum server)**. The desktop application runs as a self-contained binary bundle with zero Python or external runtime dependencies.
+
+---
+
+## Downloads (v1.3.5)
+
+| Platform | Architecture | Package Format | Download |
+|---|---|---|---|
+| macOS | Apple Silicon (M1/M2/M3/M4) | DMG | [Scribble_1.3.5_aarch64.dmg](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_aarch64.dmg) |
+| Windows | 64-bit (x64) | Setup EXE | [Scribble_1.3.5_x64-setup.exe](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_x64-setup.exe) |
+| Linux | 64-bit (x64) | AppImage | [Scribble_1.3.5_amd64.AppImage](https://github.com/luongndcoder/Scribble/releases/latest/download/Scribble_1.3.5_amd64.AppImage) |
+| Linux | 64-bit (x64) | Debian Package | [scribble_1.3.5_amd64.deb](https://github.com/luongndcoder/Scribble/releases/latest/download/scribble_1.3.5_amd64.deb) |
+
+### macOS Security Gatekeeper Note
+
+If macOS displays "Scribble cannot be opened because the developer cannot be verified" on first launch:
+1. Go to **System Settings** -> **Privacy & Security**, scroll down to the Security section, and click **Open Anyway**.
+2. Alternatively, remove the quarantine attribute via Terminal:
+   ```bash
+   xattr -cr /Applications/Scribble.app
+   ```
+
+---
+
+## Technical Architecture
+
+- **User Interface**: React 19, TypeScript, Tailwind CSS v4, Zustand store, Lucide icons.
+- **Application Shell & Engine**: Tauri v2 embedding an in-process Axum HTTP and WebSocket server.
+- **Local Database**: Embedded SQLite via `rusqlite`, keeping all meetings, transcripts, and preferences strictly on your disk.
+- **Native Audio Capture**:
+  - macOS: CoreAudio process tap via `cidre`.
+  - Windows: Direct WASAPI loopback capture.
+- **Speech Recognition Engines**:
+  - Cloud: Nvidia Riva streaming gRPC and Soniox streaming WebSocket.
+  - Offline / Local: Bundled Vietnamese Zipformer 30M via `sherpa-onnx`, and multilingual Nemotron 3.5 ASR running on Apple Silicon GPU via `mlx-rs`.
+- **Speaker Diarization**: ResNet34 / CAM++ ONNX model running locally via `ort` and `kaldi-native-fbank`.
+- **Integrated Auto-Updater**: Built-in update checker and in-place installer backed by `tauri-plugin-updater` and cryptographic signatures.
+
+---
+
+## Key Capabilities
+
+- **System Audio & Microphone Recording**: Capture sound from conferencing tools (Zoom, Google Meet, Teams) and microphones simultaneously.
+- **Real-Time Streaming STT**: Low-latency transcription as you speak, with support for offline processing.
+- **Live Cabin Translation**: Simultaneous multi-language translation (English, Japanese, Korean, Chinese, French, German, Spanish, etc.) displayed alongside the transcript.
+- **Speaker Diarization**: Automatic speaker segmentation and labeling, with full inline editing.
+- **Audio File Upload Pipeline**: Transcribe pre-recorded files (`.mp3`, `.m4a`, `.wav`, `.mp4`, `.mkv`, `.webm`) using silence-aware VAD chunking and parallel transcription with incremental resume support.
+- **AI Minutes & Reference Materials**: Generate executive summaries, key decisions, action items, and risks. Attach reference files (`.md` or `.txt`) such as agendas and briefs to provide grounding context for LLM generation.
+- **Interactive Audio Playback**: Click any transcript timestamp to jump to the exact moment in the recorded audio.
+- **Document Export**: Export meeting minutes directly to Microsoft Word (`.docx`) or Markdown (`.md`).
+
+---
+
+## Project Structure
 
 ```
 Scribble/
-├── src/                       # React + TypeScript frontend
-│   ├── components/
-│   │   ├── MeetingList.tsx        # Meeting history + Upload button
-│   │   ├── MeetingDetail.tsx      # Compact toolbar (back + tabs + actions)
-│   │   ├── MeetingAttachments.tsx # Reference materials (collapsible)
-│   │   ├── UploadAudioModal.tsx   # File picker + pipeline progress SSE
-│   │   ├── RecordingBar.tsx       # Slim merged rec + translation bar
-│   │   ├── StartupStatusBar.tsx   # Bottom-dock startup status strip
-│   │   ├── SettingsPanel.tsx      # 2-column STT | AI settings
-│   │   └── TranscriptView.tsx     # Per-chunk transcript w/ timestamps
-│   ├── stores/appStore.ts         # Zustand state (incl. backendOnline)
-│   └── lib/
-│       ├── attachments.ts         # Reference materials client
-│       ├── upload-audio.ts        # Audio upload + SSE bridge
-│       └── sidecar.ts             # Sidecar HTTP/WS helpers
-├── src-python/                # Python FastAPI sidecar
-│   ├── main.py                # FastAPI server, lifecycle, WS handlers
-│   ├── db.py                  # SQLite singleton + migrations
-│   ├── stt.py                 # STT (Nvidia Riva streaming, Soniox)
-│   ├── diarize.py             # Realtime speaker ID (CAM++ ONNX)
-│   ├── translate.py           # Nvidia NMT
-│   ├── summarize.py           # LLM minutes (MoM/Deep/Summary, MapReduce)
-│   ├── api/
-│   │   ├── upload.py          # /meetings/upload-audio, SSE job events
-│   │   ├── attachments.py     # /meetings/{id}/attachments CRUD
-│   │   ├── transcription.py   # /summarize, /translate
-│   │   ├── settings.py        # Settings CRUD + provider URLs
-│   │   ├── meetings.py        # Meetings CRUD + audio download
-│   │   └── diagnose.py        # /test-stt, /test-llm
-│   ├── services/
-│   │   ├── upload_pipeline.py # Normalize → split → STT → diarize → summarize
-│   │   ├── vad_splitter.py    # ffmpeg silencedetect chunker (22s target)
-│   │   ├── batch_diarizer.py  # scipy clustering on CAM++ embeddings
-│   │   ├── job_registry.py    # In-memory job state + SSE queue
-│   │   ├── upload_storage.py  # Streaming write + sha256 + sanitize
-│   │   └── audio.py           # find_ffmpeg helper (cross-platform)
-│   ├── models/                # ONNX model files (voxceleb_CAM++)
-│   └── scribble-sidecar.spec  # PyInstaller build spec (onedir)
-├── src-tauri/                 # Tauri Rust shell
+├── src/                       # Frontend application (React 19 + TypeScript + Vite)
+│   ├── components/            # UI components (Meeting detail, Upload modal, Settings, etc.)
+│   ├── stores/                # Zustand client state stores
+│   └── lib/                   # API clients, audio utilities, updater helpers
+├── src-tauri/                 # Native desktop application (Tauri v2 + Rust)
 │   ├── src/
-│   │   ├── lib.rs             # App entrypoint, sidecar extraction
-│   │   └── upload.rs          # Streaming multipart upload to sidecar
-│   ├── tauri.conf.json        # App config, icons, bundle settings
-│   └── binaries/              # Platform sidecar binaries (tar.gz onedir)
-├── .github/workflows/         # CI/CD (Windows + Linux builds)
-└── package.json
+│   │   ├── api/               # In-process Axum REST & WebSocket endpoints
+│   │   ├── diarize/           # ONNX speaker embedding & clustering
+│   │   ├── pipeline/          # Upload audio processing & VAD chunking pipeline
+│   │   ├── stt/               # Speech-to-text drivers (Riva, Soniox, Sherpa, MLX)
+│   │   ├── db.rs              # Embedded SQLite database schema & migrations
+│   │   ├── llm.rs             # LLM minutes summarization engine
+│   │   └── lib.rs             # Tauri application setup and lifecycle hooks
+│   ├── Cargo.toml             # Rust dependencies and platform configuration
+│   └── tauri.conf.json        # Tauri window, updater, and bundle configuration
+├── landing/                   # Product landing website
+└── package.json               # Frontend dependencies and build scripts
 ```
 
 ---
 
-## 🙏 Acknowledgments
+## Development Setup
 
-This project was inspired by and incorporates ideas from:
+### Prerequisites
+- Node.js 20+ and `pnpm`
+- Rust 1.75+ (`rustup`)
+- CMake and C++ build toolchain
 
-- **[Meetily](https://github.com/Zackriya-Solutions/meetily)** by [Zackriya Solutions](https://github.com/Zackriya-Solutions) — UI/UX design patterns, summarization prompt engineering techniques, and chunking strategies for long transcripts.
+### Running in Development
 
-### Local/offline STT model
+```bash
+# Install frontend dependencies
+pnpm install
 
-The offline Vietnamese speech recognition (Settings → **Local (offline)**) uses the **sherpa-onnx Zipformer Vietnamese (30M, int8)** model by **[hynt/Zipformer-30M-RNNT-6000h](https://huggingface.co/hynt/Zipformer-30M-RNNT-6000h)**, packaged via **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)** (Apache-2.0). The model is licensed **CC BY-NC-ND 4.0** (non-commercial, attribution required, no derivatives) — bundled and used unmodified for offline transcription.
+# Run application in development mode
+pnpm tauri dev
+```
 
-## 📄 License
+### Building Release Binaries
 
-MIT
+```bash
+# macOS
+pnpm tauri build -b dmg
+
+# Windows
+pnpm tauri build -b nsis
+
+# Linux
+pnpm tauri build
+```
+
+---
+
+## Acknowledgments & Attributions
+
+- **[Meetily](https://github.com/Zackriya-Solutions/meetily)**: UX patterns, audio capture architectures, and summarization prompt engineering inspiration.
+- **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: On-device speech recognition runtime (Apache-2.0).
+- **[hynt/Zipformer-30M-RNNT-6000h](https://huggingface.co/hynt/Zipformer-30M-RNNT-6000h)**: Offline Vietnamese speech recognition model (licensed under CC BY-NC-ND 4.0).
+- **CAM++ / VoxCeleb**: Speaker recognition models for neural speaker diarization.
+
+---
+
+## License
+
+This project is open-source under the [MIT License](LICENSE).
