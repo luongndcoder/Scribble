@@ -549,7 +549,7 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                                 <div class="guide-step-num guide-step-num--done">✓</div>
                                 <div class="guide-step-text">
                                     <h4 data-i18n="m9.title">Đã cài xong Scribble!</h4>
-                                    <p data-i18n="m9.desc">Ứng dụng khởi chạy thành công. Bạn sẽ thấy giao diện chính Scribble. Tiếp tục Phase 2 để thiết lập API key.</p>
+                                    <p data-i18n="m9.desc">Ứng dụng khởi chạy thành công. Bạn sẽ thấy giao diện chính Scribble. Tiếp tục Phase 2 để thiết lập cấu hình.</p>
                                 </div>
                             </div>
                             <div class="guide-step-img">
@@ -673,7 +673,7 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                                 <div class="guide-step-num guide-step-num--done">✓</div>
                                 <div class="guide-step-text">
                                     <h4 data-i18n="w7.title">Cài đặt hoàn tất!</h4>
-                                    <p data-i18n="w7.desc">Trình cài đặt sẽ hướng dẫn bạn qua các bước còn lại. Chọn ngôn ngữ, vị trí cài đặt, và Scribble sẽ sẵn sàng trong vài giây. Tiếp tục Phase 2 để thiết lập API key.</p>
+                                    <p data-i18n="w7.desc">Trình cài đặt sẽ hướng dẫn bạn qua các bước còn lại. Chọn ngôn ngữ, vị trí cài đặt, và Scribble sẽ sẵn sàng trong vài giây. Tiếp tục Phase 2 để thiết lập cấu hình.</p>
                                 </div>
                             </div>
                         </div>
@@ -681,187 +681,14 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                 </div>
             </div>
 
-            <!-- ═══ Phase 2: NVIDIA Account & API Key ═══ -->
+
+            <!-- ═══ Phase 2: Configure Scribble ═══ -->
             <div class="guide-phase">
                 <div class="guide-phase-header">
                     <div class="guide-phase-num">Phase 2</div>
                     <div>
-                        <h3 data-i18n="p2.title">Lấy API Key NVIDIA miễn phí</h3>
-                        <p data-i18n="p2.sub">Cần thiết cho tính năng phiên âm và AI (có gói miễn phí)</p>
-                    </div>
-                </div>
-
-                <div class="guide-steps">
-                    <!-- N1: Visit build.nvidia.com -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">1</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="n1.title">Truy cập build.nvidia.com</h4>
-                                <p data-i18n="n1.desc">Vào <a href="https://build.nvidia.com" target="_blank" rel="noopener"><strong>build.nvidia.com</strong></a> và nhấn nút <strong>"Login"</strong> ở góc trên bên phải. Nếu chưa có tài khoản, bạn cần tạo mới.</p>
-                            </div>
-                        </div>
-                        <div class="guide-step-img">
-                            <picture>
-                                <source srcset="images/guide/processed/nvidia_homepage_login.webp" type="image/webp">
-                                <img src="images/guide/processed/nvidia_homepage_login.png" alt="NVIDIA Build portal — Sign in with email to get started" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- N2: Create account -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">2</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="n2.title">Tạo tài khoản</h4>
-                                <p data-i18n="n2.desc">Điền <strong>email</strong>, <strong>mật khẩu</strong>, hoàn thành hCaptcha, rồi nhấn <strong>"Create Account"</strong>. Bạn cũng có thể đăng ký qua Google hoặc GitHub.</p>
-                            </div>
-                        </div>
-                        <div class="guide-step-img guide-step-img--small">
-                            <picture>
-                                <source srcset="images/guide/processed/nvidia_create_account.webp" type="image/webp">
-                                <img src="images/guide/processed/nvidia_create_account.png" alt="NVIDIA account creation form — email, password, hCaptcha" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- N3: Verify email -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">3</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="n3.title">Xác minh email</h4>
-                                <p data-i18n="n3.desc">NVIDIA sẽ gửi <strong>mã 6 chữ số</strong> đến email. Nhập mã và nhấn <strong>"Continue"</strong>.</p>
-                            </div>
-                        </div>
-                        <div class="guide-step-img">
-                            <picture>
-                                <source srcset="images/guide/processed/nvidia_verify_email.webp" type="image/webp">
-                                <img src="images/guide/processed/nvidia_verify_email.png" alt="NVIDIA verify your email — enter 6-digit code" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- N4: Almost done -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">4</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="n4.title">Hoàn tất đăng ký</h4>
-                                <p data-i18n="n4.desc">Xem lại cài đặt tùy chọn (không bắt buộc). Nhấn <strong>"Submit"</strong> để hoàn tất tài khoản. Bạn sẽ được chuyển đến trang quản trị NVIDIA.</p>
-                            </div>
-                        </div>
-                        <div class="guide-step-img">
-                            <picture>
-                                <source srcset="images/guide/processed/nvidia_almost_done.webp" type="image/webp">
-                                <img src="images/guide/processed/nvidia_almost_done.png" alt="NVIDIA Almost done — complete registration with Submit button" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- N5: Create Cloud Account -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">5</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="n5.title">Tạo NVIDIA Cloud Account</h4>
-                                <p data-i18n="n5.desc">Bạn sẽ được yêu cầu tạo <strong>NVIDIA Cloud Account</strong>. Nhập <strong>Cloud Account Name</strong> (ví dụ: tên bạn hoặc tổ chức), rồi nhấn <strong>"Create NVIDIA Cloud Account"</strong>.</p>
-                            </div>
-                        </div>
-                        <div class="guide-step-img guide-step-img--small">
-                            <picture>
-                                <source srcset="images/guide/processed/nvidia_cloud_account.webp" type="image/webp">
-                                <img src="images/guide/processed/nvidia_cloud_account.png" alt="NVIDIA Cloud Account — enter account name and create" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- N6: Verify account banner -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">6</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="n6.title">Nhấn "Verify" để được cấp quyền API</h4>
-                                <p data-i18n="n6.desc">Sau khi đăng nhập, bạn sẽ thấy banner vàng phía trên: <strong>"Please verify your account to get API access"</strong>. Nhấn nút <strong>"Verify"</strong> bên phải banner.</p>
-                                <div class="guide-tip">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                                    <span data-i18n="n6.tip">Bước này bắt buộc — bạn không thể tạo API key mà không xác minh số điện thoại.</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="guide-step-img">
-                            <picture>
-                                <source srcset="images/guide/processed/nvidia_verify_banner.webp" type="image/webp">
-                                <img src="images/guide/processed/nvidia_verify_banner.png" alt="NVIDIA dashboard — Please verify your account banner with Verify button" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- N7: Phone number verification -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">7</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="n7.title">Xác minh số điện thoại</h4>
-                                <p data-i18n="n7.desc">Hộp thoại yêu cầu <strong>số điện thoại</strong> sẽ xuất hiện. Chọn <strong>Location</strong>, nhập <strong>Phone Number</strong>, rồi nhấn <strong>"Send Code via SMS"</strong>. Nhập mã OTP nhận được để hoàn tất xác minh.</p>
-                            </div>
-                        </div>
-                        <div class="guide-step-img guide-step-img--small">
-                            <picture>
-                                <source srcset="images/guide/processed/nvidia_phone_verify.webp" type="image/webp">
-                                <img src="images/guide/processed/nvidia_phone_verify.png" alt="NVIDIA phone verification — enter phone number and send OTP code" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- N8: Navigate to API Keys -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">8</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="n8.title">Đi tới API Keys</h4>
-                                <p data-i18n="n8.desc">Nhấn <strong>icon hồ sơ</strong> ở góc trên bên phải, rồi chọn <strong>"API Keys"</strong> từ menu dropdown.</p>
-                            </div>
-                        </div>
-                        <div class="guide-step-img guide-step-img--small">
-                            <picture>
-                                <source srcset="images/guide/processed/nvidia_api_keys_menu.webp" type="image/webp">
-                                <img src="images/guide/processed/nvidia_api_keys_menu.png" alt="NVIDIA profile menu — API Keys option in dropdown" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- N9: Generate API Key -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">9</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="n9.title">Tạo API Key</h4>
-                                <p data-i18n="n9.desc">Nhấn <strong>"Generate API Key"</strong>. <strong>Sao chép key ngay lập tức</strong> và lưu ở nơi an toàn — bạn sẽ không thể xem lại nó!</p>
-                                <div class="guide-tip">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                                    <span data-i18n="n9.tip">Gói miễn phí cho bạn 1.000 API credit/tháng — đủ dùng cho cá nhân.</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="guide-step-img">
-                            <picture>
-                                <source srcset="images/guide/processed/nvidia_api_keys_generate.webp" type="image/webp">
-                                <img src="images/guide/processed/nvidia_api_keys_generate.png" alt="NVIDIA API Keys dashboard — Generate API Key button" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ═══ Phase 3: Configure Scribble ═══ -->
-            <div class="guide-phase">
-                <div class="guide-phase-header">
-                    <div class="guide-phase-num">Phase 3</div>
-                    <div>
-                        <h3 data-i18n="p3.title">Cấu hình Scribble</h3>
-                        <p data-i18n="p3.sub">Dán API key và thiết lập mô hình AI</p>
+                        <h3 data-i18n="p2.title">Cấu hình Scribble</h3>
+                        <p data-i18n="p2.sub">Cấu hình Speech-to-Text và Trợ lý AI</p>
                     </div>
                 </div>
 
@@ -871,33 +698,16 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         <div class="guide-step-info">
                             <div class="guide-step-num">1</div>
                             <div class="guide-step-text">
-                                <h4 data-i18n="c1.title">Mở Settings → Speech-to-Text (Phiên âm)</h4>
-                                <p data-i18n="c1.desc">Mở Scribble, nhấn biểu tượng <strong>⚙️ Settings</strong> ở góc trên bên phải. Trong phần <strong>Speech-to-Text</strong>, bạn có thể chọn mô hình Local offline hoặc Soniox.</p>
-                            </div>
-                        </div>
-                        <div class="guide-step-img">
-                            <picture>
-                                <source srcset="images/screenshots/settings-general.webp" type="image/webp">
-                                <img src="images/screenshots/settings-general.png" alt="Scribble Settings — General and Speech-to-Text navigation" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- C2: STT fields -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">2</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="c2.title">Chọn chế độ phiên âm</h4>
-                                <p data-i18n="c2.desc">Chọn <strong>Local</strong> để nhận diện giọng nói 100% trên máy không cần internet, hoặc chọn <strong>Soniox</strong> và dán Soniox API key.</p>
+                                <h4 data-i18n="c1.title">Cấu hình Speech-to-Text (Phiên âm)</h4>
+                                <p data-i18n="c1.desc">Mở Scribble, nhấn biểu tượng <strong>⚙️ Settings</strong> ở góc trên bên phải và chọn tab <strong>Speech-to-Text</strong>. Bạn có thể chọn mô hình <strong>Local</strong> (Zipformer 30M hoặc Nemotron 0.6B) để nhận diện giọng nói 100% offline trên máy không cần internet, hoặc chọn <strong>Soniox</strong> để dùng Cloud STT độ chính xác cao.</p>
                                 <div class="guide-config-block">
                                     <div class="guide-config-row">
-                                        <span class="guide-config-label">Local</span>
-                                        <code class="guide-config-value">Offline (On-device STT)</code>
+                                        <span class="guide-config-label">Local STT</span>
+                                        <code class="guide-config-value">Offline (Zipformer 30M / Nemotron 0.6B)</code>
                                     </div>
                                     <div class="guide-config-row">
-                                        <span class="guide-config-label">Soniox API Key</span>
-                                        <code class="guide-config-value">snx_xxxx (optional cloud STT)</code>
+                                        <span class="guide-config-label">Cloud STT</span>
+                                        <code class="guide-config-value">Soniox (optional API key)</code>
                                     </div>
                                 </div>
                             </div>
@@ -910,68 +720,41 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         </div>
                     </div>
 
-                    <!-- C3: AI API Key -->
+                    <!-- C2: AI Assistant Settings -->
                     <div class="guide-step">
                         <div class="guide-step-info">
-                            <div class="guide-step-num">3</div>
+                            <div class="guide-step-num">2</div>
                             <div class="guide-step-text">
-                                <h4 data-i18n="c3.title">Cấu hình AI Assistant API Key</h4>
-                                <p data-i18n="c3.desc">Cuộn xuống phần <strong>AI Assistant</strong>. Dán API key (NVIDIA NIM, OpenAI hoặc DeepSeek) vào trường <strong>API Key</strong>.</p>
-                            </div>
-                        </div>
-                        <div class="guide-step-img">
-                            <picture>
-                                <source srcset="images/guide/processed/config_ai_api_key.webp" type="image/webp">
-                                <img src="images/guide/processed/config_ai_api_key.png" alt="Scribble Settings — AI Assistant API Key configuration" loading="lazy">
-                            </picture>
-                        </div>
-                    </div>
-
-                    <!-- C4: AI Server URL & Model -->
-                    <div class="guide-step">
-                        <div class="guide-step-info">
-                            <div class="guide-step-num">4</div>
-                            <div class="guide-step-text">
-                                <h4 data-i18n="c4.title">Đặt AI Server URL & Model</h4>
-                                <p data-i18n="c4.desc">Nhập địa chỉ server và tên model trong phần AI Assistant. Nhấn <strong>"Save"</strong> để áp dụng tất cả cài đặt.</p>
-                                <div class="guide-config-block">
-                                    <div class="guide-config-row">
-                                        <span class="guide-config-label">Server URL</span>
-                                        <code class="guide-config-value">https://integrate.api.nvidia.com/v1</code>
-                                    </div>
-                                    <div class="guide-config-row">
-                                        <span class="guide-config-label">Model</span>
-                                        <code class="guide-config-value">deepseek-ai/deepseek-v3.2</code>
-                                    </div>
-                                </div>
+                                <h4 data-i18n="c2.title">Cấu hình Trợ lý AI (Tóm tắt & Biên bản)</h4>
+                                <p data-i18n="c2.desc">Chuyển sang tab <strong>AI Assistant</strong> để cấu hình mô hình tạo tóm tắt và biên bản họp. Scribble hỗ trợ đầy đủ các nhà cung cấp phổ biến: OpenAI, DeepSeek, Google Gemini, Groq, Mistral, OpenRouter hoặc mô hình chạy cục bộ qua Ollama / LM Studio. Chọn nhà cung cấp và dán API Key của bạn.</p>
                                 <div class="guide-tip">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                                    <span data-i18n="c4.tip">Bạn có thể dùng bất kỳ AI model tương thích nào. DeepSeek v3.2 được khuyên dùng cho kết quả tốt nhất.</span>
+                                    <span data-i18n="c2.tip">Linh hoạt lựa chọn: Bạn có thể dùng API trả phí hoặc các dịch vụ có gói miễn phí như Groq, OpenRouter, Google AI Studio hoặc chạy mô hình local hoàn toàn miễn phí với Ollama.</span>
                                 </div>
                             </div>
                         </div>
                         <div class="guide-step-img">
                             <picture>
-                                <source srcset="images/guide/processed/config_ai_server_model.webp" type="image/webp">
-                                <img src="images/guide/processed/config_ai_server_model.png" alt="Scribble Settings — AI Server URL and Model Name configuration" loading="lazy">
+                                <source srcset="images/screenshots/settings-ai.webp" type="image/webp">
+                                <img src="images/screenshots/settings-ai.png" alt="Scribble Settings — AI Assistant configuration" loading="lazy">
                             </picture>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- ═══ Phase 4: Permissions & Start ═══ -->
+            <!-- ═══ Phase 3: Permissions & Start ═══ -->
             <div class="guide-phase">
                 <div class="guide-phase-header">
-                    <div class="guide-phase-num">Phase 4</div>
+                    <div class="guide-phase-num">Phase 3</div>
                     <div>
-                        <h3 data-i18n="p4.title">Bắt đầu ghi âm</h3>
-                        <p data-i18n="p4.sub">Cấp quyền và bắt đầu phiên đầu tiên</p>
+                        <h3 data-i18n="p3.title">Cấp quyền & Bắt đầu ghi âm</h3>
+                        <p data-i18n="p3.sub">Cấp quyền hệ thống và bắt đầu cuộc họp đầu tiên</p>
                     </div>
                 </div>
 
                 <div class="guide-steps">
-                    <!-- P1: Screen Recording dialog -->
+                    <!-- Perm 1: Screen Recording dialog -->
                     <div class="guide-step">
                         <div class="guide-step-info">
                             <div class="guide-step-num">1</div>
@@ -988,7 +771,7 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         </div>
                     </div>
 
-                    <!-- P2: Privacy & Security toggle -->
+                    <!-- Perm 2: Privacy & Security toggle -->
                     <div class="guide-step">
                         <div class="guide-step-info">
                             <div class="guide-step-num">2</div>
@@ -1005,7 +788,7 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         </div>
                     </div>
 
-                    <!-- P3: Final success -->
+                    <!-- Perm 3: Final success -->
                     <div class="guide-step guide-step--success">
                         <div class="guide-step-info">
                             <div class="guide-step-num guide-step-num--done">✓</div>
@@ -1016,8 +799,8 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                         </div>
                         <div class="guide-step-img">
                             <picture>
-                                <source srcset="images/guide/processed/result_live_transcription.webp" type="image/webp">
-                                <img src="images/guide/processed/result_live_transcription.png" alt="Scribble live transcription with speaker diarization — final result" loading="lazy">
+                                <source srcset="images/screenshots/transcript-diarization.webp" type="image/webp">
+                                <img src="images/screenshots/transcript-diarization.png" alt="Scribble live transcription with speaker diarization — final result" loading="lazy">
                             </picture>
                         </div>
                     </div>
@@ -1037,7 +820,7 @@ cuộc họp của bạn</span><span data-i18n="dl.title3">?</span></h2>
                 </details>
                 <details class="faq-item">
                     <summary data-i18n="faq.q3">Có cần trả phí cho API không?</summary>
-                    <p data-i18n="faq.a3">Không bắt buộc. Bạn có thể dùng hoàn toàn Offline miễn phí bằng mô hình Local (Zipformer/Nemotron). Nếu dùng Cloud STT, Soniox có gói miễn phí tại <a href="https://soniox.com" target="_blank" rel="noopener">soniox.com</a>. Với AI tóm tắt biên bản, bạn có thể dùng API miễn phí từ NVIDIA NIM hoặc mô hình cục bộ như Ollama.</p>
+                    <p data-i18n="faq.a3">Không bắt buộc. Bạn có thể dùng hoàn toàn Offline miễn phí bằng mô hình Local (Zipformer/Nemotron). Nếu dùng Cloud STT, Soniox có gói miễn phí tại <a href="https://soniox.com" target="_blank" rel="noopener">soniox.com</a>. Với AI tóm tắt biên bản, bạn có thể dùng API từ OpenAI, DeepSeek, Google Gemini, Groq, OpenRouter hoặc mô hình cục bộ như Ollama.</p>
                 </details>
             </div>
         </div>
