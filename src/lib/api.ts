@@ -345,7 +345,7 @@ export interface LocalModelStatus {
     multilingual?: boolean;
     supported_languages?: string[];
 }
-/** `engine` (zipformer | nemotron) asks about an engine picked in Settings
+/** `engine` (zipformer | nemotron | qwen3ft) asks about an engine picked in Settings
  *  but not saved yet; omitted → the saved `local_engine`. */
 export const getLocalModelStatus = (engine?: string) =>
     request<LocalModelStatus>(`/local/model-status${engine ? `?engine=${encodeURIComponent(engine)}` : ''}`);

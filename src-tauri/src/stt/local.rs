@@ -323,23 +323,7 @@ pub struct SherpaOfflineEngine {
 
 impl SherpaOfflineEngine {
     pub fn new(model_dir: &Path) -> Option<Self> {
-        let mut cfg = OfflineRecognizerConfig::default();
-        cfg.feat_config.sample_rate = SAMPLE_RATE;
-        cfg.feat_config.feature_dim = 80;
-        cfg.model_config = OfflineModelConfig {
-            transducer: OfflineTransducerModelConfig {
-                encoder: Some(model_dir.join("encoder.int8.onnx").to_string_lossy().into_owned()),
-                decoder: Some(model_dir.join("decoder.onnx").to_string_lossy().into_owned()),
-                joiner: Some(model_dir.join("joiner.int8.onnx").to_string_lossy().into_owned()),
-            },
-            tokens: Some(model_dir.join("tokens.txt").to_string_lossy().into_owned()),
-            num_threads: 4,
-            model_type: None,
-            ..Default::default()
-        };
-        cfg.decoding_method = Some("greedy_search".to_string());
-
-        let recognizer = OfflineRecognizer::create(&cfg)?;
+        let recognizer = offline_transducer_recognizer(model_dir)?;
         Some(Self { recognizer })
     }
 
@@ -353,6 +337,274 @@ impl SherpaOfflineEngine {
             .map(|r| r.text.trim().to_string())
             .unwrap_or_default();
         postprocess_local(&raw, language)
+    }
+}
+
+/// Build the sherpa-onnx offline transducer recognizer for a model dir
+/// (`encoder.int8.onnx` + `decoder.onnx` + `joiner.int8.onnx` + `tokens.txt`).
+fn offline_transducer_recognizer(model_dir: &Path) -> Option<OfflineRecognizer> {
+    let mut cfg = OfflineRecognizerConfig::default();
+    cfg.feat_config.sample_rate = SAMPLE_RATE;
+    cfg.feat_config.feature_dim = 80;
+    cfg.model_config = OfflineModelConfig {
+        transducer: OfflineTransducerModelConfig {
+            encoder: Some(model_dir.join("encoder.int8.onnx").to_string_lossy().into_owned()),
+            decoder: Some(model_dir.join("decoder.onnx").to_string_lossy().into_owned()),
+            joiner: Some(model_dir.join("joiner.int8.onnx").to_string_lossy().into_owned()),
+        },
+        tokens: Some(model_dir.join("tokens.txt").to_string_lossy().into_owned()),
+        num_threads: 4,
+        model_type: None,
+        ..Default::default()
+    };
+    cfg.decoding_method = Some("greedy_search".to_string());
+    OfflineRecognizer::create(&cfg)
+}
+
+// ── VAD-wrapped offline transducer (streaming without streaming graphs) ──────
+
+/// True for a sherpa-onnx OFFLINE transducer layout: int8 encoder + fp32
+/// decoder, no `encoder.fp16.onnx` and no `decoder.int8.onnx`. Example: the
+/// bilingual VI–EN NghiASR exp7 package, whose author published only
+/// non-streaming exports (encoder metadata `non-streaming zipformer2` — no
+/// cache states, so `OnlineRecognizer` cannot load it). We synthesize the
+/// streaming surface around it instead: an energy VAD closes each utterance
+/// after trailing silence, then the buffered audio is decoded whole.
+///
+/// Must be checked BEFORE `StreamingModelKind::detect`, which keys off
+/// `encoder.int8.onnx` and would misread this layout as Nemotron (128 mel,
+/// no `zipformer2` model_type → garbage output).
+pub fn is_offline_transducer_dir(model_dir: &Path) -> bool {
+    !model_dir.join("encoder.fp16.onnx").is_file()
+        && !model_dir.join("decoder.int8.onnx").is_file()
+        && model_dir.join("encoder.int8.onnx").is_file()
+        && model_dir.join("decoder.onnx").is_file()
+        && model_dir.join("joiner.int8.onnx").is_file()
+        && model_dir.join("tokens.txt").is_file()
+}
+
+/// 20 ms frames at 16 kHz (matches the frontend frame quantizer).
+const VAD_FRAME_SAMPLES: usize = 320;
+const VAD_FRAME_MS: u32 = 20;
+/// RMS floor counting as speech — 380/32768, the threshold the legacy Python
+/// `LocalStreamingSTT` used on real meeting recordings.
+const VAD_SPEECH_RMS: f32 = 380.0 / 32768.0;
+/// Speech shorter than this is a click/noise blip, not an utterance.
+const VAD_MIN_SPEECH_MS: u32 = 240;
+/// Trailing silence that closes an utterance (meeting sentence cadence).
+const VAD_END_SILENCE_MS: u32 = 800;
+/// Force-cut for a monologue without pauses (parity with rule3 = 20 s).
+const VAD_MAX_UTT_MS: u32 = 20_000;
+/// Interim re-decode cadence for the live partial preview.
+const VAD_PARTIAL_INTERVAL_MS: u32 = 900;
+
+#[derive(Default)]
+struct VadEngineState {
+    /// Audio of the utterance being captured, starting at its first speech.
+    buf: Vec<f32>,
+    capturing: bool,
+    speech_ms: u32,
+    silence_ms: u32,
+    utt_ms: u32,
+    /// An utterance closed inside the most recent `accept` (the endpoint flag).
+    closed: bool,
+    /// Utterance texts closed but not yet drained by `finalize`.
+    completed: Vec<String>,
+    /// Tokens + timestamps of the most recent decode (partial or closing) —
+    /// timestamps are seconds from the utterance start, like the online engine.
+    last_tokens: Vec<String>,
+    last_ts: Vec<f32>,
+    last_partial_ms: u32,
+    partial_cache: String,
+    /// Recognition language of the stream (decoders that need it).
+    language: String,
+    /// Audio-ms between partial re-decodes, adapted to the decoder's real cost.
+    partial_gap_ms: u32,
+}
+
+/// An offline transducer wrapped in VAD utterance closing, implementing the
+/// same [`StreamingAsr`] surface as the streaming Zipformer — endpoints fire
+/// one utterance late (silence-triggered, not decoder-triggered) and partials
+/// refresh at ~1 s cadence instead of per token, which is fine for the live
+/// meeting UI. Used for model packages that ship no streaming graphs.
+pub struct VadOfflineEngine<D: UtteranceDecoder> {
+    decoder: D,
+    state: Mutex<VadEngineState>,
+}
+
+/// Decodes one buffered utterance for a [`VadOfflineEngine`].
+pub trait UtteranceDecoder: Send + Sync {
+    /// 16 kHz mono PCM of one utterance → (raw text, tokens, token times in
+    /// seconds from the utterance start). Tokens carry their own leading space.
+    fn decode_utterance(&self, pcm: &[f32], language: &str) -> (String, Vec<String>, Vec<f32>);
+}
+
+/// sherpa-onnx offline transducer as an [`UtteranceDecoder`].
+pub struct SherpaUtteranceDecoder {
+    recognizer: OfflineRecognizer,
+}
+
+impl UtteranceDecoder for SherpaUtteranceDecoder {
+    fn decode_utterance(&self, pcm: &[f32], _language: &str) -> (String, Vec<String>, Vec<f32>) {
+        let stream = self.recognizer.create_stream();
+        stream.accept_waveform(SAMPLE_RATE, pcm);
+        self.recognizer.decode(&stream);
+        match stream.get_result() {
+            Some(r) => {
+                let ts = r.timestamps.unwrap_or_default();
+                (r.text.trim().to_string(), r.tokens, ts)
+            }
+            None => (String::new(), Vec::new(), Vec::new()),
+        }
+    }
+}
+
+/// The sherpa-onnx offline transducer flavour (bilingual NghiASR etc.).
+pub type VadOfflineZipformerEngine = VadOfflineEngine<SherpaUtteranceDecoder>;
+
+fn frame_rms(frame: &[f32]) -> f32 {
+    if frame.is_empty() {
+        return 0.0;
+    }
+    (frame.iter().map(|s| s * s).sum::<f32>() / frame.len() as f32).sqrt()
+}
+
+impl VadOfflineZipformerEngine {
+    pub fn new(model_dir: &Path) -> Option<Self> {
+        let recognizer = offline_transducer_recognizer(model_dir)?;
+        log::info!(
+            "LOADED: VAD-wrapped offline transducer (streaming shim) from {}",
+            model_dir.display()
+        );
+        Some(Self::with_decoder(SherpaUtteranceDecoder { recognizer }))
+    }
+}
+
+impl<D: UtteranceDecoder> VadOfflineEngine<D> {
+    /// Wrap any offline [`UtteranceDecoder`] in the VAD streaming surface.
+    pub fn with_decoder(decoder: D) -> Self {
+        Self { decoder, state: Mutex::new(VadEngineState::default()) }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, VadEngineState> {
+        self.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Decode a buffered utterance → (raw text, tokens, timestamps).
+    fn decode(&self, buf: &[f32], language: &str) -> (String, Vec<String>, Vec<f32>) {
+        self.decoder.decode_utterance(buf, language)
+    }
+}
+
+impl<D: UtteranceDecoder> StreamingAsr for VadOfflineEngine<D> {
+    fn accept(&self, pcm: &[f32]) {
+        let mut st = self.lock();
+        st.closed = false;
+        for frame in pcm.chunks(VAD_FRAME_SAMPLES) {
+            let speech = frame_rms(frame) >= VAD_SPEECH_RMS;
+            if !st.capturing {
+                if !speech {
+                    continue;
+                }
+                // First speech frame of a new utterance — buffer starts here,
+                // so token timestamps stay relative to the utterance start.
+                st.capturing = true;
+                st.buf.clear();
+                st.speech_ms = 0;
+                st.silence_ms = 0;
+                st.utt_ms = 0;
+                st.last_partial_ms = 0;
+                st.partial_cache.clear();
+            }
+            st.buf.extend_from_slice(frame);
+            st.utt_ms += VAD_FRAME_MS;
+            if speech {
+                st.speech_ms += VAD_FRAME_MS;
+                st.silence_ms = 0;
+            } else {
+                st.silence_ms += VAD_FRAME_MS;
+            }
+
+            let enough_speech = st.speech_ms >= VAD_MIN_SPEECH_MS;
+            let timed_out = st.silence_ms >= VAD_END_SILENCE_MS || st.utt_ms >= VAD_MAX_UTT_MS;
+            if enough_speech && timed_out {
+                // Close the utterance now so one big `accept` (e.g. the upload
+                // path feeding whole files) still yields every sentence.
+                let (raw, tokens, ts) = self.decode(&st.buf, &st.language);
+                st.last_tokens = tokens;
+                st.last_ts = ts;
+                if !raw.is_empty() {
+                    st.completed.push(raw);
+                }
+                st.closed = true;
+                st.capturing = false;
+                st.buf.clear();
+            }
+        }
+    }
+
+    fn is_endpoint(&self) -> bool {
+        self.lock().closed
+    }
+
+    fn tokens(&self) -> (Vec<String>, Vec<f32>) {
+        let st = self.lock();
+        (st.last_tokens.clone(), st.last_ts.clone())
+    }
+
+    fn partial_text(&self, language: &str) -> String {
+        let mut st = self.lock();
+        // Under 1 s buffered there is nothing worth a decode yet.
+        if !st.capturing || st.buf.len() < SAMPLE_RATE as usize {
+            return String::new();
+        }
+        if st.utt_ms.saturating_sub(st.last_partial_ms) >= st.partial_gap_ms.max(VAD_PARTIAL_INTERVAL_MS) {
+            st.last_partial_ms = st.utt_ms;
+            let started = std::time::Instant::now();
+            let (raw, tokens, ts) = self.decode(&st.buf, &st.language);
+            // A slow decoder (LLM-based ASR) must not eat the real-time budget:
+            // keep partial re-decodes under ~25% of wall time.
+            st.partial_gap_ms = (started.elapsed().as_millis() as u32).saturating_mul(4);
+            st.last_tokens = tokens;
+            st.last_ts = ts;
+            st.partial_cache = postprocess_local(&raw, language);
+        }
+        st.partial_cache.clone()
+    }
+
+    fn finalize(&self, language: &str) -> String {
+        let mut st = self.lock();
+        let mut parts = std::mem::take(&mut st.completed);
+        // End of stream with speech still in flight (no trailing silence
+        // yet): decode the remainder so nothing is lost.
+        if st.capturing && st.speech_ms >= VAD_MIN_SPEECH_MS {
+            let (raw, tokens, ts) = self.decode(&st.buf, &st.language);
+            st.last_tokens = tokens;
+            st.last_ts = ts;
+            if !raw.is_empty() {
+                parts.push(raw);
+            }
+        }
+        st.capturing = false;
+        st.closed = false;
+        st.buf.clear();
+        st.speech_ms = 0;
+        st.silence_ms = 0;
+        st.utt_ms = 0;
+        st.partial_cache.clear();
+        let joined = parts.join(" ");
+        postprocess_local(&joined, language)
+    }
+
+    fn set_language(&self, language: &str) {
+        // The sherpa bilingual vocabulary ignores it; LLM decoders force it.
+        self.lock().language = language.to_string();
+    }
+
+    fn reset_stream(&self) {
+        let mut st = self.lock();
+        let language = std::mem::take(&mut st.language);
+        *st = VadEngineState { language, ..VadEngineState::default() };
     }
 }
 
@@ -386,14 +638,31 @@ pub fn clear_engine_caches() {
         };
         g.clear();
     }
+    #[cfg(all(target_os = "macos", feature = "mlx"))]
+    super::qwen3_mlx::engine::clear_shared();
 }
 
 /// Build the right engine for a model dir: the MLX Nemotron checkpoint on
 /// macOS (`model.safetensors` + `config.json`), otherwise sherpa-onnx.
 fn build_stream_engine(model_dir: &Path) -> Option<Arc<dyn StreamingAsr>> {
+    // Fine-tuned Qwen3-ASR (offline LLM ASR, VAD-wrapped). Checked BEFORE the
+    // Nemotron MLX test: both ship `model.safetensors` + `config.json`.
+    #[cfg(all(target_os = "macos", feature = "mlx"))]
+    if super::qwen3_ft::is_qwen3_dir(model_dir) {
+        return super::qwen3_mlx::engine::new_stream_engine(model_dir)
+            .map(|e| Arc::new(e) as Arc<dyn StreamingAsr>);
+    }
     #[cfg(all(target_os = "macos", feature = "mlx"))]
     if super::nemotron_mlx::is_mlx_dir(model_dir) {
         return super::nemotron_mlx::NemotronMlxEngine::new(model_dir)
+            .map(|e| Arc::new(e) as Arc<dyn StreamingAsr>);
+    }
+    // An offline transducer package (e.g. the bilingual VI–EN NghiASR exp7)
+    // ships no streaming graphs — wrap it with VAD utterance closing instead.
+    // Must run before StreamingZipformerEngine, whose layout detect would
+    // misread this dir as Nemotron.
+    if is_offline_transducer_dir(model_dir) {
+        return VadOfflineZipformerEngine::new(model_dir)
             .map(|e| Arc::new(e) as Arc<dyn StreamingAsr>);
     }
     StreamingZipformerEngine::new(model_dir).map(|e| Arc::new(e) as Arc<dyn StreamingAsr>)
@@ -784,13 +1053,19 @@ fn run_local_worker(
 static UPLOAD_ENGINE: OnceLock<Mutex<Option<(PathBuf, Arc<dyn StreamingAsr>)>>> = OnceLock::new();
 
 /// Model dir for uploads: the engine picked in Settings → Local
-/// (`local_engine`). Nemotron falls back to the bundled Zipformer while it is
-/// not downloaded, so an upload never fails just because of that choice.
+/// (`local_engine`). Nemotron / Qwen3 fall back to the bundled Zipformer while
+/// their model is missing, so an upload never fails just because of that choice.
 fn upload_model_dir() -> Option<PathBuf> {
-    let use_nemotron = crate::db::Database::get()
+    let engine = crate::db::Database::get()
         .and_then(|db| db.get_setting("local_engine").ok().flatten())
-        .is_some_and(|v| v.trim() == "nemotron");
-    if use_nemotron {
+        .unwrap_or_default();
+    if engine.trim() == super::qwen3_ft::ENGINE_ID {
+        match super::qwen3_ft::model_dir() {
+            Some(dir) if super::qwen3_ft::compiled_in() => return Some(dir),
+            _ => log::warn!("[local-stt] FAILED: qwen3ft selected but unavailable, upload uses zipformer"),
+        }
+    }
+    if engine.trim() == "nemotron" {
         if let Some(dir) = super::model_download::nemotron_model_dir() {
             return Some(dir);
         }

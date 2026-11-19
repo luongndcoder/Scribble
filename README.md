@@ -122,6 +122,7 @@ All credentials and preferences are stored exclusively in your local SQLite data
 | Soniox | Cloud | Premium quality, multilingual code-switching, live cabin translation | API Key from [soniox.com](https://soniox.com) |
 | Local (Zipformer 30M) | On-device | Bundled, lightweight (< 50MB), instant setup for Vietnamese | Built-in (sherpa-onnx), no API key needed |
 | Local (Nemotron 0.6B) | On-device | High accuracy, punctuation, multilingual, hardware-accelerated | Downloaded on demand, Apple Silicon GPU (MLX) |
+| Local (Qwen3-ASR 1.7B fine-tune) | On-device | Most accurate for Vietnamese meetings; offline LLM-ASR run per VAD utterance (live) or whole file (upload) | Needs a local checkpoint (`qwen3ft_model_dir`) and a build with `--features mlx` (Apple Silicon GPU) |
 
 ### LLM Providers for Meeting Minutes
 
@@ -320,6 +321,7 @@ Mọi thông tin cấu hình và API key đều được lưu trữ hoàn toàn 
 | Soniox | Cloud | Độ chính xác cao, nhận diện ngôn ngữ trộn lẫn, hỗ trợ dịch cabin | API Key từ [soniox.com](https://soniox.com) |
 | Local (Zipformer 30M) | Trên máy | Tích hợp sẵn, siêu nhẹ (< 50MB), phiên âm tiếng Việt tức thì | Có sẵn (sherpa-onnx), không cần API key |
 | Local (Nemotron 0.6B) | Trên máy | Độ chính xác cao, đa ngôn ngữ, tự động thêm dấu câu, tăng tốc GPU | Tải khi cần, chạy trên Apple Silicon GPU (MLX) |
+| Local (Qwen3-ASR 1.7B fine-tune) | Trên máy | Chính xác nhất cho họp tiếng Việt; ASR dạng LLM chạy theo từng câu (live) hoặc cả file (upload) | Cần checkpoint local (`qwen3ft_model_dir`) và bản build `--features mlx` (GPU Apple Silicon) |
 
 ### Cấu hình LLM tạo biên bản
 

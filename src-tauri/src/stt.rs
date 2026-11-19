@@ -52,6 +52,9 @@ pub mod local;
 pub mod model_download;
 #[cfg(all(target_os = "macos", feature = "mlx"))]
 pub mod nemotron_mlx;
+pub mod qwen3_ft;
+#[cfg(all(target_os = "macos", feature = "mlx"))]
+pub mod qwen3_mlx;
 pub mod soniox;
 pub mod soniox_async;
 pub mod text;
@@ -59,7 +62,8 @@ pub mod text;
 pub use local::{
     clear_engine_caches, get_offline_engine, get_stream_engine, offline_model_dir,
     streaming_model_dir, transcribe_wav_file, LocalStreamingStt, SherpaOfflineEngine,
-    StreamingZipformerEngine, FRAME_BYTES, FRAME_SAMPLES,
+    StreamingAsr, StreamingZipformerEngine, VadOfflineZipformerEngine, FRAME_BYTES,
+    FRAME_SAMPLES,
 };
 pub use soniox::{run_soniox_session, SonioxConfig, SonioxSegment, SONIOX_RT_URL};
 pub use text::*;
@@ -226,12 +230,14 @@ pub struct LocalStreamParams {
 
 async fn handle_local_stream(socket: WebSocket, params: LocalStreamParams) {
     let (params_source, params_meeting_id) = (params.source.clone(), params.meeting_id);
-    // Engine choice (Settings → Local): bundled Zipformer (Vietnamese) or the
-    // downloadable multilingual Nemotron. Nemotron also honours the saved
-    // recognition language (`auto` = its own language detection).
+    // Engine choice (Settings → Local): bundled Zipformer (Vietnamese), the
+    // downloadable multilingual Nemotron, or the user's fine-tuned Qwen3-ASR.
+    // Nemotron and Qwen3 honour the saved recognition language (`auto` =
+    // detect).
     let use_nemotron = db_setting("local_engine").as_deref() == Some("nemotron");
+    let use_qwen3 = db_setting("local_engine").as_deref() == Some(qwen3_ft::ENGINE_ID);
     let language = params.lang.unwrap_or_else(|| {
-        if use_nemotron {
+        if use_nemotron || use_qwen3 {
             db_setting("stt_language").unwrap_or_else(|| "vi".to_string())
         } else {
             "vi".to_string()
@@ -261,13 +267,19 @@ async fn handle_local_stream(socket: WebSocket, params: LocalStreamParams) {
 
     let resolved = match params.model_dir {
         Some(dir) => Some(std::path::PathBuf::from(dir)),
+        None if use_qwen3 && qwen3_ft::compiled_in() => qwen3_ft::model_dir(),
         None if use_nemotron => model_download::nemotron_model_dir(),
+        None if use_qwen3 => None,
         None => streaming_model_dir(),
     };
     let model_dir = match resolved {
         Some(dir) => dir,
         None => {
-            let msg = if use_nemotron {
+            let msg = if use_qwen3 && !qwen3_ft::compiled_in() {
+                "Bản app này không có engine Qwen3 (cần build macOS với --features mlx) — chọn engine khác."
+            } else if use_qwen3 {
+                "Không tìm thấy model Qwen3 fine-tune — kiểm tra thư mục model trong Cài đặt → Giọng nói → Local, hoặc chọn Zipformer."
+            } else if use_nemotron {
                 "Model Nemotron chưa được tải — vào Cài đặt → Giọng nói → Local để tải, hoặc chọn Zipformer."
             } else {
                 "Model local chưa sẵn sàng — cài lại app hoặc tải model offline."

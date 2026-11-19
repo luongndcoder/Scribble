@@ -39,7 +39,7 @@ export function SettingsPanel() {
     const [downloadingModel, setDownloadingModel] = useState(false);
     // Local engine: bundled Vietnamese Zipformer, or downloadable multilingual
     // Nemotron 3.5 (higher quality, punctuated, ~683MB).
-    const [localEngine, setLocalEngine] = useState<'zipformer' | 'nemotron'>('zipformer');
+    const [localEngine, setLocalEngine] = useState<'zipformer' | 'nemotron' | 'qwen3ft'>('zipformer');
     const [sonioxKey, setSonioxKey] = useState('');
     const [sonioxLangs, setSonioxLangs] = useState<Set<string>>(new Set(['vi']));
     // Primary language for the Local (offline) engine.
@@ -166,7 +166,7 @@ export function SettingsPanel() {
                 if (hints.length > 0) setSonioxLangs(new Set(hints));
             }
             setSttLanguage(s.stt_language || 'vi');
-            setLocalEngine(s.local_engine === 'nemotron' ? 'nemotron' : 'zipformer');
+            setLocalEngine(s.local_engine === 'nemotron' || s.local_engine === 'qwen3ft' ? s.local_engine : 'zipformer');
             if (s.llm_api_key) setLlmKey('••••••••');
             if (s.llm_base_url) setLlmUrl(s.llm_base_url);
             if (s.llm_model) setLlmModel(s.llm_model);
@@ -531,6 +531,14 @@ export function SettingsPanel() {
                                             <strong>Nemotron 0.6B</strong>
                                             <span className="provider-tab-desc">{lang === 'vi' ? 'Chính xác hơn • Có dấu câu • Đa ngôn ngữ • Tải về khi chọn' : 'More accurate • Punctuated • Multilingual • Downloaded on demand'}</span>
                                         </button>
+                                        <button
+                                            type="button"
+                                            className={`provider-tab${localEngine === 'qwen3ft' ? ' active' : ''}`}
+                                            onClick={() => setLocalEngine('qwen3ft')}
+                                        >
+                                            <strong>Qwen3 1.7B fine-tune</strong>
+                                            <span className="provider-tab-desc">{lang === 'vi' ? 'Chính xác nhất • GPU Apple (MLX) • Model có sẵn trên máy' : 'Most accurate • Apple GPU (MLX) • Model already on this Mac'}</span>
+                                        </button>
                                     </div>
                                 </div>
                                 <div className="setting-warning">
@@ -556,6 +564,10 @@ export function SettingsPanel() {
                                             <div className="setting-label" style={{ color: '#16a34a' }}>
                                                 ✓ {lang === 'vi' ? 'Sẵn sàng dùng offline' : 'Ready to use offline'}
                                             </div>
+                                        ) : modelStatus.needs_download === false ? (
+                                            <div className="setting-label" style={{ color: '#dc2626' }}>
+                                                ✗ {modelStatus.error || (lang === 'vi' ? 'Model chưa sẵn sàng' : 'Model not ready')}
+                                            </div>
                                         ) : (
                                             <button
                                                 type="button"
@@ -566,7 +578,7 @@ export function SettingsPanel() {
                                                 {lang === 'vi' ? `Tải model offline (${modelStatus.size_mb}MB)` : `Download offline model (${modelStatus.size_mb}MB)`}
                                             </button>
                                         )}
-                                        {modelStatus.status === 'error' && (
+                                        {modelStatus.status === 'error' && modelStatus.needs_download !== false && (
                                             <div className="setting-hint" style={{ color: '#dc2626' }}>
                                                 {lang === 'vi' ? 'Tải lỗi — kiểm tra mạng và ' : 'Download failed — check network and '}
                                                 <a onClick={handleDownloadModel} style={{ cursor: 'pointer', textDecoration: 'underline' }}>{lang === 'vi' ? 'thử lại' : 'retry'}</a>

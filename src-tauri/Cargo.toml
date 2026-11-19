@@ -89,6 +89,9 @@ cidre = { git = "https://github.com/yury/cidre", rev = "a9587fa", features = ["a
 # feature needs Xcode's Metal Toolchain (`xcodebuild -downloadComponent
 # MetalToolchain`) on the BUILD machine only — the shaders ship compiled.
 mlx-rs = { version = "0.32", optional = true }
+# Qwen3-ASR byte-level BPE (stt::qwen3_mlx) — loads the checkpoint's tokenizer.json.
+# Only the Rust-native regex engine path (`onig`) the Qwen pre-tokenizer needs.
+tokenizers = { version = "0.21", default-features = false, features = ["onig"], optional = true }
 
 # Windows: WASAPI loopback for system audio capture
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -106,7 +109,7 @@ webkit2gtk = "=2.0.1"
 # Off by default because mlx-rs always compiles Metal shaders, which needs
 # the Xcode Metal Toolchain on the build machine.
 [features]
-mlx = ["dep:mlx-rs"]
+mlx = ["dep:mlx-rs", "dep:tokenizers"]
 
 # Strip debug symbols from release binaries (~150k symbols shipped before).
 [profile.release]

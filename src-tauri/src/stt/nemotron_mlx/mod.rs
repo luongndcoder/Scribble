@@ -80,7 +80,7 @@ pub struct NemotronMlxEngine {
 /// each version's GitHub Release and downloaded together with the MLX model
 /// (see `model_download`). This must run before the first Metal
 /// initialisation (it is process-global).
-fn use_bundled_metallib() {
+pub(crate) fn use_bundled_metallib() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) else {

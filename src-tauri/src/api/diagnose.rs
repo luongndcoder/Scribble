@@ -24,6 +24,10 @@ fn t(key: &str, lang: &str) -> &'static str {
         ("local_model_missing", false) => "Offline speech model is not ready",
         ("nemotron_missing", true) => "Đã chọn Nemotron nhưng model chưa tải — vào Cài đặt để tải",
         ("nemotron_missing", false) => "Nemotron is selected but not downloaded — download it in Settings",
+        ("qwen3ft_missing", true) => "Đã chọn Qwen3 fine-tune nhưng không tìm thấy model — kiểm tra thư mục model trong Cài đặt",
+        ("qwen3ft_missing", false) => "Qwen3 fine-tune is selected but its model folder was not found — check it in Settings",
+        ("qwen3ft_unavailable", true) => "Đã chọn Qwen3 fine-tune nhưng bản app này không có engine MLX",
+        ("qwen3ft_unavailable", false) => "Qwen3 fine-tune is selected but this build has no MLX engine",
         ("soniox_key_missing", true) => "Chưa nhập mã truy cập Soniox",
         ("soniox_key_missing", false) => "Soniox access key not set",
         ("soniox_connected", true) => "Soniox đã kết nối thành công",
@@ -91,7 +95,12 @@ pub async fn diagnose(
         // live recording with Nemotron fails until it is downloaded.
         let nemotron = state.db.get_setting("local_engine").ok().flatten().as_deref() == Some("nemotron");
         let ready = crate::stt::local::streaming_model_dir().is_some();
-        if nemotron && crate::stt::model_download::nemotron_model_dir().is_none() {
+        let qwen3ft = crate::stt::qwen3_ft::selected();
+        if qwen3ft && !crate::stt::qwen3_ft::compiled_in() {
+            json!({"status": "warning", "message": t("qwen3ft_unavailable", &lang)})
+        } else if qwen3ft && crate::stt::qwen3_ft::model_dir().is_none() {
+            json!({"status": "warning", "message": t("qwen3ft_missing", &lang)})
+        } else if nemotron && crate::stt::model_download::nemotron_model_dir().is_none() {
             json!({"status": "warning", "message": t("nemotron_missing", &lang)})
         } else if ready {
             json!({"status": "ok", "message": t("local_stt_ready", &lang)})

@@ -232,8 +232,12 @@ pub async fn local_device_info() -> Response {
 /// `startRecording` on it. When it 404'd, the guard threw into its catch block
 /// and the user saw "Hệ thống chưa sẵn sàng" instead of a recording.
 pub async fn local_model_status(Query(q): Query<EngineQuery>) -> Response {
-    if q.engine.unwrap_or_else(selected_local_engine) == "nemotron" {
+    let engine = q.engine.unwrap_or_else(selected_local_engine);
+    if engine == "nemotron" {
         return Json(nemotron_status()).into_response();
+    }
+    if engine == crate::stt::qwen3_ft::ENGINE_ID {
+        return Json(qwen3ft_status()).into_response();
     }
     let model_dir = crate::stt::local::streaming_model_dir();
     let cached = model_dir.is_some();
@@ -279,7 +283,8 @@ pub struct EngineQuery {
     pub engine: Option<String>,
 }
 
-/// Settings → Local engine: `zipformer` (bundled, default) or `nemotron`.
+/// Settings → Local engine: `zipformer` (bundled, default), `nemotron` or
+/// `qwen3ft` (user's fine-tuned Qwen3-ASR, native MLX).
 fn selected_local_engine() -> String {
     crate::db::Database::get()
         .and_then(|db| db.get_setting("local_engine").ok().flatten())
@@ -315,6 +320,38 @@ fn nemotron_status() -> serde_json::Value {
     })
 }
 
+/// Status of the user's fine-tuned Qwen3-ASR checkpoint. It is a local folder
+/// (`qwen3ft_model_dir`), never downloaded — a missing folder is an error the
+/// user fixes in Settings, in the shape the Settings panel already renders.
+fn qwen3ft_status() -> serde_json::Value {
+    use crate::stt::qwen3_ft as q;
+    let dir = q::configured_model_dir();
+    let found = q::model_dir().is_some();
+    let ready = found && q::compiled_in();
+    let error = if !q::compiled_in() {
+        json!("Bản app này không có engine Qwen3 (cần build macOS với --features mlx)")
+    } else if !found {
+        json!(format!("Không tìm thấy model Qwen3 tại {}", dir.display()))
+    } else {
+        serde_json::Value::Null
+    };
+    let size_mb = std::fs::metadata(dir.join("model.safetensors")).map(|m| m.len() / 1_000_000).unwrap_or(0);
+    json!({
+        "engine": q::ENGINE_ID,
+        "model_id": dir.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default(),
+        "model_dir": dir.to_string_lossy(),
+        "display_name": "Qwen3-ASR 1.7B fine-tune (MLX, GPU)",
+        "needs_download": false,
+        "cached": ready,
+        "size_mb": size_mb,
+        "status": if ready { "done" } else { "error" },
+        "progress": if ready { 1.0 } else { 0.0 },
+        "error": error,
+        "multilingual": true,
+        "supported_languages": ["vi", "en"],
+    })
+}
+
 /// `POST /local/download-model` — starts the Nemotron download when that engine
 /// is selected; a no-op for the bundled Zipformer.
 ///
@@ -323,9 +360,14 @@ fn nemotron_status() -> serde_json::Value {
 /// nothing to fetch; if it IS missing we report the error instead of pretending
 /// to download.
 pub async fn local_download_model(Query(q): Query<EngineQuery>) -> Response {
-    if q.engine.unwrap_or_else(selected_local_engine) == "nemotron" {
+    let engine = q.engine.unwrap_or_else(selected_local_engine);
+    if engine == "nemotron" {
         crate::stt::model_download::start_nemotron_download();
         return Json(nemotron_status()).into_response();
+    }
+    if engine == crate::stt::qwen3_ft::ENGINE_ID {
+        // Local folder, nothing to fetch: report the real state.
+        return Json(qwen3ft_status()).into_response();
     }
     let cached = crate::stt::local::streaming_model_dir().is_some();
     if cached {
